@@ -1,0 +1,33 @@
+/**
+ * For more details on how to configure Wrangler, refer to:
+ * https://developers.cloudflare.com/workers/wrangler/configuration/
+ */
+{
+	"$schema": "node_modules/wrangler/config-schema.json",
+	"name": "poker-slack-app",
+	"main": "src/index.ts",
+	"compatibility_date": "2025-04-03",
+	"compatibility_flags": [
+		"nodejs_compat"
+	],
+	"migrations": [
+		{
+			"new_sqlite_classes": [
+				"PokerDurableObject"
+			],
+			"tag": "v1"
+		}
+	],
+	"durable_objects": {
+		"bindings": [
+			{
+				"class_name": "PokerDurableObject",
+				"name": "POKER_DURABLE_OBJECT"
+			}
+		]
+	},
+	"observability": {
+		"enabled": true
+	}
+	
+}
