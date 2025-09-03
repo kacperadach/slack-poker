@@ -150,6 +150,7 @@ const MESSAGE_HANDLERS = {
 	d: showCards,
 	a: ass,
 	cjecl: check,
+	prenh: preNH,
 };
 
 async function handleMessage(env: Env, context, payload) {
@@ -256,6 +257,18 @@ async function showCards(env, context, payload) {
 	}
 
 	game.showCards(context.userId, false);
+	await sendGameEventMessages(context, game);
+}
+
+async function preNH(env, context, payload) {
+	const game = await fetchGame(env, context);
+	if (!game) {
+		await context.say({ text: `No game exists! Type 'New Game'` });
+		return;
+	}
+
+	game.preNH(context.userId);
+	saveGame(env, context, game);
 	await sendGameEventMessages(context, game);
 }
 
@@ -547,7 +560,9 @@ async function sendGameEventMessages(context, game: TexasHoldem) {
 		}
 	}
 
-	await context.say({
-		text: publicMessages.join('\n'),
-	});
+	if (publicMessages.length > 0) {
+		await context.say({
+			text: publicMessages.join('\n'),
+		});
+	}
 }

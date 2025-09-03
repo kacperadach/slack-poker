@@ -298,6 +298,13 @@ export class TexasHoldem {
 		// Handle side pots and distribute winnings
 		this.handleSidePots();
 
+		this.activePlayers.forEach((player) => {
+			if (player.getPreNH()) {
+				this.events.push(new GameEvent(`${player.getId()} says :nh:`));
+				player.setPreNH(false);
+			}
+		});
+
 		this.currentPot = 0;
 		this.currentBetAmount = 0;
 		this.lastRaiseAmount = 0;
@@ -557,6 +564,22 @@ export class TexasHoldem {
 		if (currentPlayer) {
 			this.events.push(new GameEvent(`${currentPlayer.getId()}'s turn`, [], false, '', true));
 		}
+	}
+
+	public preNH(playerId: string): void {
+		if (this.gameState === GameState.WaitingForPlayers) {
+			this.events.push(new GameEvent(`${playerId} Cannot pre-nh, may not be a :nh:!`));
+			return;
+		}
+
+		const player = this.activePlayers.find((player) => player.getId() === playerId);
+		if (!player) {
+			this.events.push(new GameEvent(`${playerId} Cannot pre-nh, player not found!`));
+			return;
+		}
+
+		player.setPreNH(true);
+		this.events.push(new GameEvent(`${playerId} pre-nh!`));
 	}
 
 	public preFold(playerId: string): void {

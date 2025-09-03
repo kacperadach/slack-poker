@@ -18,6 +18,7 @@ export class Player {
 	private wantsToJoinTable: boolean; // indicates player wants to join when round is over
 	private totalBuyIn: number;
 	private preMove: PreMove | null;
+	private preNH: boolean = false;
 
 	constructor(
 		id: string,
@@ -31,7 +32,8 @@ export class Player {
 		wantsToLeaveTable: boolean = false,
 		wantsToJoinTable: boolean = false,
 		totalBuyIn: number = 0,
-		preMove: PreMove | null = null
+		preMove: PreMove | null = null,
+		preNH: boolean = false
 	) {
 		this.id = id;
 		this.chips = chips;
@@ -45,6 +47,7 @@ export class Player {
 		this.wantsToJoinTable = wantsToJoinTable;
 		this.totalBuyIn = totalBuyIn;
 		this.preMove = preMove;
+		this.preNH = preNH;
 	}
 
 	public getHadTurnThisRound(): boolean {
@@ -183,6 +186,14 @@ export class Player {
 		return `Player ${this.id} (Chips: ${this.chips})`;
 	}
 
+	public getPreNH(): boolean {
+		return this.preNH;
+	}
+
+	public setPreNH(preNH: boolean): void {
+		this.preNH = preNH;
+	}
+
 	public toJson(): any {
 		return {
 			id: this.id,
@@ -197,6 +208,7 @@ export class Player {
 			wantsToJoinTable: this.wantsToJoinTable,
 			totalBuyIn: this.totalBuyIn,
 			preMove: this.preMove,
+			preNH: this.preNH,
 		};
 	}
 
@@ -213,7 +225,8 @@ export class Player {
 			data?.wantsToLeaveTable || false,
 			data?.wantsToJoinTable || false,
 			data?.totalBuyIn || 0,
-			data?.preMove || null
+			data?.preMove || null,
+			data?.preNH || false
 		);
 	}
 
