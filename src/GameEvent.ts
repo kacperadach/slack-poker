@@ -5,16 +5,19 @@ export class GameEvent {
 	private cards: Card[];
 	private ephemeral: boolean;
 	private playerId: string;
+	private isTurnMessage: boolean;
 
 	constructor(description: string);
 	constructor(description: string, cards: Card[]);
 	constructor(description: string, cards: Card[], ephemeral: boolean);
 	constructor(description: string, cards: Card[], ephemeral: boolean, playerId: string);
-	constructor(description: string, cards: Card[] = [], ephemeral: boolean = false, playerId: string = '') {
+	constructor(description: string, cards: Card[], ephemeral: boolean, playerId: string, isTurnMessage: boolean);
+	constructor(description: string, cards: Card[] = [], ephemeral: boolean = false, playerId: string = '', isTurnMessage: boolean = false) {
 		this.description = description;
 		this.cards = cards;
 		this.ephemeral = ephemeral;
 		this.playerId = playerId;
+		this.isTurnMessage = isTurnMessage;
 	}
 
 	public getDescription(): string {
@@ -47,5 +50,13 @@ export class GameEvent {
 
 	public setPlayerId(playerId: string): void {
 		this.playerId = playerId;
+	}
+
+	public getIsTurnMessage(): boolean {
+		return this.isTurnMessage;
+	}
+
+	public setIsTurnMessage(isTurnMessage: boolean): void {
+		this.isTurnMessage = isTurnMessage;
 	}
 }

@@ -1,5 +1,10 @@
 import { Card } from './Card';
 
+export type PreMove = {
+	move: 'check' | 'fold' | 'bet' | 'call';
+	amount?: number;
+};
+
 export class Player {
 	private id: string;
 	private chips: number;
@@ -12,6 +17,7 @@ export class Player {
 	private wantsToLeaveTable: boolean; // indicates player wants to leave when round is over
 	private wantsToJoinTable: boolean; // indicates player wants to join when round is over
 	private totalBuyIn: number;
+	private preMove: PreMove | null;
 
 	constructor(
 		id: string,
@@ -24,7 +30,8 @@ export class Player {
 		hadTurnThisRound: boolean = false,
 		wantsToLeaveTable: boolean = false,
 		wantsToJoinTable: boolean = false,
-		totalBuyIn: number = 0
+		totalBuyIn: number = 0,
+		preMove: PreMove | null = null
 	) {
 		this.id = id;
 		this.chips = chips;
@@ -37,6 +44,7 @@ export class Player {
 		this.wantsToLeaveTable = wantsToLeaveTable;
 		this.wantsToJoinTable = wantsToJoinTable;
 		this.totalBuyIn = totalBuyIn;
+		this.preMove = preMove;
 	}
 
 	public getHadTurnThisRound(): boolean {
@@ -163,6 +171,14 @@ export class Player {
 		return this.wantsToJoinTable;
 	}
 
+	public getPreMove(): PreMove | null {
+		return this.preMove;
+	}
+
+	public setPreMove(preMove: PreMove | null): void {
+		this.preMove = preMove;
+	}
+
 	public toString(): string {
 		return `Player ${this.id} (Chips: ${this.chips})`;
 	}
@@ -180,6 +196,7 @@ export class Player {
 			wantsToLeaveTable: this.wantsToLeaveTable,
 			wantsToJoinTable: this.wantsToJoinTable,
 			totalBuyIn: this.totalBuyIn,
+			preMove: this.preMove,
 		};
 	}
 
@@ -195,7 +212,8 @@ export class Player {
 			data.hadTurnThisRound,
 			data?.wantsToLeaveTable || false,
 			data?.wantsToJoinTable || false,
-			data?.totalBuyIn || 0
+			data?.totalBuyIn || 0,
+			data?.preMove || null
 		);
 	}
 

@@ -72,7 +72,7 @@ export class TexasHoldem {
 					this.dealFlop();
 					this.gameState = GameState.Flop;
 					this.startNewBettingRound();
-					// Check if we should immediately progress again
+
 					if (this.shouldSkipToShowdown()) {
 						this.progressGame();
 					}
@@ -84,7 +84,7 @@ export class TexasHoldem {
 					this.dealTurn();
 					this.gameState = GameState.Turn;
 					this.startNewBettingRound();
-					// Check if we should immediately progress again
+
 					if (this.shouldSkipToShowdown()) {
 						this.progressGame();
 					}
@@ -96,7 +96,7 @@ export class TexasHoldem {
 					this.dealRiver();
 					this.gameState = GameState.River;
 					this.startNewBettingRound();
-					// Check if we should immediately progress again
+
 					if (this.shouldSkipToShowdown()) {
 						this.progressGame();
 					}
@@ -111,6 +111,42 @@ export class TexasHoldem {
 
 			default:
 				break;
+		}
+
+		// PreMove Logic
+		if (this.gameState != GameState.WaitingForPlayers) {
+			const currentPlayer = this.getCurrentPlayer();
+			if (currentPlayer && currentPlayer.getPreMove() != null) {
+				// perform premove
+				const preMove = currentPlayer.getPreMove();
+				currentPlayer.setPreMove(null); // need to do this before performing premove since progressGame is called recursively
+
+				this.events.push(new GameEvent(`${currentPlayer.getId()} is pre-moving!`));
+				if (preMove?.move.toLowerCase() === 'check') {
+					this.check(currentPlayer.getId());
+				} else if (preMove?.move.toLowerCase() === 'fold') {
+					this.fold(currentPlayer.getId());
+				} else if (preMove?.move.toLowerCase() === 'call') {
+					const callAmount = preMove?.amount;
+					if (!callAmount) {
+						this.events.push(new GameEvent(`Call amount not set, Kapcer stinks at coding! No wonder he's a 3/5.`));
+						return;
+					}
+					if (callAmount !== this.currentBetAmount) {
+						this.events.push(new GameEvent(`${currentPlayer.getId()} not pre-calling, bet amount has changed!`));
+						return;
+					}
+
+					this.call(currentPlayer.getId());
+				} else if (preMove?.move.toLowerCase() === 'bet') {
+					const betAmount = preMove?.amount;
+					if (!betAmount) {
+						this.events.push(new GameEvent(`Bet amount not set, Kapcer stinks at coding! No wonder he's a 3/5.`));
+						return;
+					}
+					this.bet(currentPlayer.getId(), betAmount);
+				}
+			}
 		}
 	}
 
@@ -128,6 +164,9 @@ export class TexasHoldem {
 			player.resetLastRaise();
 			player.resetHadTurnThisRound();
 		});
+
+		this.currentPlayerIndex = this.dealerPosition % this.activePlayers.length;
+		this.advanceToNextPlayer();
 	}
 
 	private isBettingRoundComplete(): boolean {
@@ -177,6 +216,7 @@ export class TexasHoldem {
 			player.resetTotalBet();
 			player.setLastRaise(0);
 			player.setHadTurnThisRound(false);
+			player.setPreMove(null);
 		});
 
 		this.activePlayers.forEach((player) => {
@@ -187,7 +227,7 @@ export class TexasHoldem {
 		});
 
 		if (this.activePlayers.length <= 1) {
-			this.events.push(new GameEvent('Not enough players to start round!'));
+			this.events.push(new GameEvent('How about you get some friends first'));
 			return 'Not enough players to start round';
 		}
 
@@ -198,18 +238,27 @@ export class TexasHoldem {
 
 		// this.reorderPlayers();
 
-		const activePlayerIds = this.activePlayers.map((p) => p.getId()).join(', ');
-		this.events.push(new GameEvent(`Starting round with players: ${activePlayerIds}`));
+		// const activePlayerIds = this.activePlayers.map((p) => p.getId()).join(', ');
+
+		let startGameMessage = 'Starting round with players: \n';
+		this.activePlayers.forEach((player) => {
+			startGameMessage += `${player.getId()} ${player.getChips()} chips\n`;
+		});
+		this.events.push(new GameEvent(startGameMessage));
+
+		// this.events.push(new GameEvent(`Starting round with players: ${activePlayerIds}`));
+
+		this.events.push(new GameEvent(`${this.activePlayers[this.dealerPosition]?.getId()} has the dealer button`));
 
 		this.communityCards = [];
 		this.foldedPlayers.clear();
-		this.currentPlayerIndex = (this.dealerPosition + 2) % this.activePlayers.length; // Start after big blind
+		this.currentPlayerIndex = (this.dealerPosition + 3) % this.activePlayers.length; // Start after big blind
 		this.deck.reset();
 		this.deck.shuffle();
 		this.dealInitialCards();
 
-		const smallBlindPlayer = this.activePlayers[this.dealerPosition % this.activePlayers.length];
-		const bigBlindPlayer = this.activePlayers[(this.dealerPosition + 1) % this.activePlayers.length];
+		const smallBlindPlayer = this.activePlayers[(this.dealerPosition + 1) % this.activePlayers.length];
+		const bigBlindPlayer = this.activePlayers[(this.dealerPosition + 2) % this.activePlayers.length];
 
 		// Handle small blind payment
 		const smallBlindAmount = Math.min(this.smallBlind, smallBlindPlayer.getChips());
@@ -257,21 +306,27 @@ export class TexasHoldem {
 		// Move dealer button to next player for next round
 		this.dealerPosition = (this.dealerPosition + 1) % this.activePlayers.length;
 
-
-		
+		const playersToAdd: string[] = [];
+		const playersToRemove: string[] = [];
 
 		this.inactivePlayers.forEach((player) => {
 			if (player.getWantsToJoinTable()) {
-				this.addPlayer(player.getId());
+				playersToAdd.push(player.getId());
 				player.setWantsToJoinTable(false);
 			}
 		});
-
 		this.activePlayers.forEach((player) => {
 			if (player.getWantsToLeaveTable()) {
-				this.removePlayer(player.getId());
+				playersToRemove.push(player.getId());
 				player.setWantsToLeaveTable(false);
 			}
+		});
+
+		playersToAdd.forEach((playerId) => {
+			this.addPlayer(playerId);
+		});
+		playersToRemove.forEach((playerId) => {
+			this.removePlayer(playerId);
 		});
 	}
 
@@ -442,18 +497,20 @@ export class TexasHoldem {
 		});
 	}
 
-	public dealFlop(): void {
-		// Burn one card then deal three community cards
+	private burnAndDeal(numCards: number) {
+		// Burn one card then deal one community card
 		this.deck.draw();
-		for (let i = 0; i < 3; i++) {
+		for (let i = 0; i < numCards; i++) {
 			const card = this.deck.draw();
 			if (card) {
 				this.communityCards.push(card);
 			}
 		}
+	}
 
+	public dealFlop(): void {
+		this.burnAndDeal(3);
 		this.events.push(new GameEvent('Flop:', this.communityCards));
-
 		this.activePlayers.forEach((player) => {
 			if (!this.foldedPlayers.has(player.getId())) {
 				this.showCards(player.getId(), false, false);
@@ -462,32 +519,23 @@ export class TexasHoldem {
 	}
 
 	public dealTurn(): void {
-		// Burn one card then deal one community card
-		this.deck.draw();
-		const card = this.deck.draw();
-		if (card) {
-			this.communityCards.push(card);
-			this.events.push(new GameEvent('Turn:', [...this.communityCards]));
-			this.activePlayers.forEach((player) => {
-				if (!this.foldedPlayers.has(player.getId())) {
-					this.showCards(player.getId(), false, false);
-				}
-			});
-		}
+		this.burnAndDeal(1);
+		this.events.push(new GameEvent('Turn:', [...this.communityCards]));
+		this.activePlayers.forEach((player) => {
+			if (!this.foldedPlayers.has(player.getId())) {
+				this.showCards(player.getId(), false, false);
+			}
+		});
 	}
+
 	public dealRiver(): void {
-		// Burn one card then deal one community card
-		this.deck.draw();
-		const card = this.deck.draw();
-		if (card) {
-			this.communityCards.push(card);
-			this.events.push(new GameEvent('River:', [...this.communityCards]));
-			this.activePlayers.forEach((player) => {
-				if (!this.foldedPlayers.has(player.getId())) {
-					this.showCards(player.getId(), false, false);
-				}
-			});
-		}
+		this.burnAndDeal(1);
+		this.events.push(new GameEvent('River:', [...this.communityCards]));
+		this.activePlayers.forEach((player) => {
+			if (!this.foldedPlayers.has(player.getId())) {
+				this.showCards(player.getId(), false, false);
+			}
+		});
 	}
 
 	public addToPot(amount: number): void {
@@ -507,8 +555,35 @@ export class TexasHoldem {
 		} while (currentPlayer && (this.foldedPlayers.has(currentPlayer.getId()) || currentPlayer.getIsAllIn()));
 
 		if (currentPlayer) {
-			this.events.push(new GameEvent(`${currentPlayer.getId()}'s turn`));
+			this.events.push(new GameEvent(`${currentPlayer.getId()}'s turn`, [], false, '', true));
 		}
+	}
+
+	public preFold(playerId: string): void {
+		if (this.gameState === GameState.WaitingForPlayers) {
+			this.events.push(new GameEvent(`${playerId} Cannot pre-fold, round has not started!`));
+			return;
+		}
+
+		const player = this.activePlayers.find((player) => player.getId() === playerId);
+		if (!player) {
+			this.events.push(new GameEvent(`${playerId} Cannot pre-fold, player not found!`));
+			return;
+		}
+
+		const currentPlayer = this.getCurrentPlayer();
+		if (!currentPlayer || currentPlayer.getId() == playerId) {
+			this.fold(playerId);
+			return;
+		}
+
+		if (this.foldedPlayers.has(playerId)) {
+			this.events.push(new GameEvent(`${playerId} Cannot pre-fold, you have folded!`));
+			return;
+		}
+
+		player.setPreMove({ move: 'fold' });
+		this.events.push(new GameEvent(`${playerId} pre-folded!`));
 	}
 
 	public fold(playerId: string): string {
@@ -535,11 +610,51 @@ export class TexasHoldem {
 		const activeNonFoldedPlayers = this.activePlayers.filter((p) => !this.foldedPlayers.has(p.getId()));
 		if (activeNonFoldedPlayers.length <= 1) {
 			this.endRound();
+
+			if (this.communityCards.length < 5) {
+				// round is over reveal community cards
+				while (this.communityCards.length < 5) {
+					if (this.communityCards.length === 0) {
+						this.burnAndDeal(3);
+					} else {
+						this.burnAndDeal(1);
+					}
+				}
+				this.events.push(new GameEvent('Community Cards would have been:', [...this.communityCards]));
+			}
+
 			return Success + ': round ended';
 		}
 
 		this.progressGame();
 		return Success;
+	}
+
+	public preCheck(playerId: string): void {
+		if (this.gameState === GameState.WaitingForPlayers) {
+			this.events.push(new GameEvent(`${playerId} Cannot pre-check, round has not started!`));
+			return;
+		}
+
+		const player = this.activePlayers.find((player) => player.getId() === playerId);
+		if (!player) {
+			this.events.push(new GameEvent(`${playerId} Cannot pre-check, player not found!`));
+			return;
+		}
+
+		if (this.foldedPlayers.has(playerId)) {
+			this.events.push(new GameEvent(`${playerId} Cannot pre-check, you have folded!`));
+			return;
+		}
+
+		const currentPlayer = this.getCurrentPlayer();
+		if (!currentPlayer || currentPlayer.getId() == playerId) {
+			this.check(playerId);
+			return;
+		}
+
+		player.setPreMove({ move: 'check' });
+		this.events.push(new GameEvent(`${playerId} pre-checked!`));
 	}
 
 	public check(playerId: string): string {
@@ -565,10 +680,37 @@ export class TexasHoldem {
 		player.setHadTurnThisRound(true);
 
 		this.advanceToNextPlayer();
-		if (this.isBettingRoundComplete()) {
-			this.progressGame();
-		}
+		// if (this.isBettingRoundComplete()) {
+		this.progressGame();
+		// }
 		return Success;
+	}
+
+	public preBet(playerId: string, amount: number): void {
+		if (this.gameState === GameState.WaitingForPlayers) {
+			this.events.push(new GameEvent(`${playerId} Cannot pre-bet, round has not started!`));
+			return;
+		}
+
+		const player = this.activePlayers.find((player) => player.getId() === playerId);
+		if (!player) {
+			this.events.push(new GameEvent(`${playerId} Cannot pre-bet, player not found!`));
+			return;
+		}
+
+		if (this.foldedPlayers.has(playerId)) {
+			this.events.push(new GameEvent(`${playerId} Cannot pre-bet, you have folded!`));
+			return;
+		}
+
+		const currentPlayer = this.getCurrentPlayer();
+		if (!currentPlayer || currentPlayer.getId() == playerId) {
+			this.bet(playerId, amount);
+			return;
+		}
+
+		player.setPreMove({ move: 'bet', amount: amount });
+		this.events.push(new GameEvent(`${playerId} pre-bet ${amount}!`));
 	}
 
 	public bet(playerId: string, amount: number): string {
@@ -591,36 +733,45 @@ export class TexasHoldem {
 			return 'Bet amount must be positive';
 		}
 
-		if (roundedAmount < this.bigBlind) {
-			this.events.push(new GameEvent(`${playerId} Cannot raise, minimum raise is ${this.bigBlind}!`));
-			return `Raise must be at least ${this.bigBlind}`;
-		}
-
 		let isRaise = false;
 		let betAmount = 0;
 		// If this is the first bet in the round
 		if (this.currentBetAmount === 0) {
-			if (roundedAmount > player.getChips()) {
-				this.events.push(new GameEvent(`${playerId} Cannot bet, not enough chips!`));
-				return 'Not enough chips to bet';
-			}
+			// if (roundedAmount > player.getChips()) {
+			// 	this.events.push(new GameEvent(`${playerId} Cannot bet, not enough chips!`));
+			// 	return 'Not enough chips to bet';
+			// }
 			betAmount = roundedAmount;
 		} else {
 			// Calculate the raise amount by subtracting the player's current bet
 			betAmount = roundedAmount - player.getCurrentBet();
 
-			const minRaise = Math.max(this.lastRaiseAmount, this.bigBlind);
+			// const minRaise = Math.max(this.lastRaiseAmount, this.bigBlind);
 
-			if (betAmount > player.getChips()) {
-				this.events.push(new GameEvent(`${playerId} Cannot bet, not enough chips!`));
-				return 'Not enough chips to bet';
-			}
+			// if (roundedAmount - this.currentBetAmount < minRaise) {
+			// 	this.events.push(new GameEvent(`${playerId} Cannot raise, minimum raise is ${minRaise}!`));
+			// 	return `Raise must be at least ${minRaise}`;
+			// }
+			isRaise = true;
+		}
+
+		if (betAmount > player.getChips()) {
+			this.events.push(new GameEvent(`${playerId} Cannot bet, not enough chips!`));
+			return 'Not enough chips to bet';
+		}
+
+		if (betAmount != player.getChips()) {
+			const minRaise = Math.max(this.lastRaiseAmount, this.bigBlind);
 			if (roundedAmount - this.currentBetAmount < minRaise) {
 				this.events.push(new GameEvent(`${playerId} Cannot raise, minimum raise is ${minRaise}!`));
 				return `Raise must be at least ${minRaise}`;
 			}
-			isRaise = true;
 		}
+
+		// if (roundedAmount < this.bigBlind) {
+		// 	this.events.push(new GameEvent(`${playerId} Cannot raise, minimum raise is ${this.bigBlind}!`));
+		// 	return `Raise must be at least ${this.bigBlind}`;
+		// }
 
 		// Calculate total chips player can win from other players
 		const maxWinnable = Math.max(...this.activePlayers.filter((p) => p.getId() !== playerId).map((p) => p.getChips() + p.getCurrentBet()));
@@ -656,6 +807,33 @@ export class TexasHoldem {
 		return isRaise ? `Raised to ${roundedAmount}` : `Bet ${roundedAmount}`;
 	}
 
+	public preCall(playerId: string): void {
+		if (this.gameState === GameState.WaitingForPlayers) {
+			this.events.push(new GameEvent(`${playerId} Cannot pre-call, round has not started!`));
+			return;
+		}
+
+		const player = this.activePlayers.find((player) => player.getId() === playerId);
+		if (!player) {
+			this.events.push(new GameEvent(`${playerId} Cannot pre-call, player not found!`));
+			return;
+		}
+
+		if (this.foldedPlayers.has(playerId)) {
+			this.events.push(new GameEvent(`${playerId} Cannot pre-call, you have folded!`));
+			return;
+		}
+
+		const currentPlayer = this.getCurrentPlayer();
+		if (!currentPlayer || currentPlayer.getId() == playerId) {
+			this.call(playerId);
+			return;
+		}
+
+		player.setPreMove({ move: 'call', amount: this.currentBetAmount });
+		this.events.push(new GameEvent(`${playerId} pre-called!`));
+	}
+
 	public call(playerId: string): string {
 		if (this.gameState === GameState.WaitingForPlayers) {
 			this.events.push(new GameEvent(`${playerId} cannot call, round has not started!`));
@@ -679,7 +857,7 @@ export class TexasHoldem {
 		const callAmount = Math.min(amountToCall, player.getChips());
 
 		if (amountToCall === 0) {
-			this.events.push(new GameEvent(`${playerId} Can't call - already matched the current bet!`));
+			this.events.push(new GameEvent(`${playerId} How about you try doing a check`));
 			return 'No need to call - already matched the current bet';
 		}
 
@@ -880,7 +1058,12 @@ export class TexasHoldem {
 	}
 
 	public showCards(playerId: string, reveal: boolean = false, showCommunityCards: boolean = true): void {
-		const player = this.activePlayers.find((p) => p.getId() === playerId);
+		let player = this.activePlayers.find((p) => p.getId() === playerId);
+
+		if (!player) {
+			player = this.inactivePlayers.find((p) => p.getId() === playerId);
+		}
+
 		if (!player) {
 			this.events.push(new GameEvent(`${playerId} is not in the game!`));
 			return;
@@ -902,7 +1085,11 @@ export class TexasHoldem {
 			if (handDescription == 'High Card') {
 				handDescription = 'Ass';
 			}
-			message = `You have ${handDescription}`;
+			if (reveal) {
+				message = `${playerId} revealed ${handDescription}`;
+			} else {
+				message = `You have ${handDescription}`;
+			}
 		}
 
 		if (showCommunityCards && this.communityCards.length > 0) {

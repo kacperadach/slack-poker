@@ -118,12 +118,38 @@ const MESSAGE_HANDLERS = {
 	check: check,
 	call: call,
 	bet: bet,
+	precheck: preCheck,
+	'pre-check': preCheck,
+	prefold: preFold,
+	'pre-fold': preFold,
+	precall: preCall,
+	'pre-call': preCall,
+	prebet: preBet,
+	'pre-bet': preBet,
 	cards: showCards,
-	'reveal cards': revealCards,
+	dards: showCards,
+	reveal: revealCards,
 	rank: getGameState,
 	help: help,
-	nudge: nudgePlayer,
+	poke: nudgePlayer,
 	seppuku: commitSeppuku,
+	':phone:': call,
+	chexk: check,
+	'i choose to call': call,
+	'i choose to check': check,
+	'i choose to fold': fold,
+	'i choose to bet': bet,
+	'i choose to pre-check': preCheck,
+	'i choose to precheck': preCheck,
+	'i choose to pre-fold': preFold,
+	'i choose to prefold': preFold,
+	'i choose to pre-call': preCall,
+	'i choose to precall': preCall,
+	'i choose to pre-bet': preBet,
+	'i choose to prebet': preBet,
+	d: showCards,
+	a: ass,
+	cjecl: check,
 };
 
 async function handleMessage(env: Env, context, payload) {
@@ -131,7 +157,7 @@ async function handleMessage(env: Env, context, payload) {
 		return;
 	}
 
-	const messageText = payload.text;
+	const messageText = payload.text.trim();
 
 	for (const [key, handler] of Object.entries(MESSAGE_HANDLERS)) {
 		if (messageText.toLowerCase().startsWith(key)) {
@@ -150,6 +176,10 @@ async function getGameState(env, context, payload) {
 
 	game.getGameStateEvent();
 	await sendGameEventMessages(context, game);
+}
+
+async function ass(env, context, payload) {
+	await context.say({ text: 'ASS' });
 }
 
 async function nudgePlayer(env, context, payload) {
@@ -229,9 +259,65 @@ async function showCards(env, context, payload) {
 	await sendGameEventMessages(context, game);
 }
 
+async function preCheck(env, context, payload) {
+	const game = await fetchGame(env, context);
+	if (!game) {
+		await context.say({ text: `No game exists! Type 'New Game'` });
+		return;
+	}
+
+	game.preCheck(context.userId);
+	saveGame(env, context, game);
+	await sendGameEventMessages(context, game);
+}
+
+async function preFold(env, context, payload) {
+	const game = await fetchGame(env, context);
+	if (!game) {
+		await context.say({ text: `No game exists! Type 'New Game'` });
+		return;
+	}
+
+	game.preFold(context.userId);
+	saveGame(env, context, game);
+	await sendGameEventMessages(context, game);
+}
+
+async function preCall(env, context, payload) {
+	const game = await fetchGame(env, context);
+	if (!game) {
+		await context.say({ text: `No game exists! Type 'New Game'` });
+		return;
+	}
+
+	game.preCall(context.userId);
+	saveGame(env, context, game);
+	await sendGameEventMessages(context, game);
+}
+
+async function preBet(env, context, payload) {
+	const messageText = payload.text.toLowerCase();
+	const betAmount = parseFloat(messageText.replace('i choose to', '').replace('bet', '').replace('pre', '').replace('-', '').trim());
+
+	if (isNaN(betAmount) || betAmount <= 0) {
+		await context.say({ text: 'Invalid bet amount! Please use format: "pre-bet {chips}"' });
+		return;
+	}
+
+	const game = await fetchGame(env, context);
+	if (!game) {
+		await context.say({ text: `No game exists! Type 'New Game'` });
+		return;
+	}
+
+	game.preBet(context.userId, betAmount);
+	saveGame(env, context, game);
+	await sendGameEventMessages(context, game);
+}
+
 async function bet(env, context, payload) {
 	const messageText = payload.text.toLowerCase();
-	const betAmount = parseFloat(messageText.replace('bet', '').trim());
+	const betAmount = parseFloat(messageText.replace('i choose to', '').replace('bet', '').trim());
 
 	if (isNaN(betAmount) || betAmount <= 0) {
 		await context.say({ text: 'Invalid bet amount! Please use format: "bet {chips}"' });
@@ -309,9 +395,9 @@ async function showChips(env, context, payload) {
 		message += `<@${player.getId()}>: ${player.getChips()} (Active)\n`;
 	});
 
-	game.getInactivePlayers().forEach((player) => {
-		message += `<@${player.getId()}>: ${player.getChips()} (Inactive)\n`;
-	});
+	// game.getInactivePlayers().forEach((player) => {
+	// 	message += `<@${player.getId()}>: ${player.getChips()} (Inactive)\n`;
+	// });
 	await context.say({ text: message });
 }
 
@@ -420,7 +506,19 @@ function getDurableObject(env, context) {
 }
 
 async function sendGameEventMessages(context, game: TexasHoldem) {
-	const events = game.getEvents();
+	let events = game.getEvents();
+	// Filter turn messages to keep only the last one
+	let lastTurnMessageIndex = -1;
+	events.forEach((event, index) => {
+		if (event.getIsTurnMessage()) {
+			lastTurnMessageIndex = index;
+		}
+	});
+	// Remove all turn messages except the last one
+	events = events.filter((event, index) => !event.getIsTurnMessage() || index === lastTurnMessageIndex);
+
+	let publicMessages = [];
+
 	for (const event of events) {
 		let message = event.getDescription();
 		if (event.getCards() && event.getCards().length > 0) {
@@ -445,9 +543,11 @@ async function sendGameEventMessages(context, game: TexasHoldem) {
 				text: message,
 			});
 		} else {
-			await context.say({
-				text: message,
-			});
+			publicMessages.push(message);
 		}
 	}
+
+	await context.say({
+		text: publicMessages.join('\n'),
+	});
 }
