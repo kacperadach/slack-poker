@@ -3,6 +3,7 @@ import { SlackApp, SlackEdgeAppEnv, isPostedMessageEvent } from 'slack-cloudflar
 import { GameState, TexasHoldem } from './Game';
 import { GameEvent } from './GameEvent';
 import { Player } from './Player';
+import { Card } from './Card';
 
 /**
  * Welcome to Cloudflare Workers! This is your first Durable Objects application.
@@ -40,6 +41,41 @@ export class PokerDurableObject extends DurableObject<Env> {
 				PRIMARY KEY (workspaceId, channelId)
 			);
 		`);
+
+		this.sql.exec(`
+			CREATE TABLE IF NOT EXISTS Flops (
+				workspaceId TEXT NOT NULL,
+				channelId TEXT NOT NULL,
+				flop TEXT NOT NULL,
+				PRIMARY KEY (workspaceId, channelId, flop)
+			);	
+		`);
+	}
+
+	addFlop(workspaceId: string, channelId: string, flop: string): void {
+		this.sql.exec(
+			`
+			INSERT INTO Flops (workspaceId, channelId, flop)
+			VALUES (?, ?, ?)
+		`,
+			workspaceId,
+			channelId,
+			flop
+		);
+	}
+
+	getFlop(workspaceId: string, channelId: string, flop: string) {
+		return this.sql
+			.exec(
+				`
+				SELECT flop FROM Flops
+				WHERE workspaceId = ? AND channelId = ? AND flop = ?
+			`,
+				workspaceId,
+				channelId,
+				flop
+			)
+			.one();
 	}
 
 	createGame(workspaceId: string, channelId: string, game: any): void {
@@ -178,7 +214,7 @@ async function getGameState(env, context, payload) {
 	}
 
 	game.getGameStateEvent();
-	await sendGameEventMessages(context, game);
+	await sendGameEventMessages(env, context, game);
 }
 
 async function ass(env, context, payload) {
@@ -248,7 +284,7 @@ async function revealCards(env, context, payload) {
 	}
 
 	game.showCards(context.userId, true);
-	await sendGameEventMessages(context, game);
+	await sendGameEventMessages(env, context, game);
 }
 
 async function showCards(env, context, payload) {
@@ -259,7 +295,7 @@ async function showCards(env, context, payload) {
 	}
 
 	game.showCards(context.userId, false);
-	await sendGameEventMessages(context, game);
+	await sendGameEventMessages(env, context, game);
 }
 
 // async function fixTheGame(env, context, payload) {
@@ -284,7 +320,7 @@ async function preDeal(env, context, payload) {
 
 	game.preDeal(context.userId);
 	saveGame(env, context, game);
-	await sendGameEventMessages(context, game);
+	await sendGameEventMessages(env, context, game);
 }
 
 async function preNH(env, context, payload) {
@@ -296,7 +332,7 @@ async function preNH(env, context, payload) {
 
 	game.preNH(context.userId);
 	saveGame(env, context, game);
-	await sendGameEventMessages(context, game);
+	await sendGameEventMessages(env, context, game);
 }
 
 async function preAH(env, context, payload) {
@@ -308,7 +344,7 @@ async function preAH(env, context, payload) {
 
 	game.preAH(context.userId);
 	saveGame(env, context, game);
-	await sendGameEventMessages(context, game);
+	await sendGameEventMessages(env, context, game);
 }
 
 async function preCheck(env, context, payload) {
@@ -320,7 +356,7 @@ async function preCheck(env, context, payload) {
 
 	game.preCheck(context.userId);
 	saveGame(env, context, game);
-	await sendGameEventMessages(context, game);
+	await sendGameEventMessages(env, context, game);
 }
 
 async function preFold(env, context, payload) {
@@ -332,7 +368,7 @@ async function preFold(env, context, payload) {
 
 	game.preFold(context.userId);
 	saveGame(env, context, game);
-	await sendGameEventMessages(context, game);
+	await sendGameEventMessages(env, context, game);
 }
 
 async function preCall(env, context, payload) {
@@ -344,7 +380,7 @@ async function preCall(env, context, payload) {
 
 	game.preCall(context.userId);
 	saveGame(env, context, game);
-	await sendGameEventMessages(context, game);
+	await sendGameEventMessages(env, context, game);
 }
 
 async function preBet(env, context, payload) {
@@ -364,7 +400,7 @@ async function preBet(env, context, payload) {
 
 	game.preBet(context.userId, betAmount);
 	saveGame(env, context, game);
-	await sendGameEventMessages(context, game);
+	await sendGameEventMessages(env, context, game);
 }
 
 async function bet(env, context, payload) {
@@ -384,7 +420,7 @@ async function bet(env, context, payload) {
 
 	game.bet(context.userId, betAmount);
 	saveGame(env, context, game);
-	await sendGameEventMessages(context, game);
+	await sendGameEventMessages(env, context, game);
 }
 
 async function call(env, context, payload) {
@@ -396,7 +432,7 @@ async function call(env, context, payload) {
 
 	game.call(context.userId);
 	saveGame(env, context, game);
-	await sendGameEventMessages(context, game);
+	await sendGameEventMessages(env, context, game);
 }
 
 async function check(env, context, payload) {
@@ -408,7 +444,7 @@ async function check(env, context, payload) {
 
 	game.check(context.userId);
 	saveGame(env, context, game);
-	await sendGameEventMessages(context, game);
+	await sendGameEventMessages(env, context, game);
 }
 
 async function fold(env, context, payload) {
@@ -420,7 +456,7 @@ async function fold(env, context, payload) {
 
 	game.fold(context.userId);
 	saveGame(env, context, game);
-	await sendGameEventMessages(context, game);
+	await sendGameEventMessages(env, context, game);
 }
 
 async function startRound(env, context, payload) {
@@ -432,7 +468,7 @@ async function startRound(env, context, payload) {
 
 	game.startRound(context.userId);
 	saveGame(env, context, game);
-	await sendGameEventMessages(context, game);
+	await sendGameEventMessages(env, context, game);
 }
 
 async function showChips(env, context, payload) {
@@ -462,7 +498,7 @@ async function cashOut(env, context, payload) {
 
 	game.cashOut(context.userId);
 	saveGame(env, context, game);
-	await sendGameEventMessages(context, game);
+	await sendGameEventMessages(env, context, game);
 }
 
 async function buyIn(env, context, payload) {
@@ -482,7 +518,7 @@ async function buyIn(env, context, payload) {
 
 	game.buyIn(context.userId, buyInAmount);
 	saveGame(env, context, game);
-	await sendGameEventMessages(context, game);
+	await sendGameEventMessages(env, context, game);
 }
 
 async function leaveGame(env, context) {
@@ -494,7 +530,7 @@ async function leaveGame(env, context) {
 
 	game.removePlayer(context.userId);
 	saveGame(env, context, game);
-	await sendGameEventMessages(context, game);
+	await sendGameEventMessages(env, context, game);
 }
 
 async function joinGame(env, context) {
@@ -506,7 +542,7 @@ async function joinGame(env, context) {
 
 	game.addPlayer(context.userId);
 	saveGame(env, context, game);
-	await sendGameEventMessages(context, game);
+	await sendGameEventMessages(env, context, game);
 }
 
 async function newGame(env, context, payload) {
@@ -557,7 +593,7 @@ function getDurableObject(env, context) {
 	return env.POKER_DURABLE_OBJECT.get(id);
 }
 
-async function sendGameEventMessages(context, game: TexasHoldem) {
+async function sendGameEventMessages(env, context, game: TexasHoldem) {
 	let events = game.getEvents();
 	// Filter turn messages to keep only the last one
 	let lastTurnMessageIndex = -1;
@@ -573,6 +609,22 @@ async function sendGameEventMessages(context, game: TexasHoldem) {
 
 	for (const event of events) {
 		let message = event.getDescription();
+
+		if (message.startsWith('Flop:') && event.getCards() && event.getCards().length == 3) {
+			const stub = getDurableObject(env, context);
+
+			const workspaceId = context.teamId;
+			const channelId = context.channelId;
+
+			const flopString = getFlopString(event.getCards());
+
+			const flop = stub.getFlop(workspaceId, channelId, flopString);
+			if (!flop) {
+				message = `*NEW* ` + message;
+				stub.addFlop(workspaceId, channelId, flopString);
+			}
+		}
+
 		if (event.getCards() && event.getCards().length > 0) {
 			message += `\n${event
 				.getCards()
@@ -604,4 +656,11 @@ async function sendGameEventMessages(context, game: TexasHoldem) {
 			text: publicMessages.join('\n'),
 		});
 	}
+}
+
+function getFlopString(cards: Card[]) {
+	return cards
+		.map((card) => card.toString())
+		.sort((a, b) => a.localeCompare(b))
+		.join('');
 }
