@@ -30,6 +30,7 @@ export class TexasHoldem {
 	private currentBetAmount: number;
 	private lastRaiseAmount: number;
 	private playerPositions: Map<string, number>;
+	private preDealId: string | undefined = undefined;
 	private events: GameEvent[];
 
 	constructor(
@@ -46,7 +47,8 @@ export class TexasHoldem {
 		foldedPlayers: Set<string> = new Set(),
 		currentBetAmount: number = 0,
 		lastRaiseAmount: number = 0,
-		playerPositions: Map<string, number> = new Map()
+		playerPositions: Map<string, number> = new Map(),
+		preDealId: string | undefined = undefined
 	) {
 		this.gameState = gameState;
 		this.deck = deck;
@@ -62,6 +64,7 @@ export class TexasHoldem {
 		this.currentBetAmount = currentBetAmount;
 		this.lastRaiseAmount = lastRaiseAmount;
 		this.playerPositions = playerPositions;
+		this.preDealId = preDealId;
 		this.events = [];
 	}
 
@@ -298,10 +301,27 @@ export class TexasHoldem {
 		// Handle side pots and distribute winnings
 		this.handleSidePots();
 
+		if (this.communityCards.length < 5) {
+			// round is over reveal community cards
+			while (this.communityCards.length < 5) {
+				if (this.communityCards.length === 0) {
+					this.burnAndDeal(3);
+				} else {
+					this.burnAndDeal(1);
+				}
+			}
+			this.events.push(new GameEvent('Community Cards would have been:', [...this.communityCards]));
+		}
+
 		this.activePlayers.forEach((player) => {
 			if (player.getPreNH()) {
 				this.events.push(new GameEvent(`${player.getId()} says :nh:`));
 				player.setPreNH(false);
+				player.setPreAH(false);
+			} else if (player.getPreAH()) {
+				this.events.push(new GameEvent(`${player.getId()} says :ah:`));
+				player.setPreNH(false);
+				player.setPreAH(false);
 			}
 		});
 
@@ -335,6 +355,12 @@ export class TexasHoldem {
 		playersToRemove.forEach((playerId) => {
 			this.removePlayer(playerId);
 		});
+
+		if (this.preDealId) {
+			const preDealPlayerId = this.preDealId;
+			this.preDealId = undefined;
+			this.startRound(preDealPlayerId);
+		}
 	}
 
 	// private reorderPlayers(): void {
@@ -566,6 +592,33 @@ export class TexasHoldem {
 		}
 	}
 
+	public preDeal(playerId: string): void {
+		if (this.gameState === GameState.WaitingForPlayers) {
+			this.startRound(playerId);
+			return;
+		}
+
+		this.preDealId = playerId;
+		this.events.push(new GameEvent(`${playerId} is pre-dealing!`));
+	}
+
+	public preAH(playerId: string): void {
+		if (this.gameState === GameState.WaitingForPlayers) {
+			this.events.push(new GameEvent(`${playerId} Cannot pre-ah, may not be a :ah:!`));
+			return;
+		}
+
+		const player = this.activePlayers.find((player) => player.getId() === playerId);
+		if (!player) {
+			this.events.push(new GameEvent(`${playerId} Cannot pre-ah, player not found!`));
+			return;
+		}
+
+		player.setPreAH(true);
+		player.setPreNH(false);
+		this.events.push(new GameEvent(`${playerId} pre-ah!`));
+	}
+
 	public preNH(playerId: string): void {
 		if (this.gameState === GameState.WaitingForPlayers) {
 			this.events.push(new GameEvent(`${playerId} Cannot pre-nh, may not be a :nh:!`));
@@ -579,6 +632,7 @@ export class TexasHoldem {
 		}
 
 		player.setPreNH(true);
+		player.setPreAH(false);
 		this.events.push(new GameEvent(`${playerId} pre-nh!`));
 	}
 
@@ -609,6 +663,20 @@ export class TexasHoldem {
 		this.events.push(new GameEvent(`${playerId} pre-folded!`));
 	}
 
+	// public fixTheGame(): void {
+	// 	this.communityCards = [];
+	// 	this.deck.reset();
+	// 	this.deck.shuffle();
+
+	// 	this.activePlayers.forEach((player) => {
+	// 		player.removeAllCards();
+	// 	});
+
+	// 	this.dealInitialCards();
+
+	// 	// this.dealFlop();
+	// }
+
 	public fold(playerId: string): string {
 		// Can only fold during an active round
 		if (this.gameState === GameState.WaitingForPlayers) {
@@ -634,17 +702,17 @@ export class TexasHoldem {
 		if (activeNonFoldedPlayers.length <= 1) {
 			this.endRound();
 
-			if (this.communityCards.length < 5) {
-				// round is over reveal community cards
-				while (this.communityCards.length < 5) {
-					if (this.communityCards.length === 0) {
-						this.burnAndDeal(3);
-					} else {
-						this.burnAndDeal(1);
-					}
-				}
-				this.events.push(new GameEvent('Community Cards would have been:', [...this.communityCards]));
-			}
+			// if (this.communityCards.length < 5) {
+			// 	// round is over reveal community cards
+			// 	while (this.communityCards.length < 5) {
+			// 		if (this.communityCards.length === 0) {
+			// 			this.burnAndDeal(3);
+			// 		} else {
+			// 			this.burnAndDeal(1);
+			// 		}
+			// 	}
+			// 	this.events.push(new GameEvent('Community Cards would have been:', [...this.communityCards]));
+			// }
 
 			return Success + ': round ended';
 		}
@@ -694,7 +762,7 @@ export class TexasHoldem {
 
 		// Player can only check if no bets have been made in current round
 		if (this.currentBetAmount > 0 && player.getCurrentBet() < this.currentBetAmount) {
-			this.events.push(new GameEvent(`${playerId} Cannot check, there are active bets!`));
+			this.events.push(new GameEvent(`${playerId} Cannot check, there are active bets! (${this.currentBetAmount} chips)`));
 			return 'Cannot check, there are active bets';
 		}
 
@@ -1159,6 +1227,7 @@ export class TexasHoldem {
 			currentBetAmount: this.currentBetAmount,
 			lastRaiseAmount: this.lastRaiseAmount,
 			playerPositions: Array.from(this.playerPositions.entries()),
+			preDealId: this.preDealId,
 		};
 	}
 
@@ -1178,7 +1247,8 @@ export class TexasHoldem {
 			new Set(data.foldedPlayers),
 			data.currentBetAmount,
 			data.lastRaiseAmount,
-			new Map(data.playerPositions)
+			new Map(data.playerPositions),
+			data.preDealId
 		);
 		return game;
 	}

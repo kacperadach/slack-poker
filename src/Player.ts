@@ -19,6 +19,7 @@ export class Player {
 	private totalBuyIn: number;
 	private preMove: PreMove | null;
 	private preNH: boolean = false;
+	private preAH: boolean = false;
 
 	constructor(
 		id: string,
@@ -33,7 +34,8 @@ export class Player {
 		wantsToJoinTable: boolean = false,
 		totalBuyIn: number = 0,
 		preMove: PreMove | null = null,
-		preNH: boolean = false
+		preNH: boolean = false,
+		preAH: boolean = false
 	) {
 		this.id = id;
 		this.chips = chips;
@@ -48,6 +50,7 @@ export class Player {
 		this.totalBuyIn = totalBuyIn;
 		this.preMove = preMove;
 		this.preNH = preNH;
+		this.preAH = preAH;
 	}
 
 	public getHadTurnThisRound(): boolean {
@@ -194,6 +197,14 @@ export class Player {
 		this.preNH = preNH;
 	}
 
+	public getPreAH(): boolean {
+		return this.preAH;
+	}
+
+	public setPreAH(preAH: boolean): void {
+		this.preAH = preAH;
+	}
+
 	public toJson(): any {
 		return {
 			id: this.id,
@@ -209,6 +220,7 @@ export class Player {
 			totalBuyIn: this.totalBuyIn,
 			preMove: this.preMove,
 			preNH: this.preNH,
+			preAH: this.preAH,
 		};
 	}
 
@@ -226,7 +238,8 @@ export class Player {
 			data?.wantsToJoinTable || false,
 			data?.totalBuyIn || 0,
 			data?.preMove || null,
-			data?.preNH || false
+			data?.preNH || false,
+			data?.preAH || false
 		);
 	}
 

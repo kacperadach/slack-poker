@@ -151,6 +151,8 @@ const MESSAGE_HANDLERS = {
 	a: ass,
 	cjecl: check,
 	prenh: preNH,
+	preah: preAH,
+	predeal: preDeal,
 };
 
 async function handleMessage(env: Env, context, payload) {
@@ -260,6 +262,31 @@ async function showCards(env, context, payload) {
 	await sendGameEventMessages(context, game);
 }
 
+// async function fixTheGame(env, context, payload) {
+// 	const game = await fetchGame(env, context);
+// 	if (!game) {
+// 		await context.say({ text: `No game exists! Type 'New Game'` });
+// 		return;
+// 	}
+// 	await context.say({ text: `Fixing the game...` });
+// 	game.fixTheGame();
+// 	await context.say({ text: `Finished fixing the game...` });
+// 	saveGame(env, context, game);
+// 	await sendGameEventMessages(context, game);
+// }
+
+async function preDeal(env, context, payload) {
+	const game = await fetchGame(env, context);
+	if (!game) {
+		await context.say({ text: `No game exists! Type 'New Game'` });
+		return;
+	}
+
+	game.preDeal(context.userId);
+	saveGame(env, context, game);
+	await sendGameEventMessages(context, game);
+}
+
 async function preNH(env, context, payload) {
 	const game = await fetchGame(env, context);
 	if (!game) {
@@ -268,6 +295,18 @@ async function preNH(env, context, payload) {
 	}
 
 	game.preNH(context.userId);
+	saveGame(env, context, game);
+	await sendGameEventMessages(context, game);
+}
+
+async function preAH(env, context, payload) {
+	const game = await fetchGame(env, context);
+	if (!game) {
+		await context.say({ text: `No game exists! Type 'New Game'` });
+		return;
+	}
+
+	game.preAH(context.userId);
 	saveGame(env, context, game);
 	await sendGameEventMessages(context, game);
 }
