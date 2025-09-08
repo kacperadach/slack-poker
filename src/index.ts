@@ -47,20 +47,22 @@ export class PokerDurableObject extends DurableObject<Env> {
 				workspaceId TEXT NOT NULL,
 				channelId TEXT NOT NULL,
 				flop TEXT NOT NULL,
+				createdAt INTEGER,
 				PRIMARY KEY (workspaceId, channelId, flop)
 			);	
 		`);
 	}
 
-	addFlop(workspaceId: string, channelId: string, flop: string): void {
+	addFlop(workspaceId: string, channelId: string, flop: string, createdAt: number): void {
 		this.sql.exec(
 			`
-			INSERT INTO Flops (workspaceId, channelId, flop)
-			VALUES (?, ?, ?)
+			INSERT INTO Flops (workspaceId, channelId, flop, createdAt)
+			VALUES (?, ?, ?, ?)
 		`,
 			workspaceId,
 			channelId,
-			flop
+			flop,
+			createdAt
 		);
 	}
 
@@ -68,7 +70,7 @@ export class PokerDurableObject extends DurableObject<Env> {
 		return this.sql
 			.exec(
 				`
-				SELECT flop FROM Flops
+				SELECT flop, createdAt FROM Flops
 				WHERE workspaceId = ? AND channelId = ? AND flop = ?
 			`,
 				workspaceId,
@@ -621,7 +623,14 @@ async function sendGameEventMessages(env, context, game: TexasHoldem) {
 			const flop = stub.getFlop(workspaceId, channelId, flopString);
 			if (!flop) {
 				message = `*NEW* ` + message;
-				stub.addFlop(workspaceId, channelId, flopString);
+				stub.addFlop(workspaceId, channelId, flopString, Date.now());
+			} else {
+				const human = new Date(flop.createdAt).toLocaleDateString('en-US', {
+					year: 'numeric',
+					month: '2-digit',
+					day: '2-digit',
+				});
+				message = `Flop (First Seen ${human}):`;
 			}
 		}
 
