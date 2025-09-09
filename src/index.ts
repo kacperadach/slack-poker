@@ -66,18 +66,23 @@ export class PokerDurableObject extends DurableObject<Env> {
 		);
 	}
 
-	getFlop(workspaceId: string, channelId: string, flop: string) {
-		return this.sql
-			.exec(
-				`
-				SELECT flop, createdAt FROM Flops
-				WHERE workspaceId = ? AND channelId = ? AND flop = ?
-			`,
-				workspaceId,
-				channelId,
-				flop
-			)
-			.one();
+	async getFlop(workspaceId: string, channelId: string, flop: string) {
+		const result = this.sql.exec(
+			`
+		  SELECT flop, createdAt FROM Flops
+		  WHERE workspaceId = ? AND channelId = ? AND flop = ?
+		  `,
+			workspaceId,
+			channelId,
+			flop
+		);
+
+		// iterate over results (can be 0..n rows)
+		for (const row of result) {
+			return row; // just return first row
+		}
+
+		return null; // nothing found
 	}
 
 	createGame(workspaceId: string, channelId: string, game: any): void {
@@ -620,7 +625,7 @@ async function sendGameEventMessages(env, context, game: TexasHoldem) {
 
 			const flopString = getFlopString(event.getCards());
 
-			const flop = stub.getFlop(workspaceId, channelId, flopString);
+			const flop = await stub.getFlop(workspaceId, channelId, flopString);
 			if (!flop) {
 				message = `*NEW* ` + message;
 				stub.addFlop(workspaceId, channelId, flopString, Date.now());
