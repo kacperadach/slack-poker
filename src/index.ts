@@ -85,6 +85,24 @@ export class PokerDurableObject extends DurableObject<Env> {
 		return null; // nothing found
 	}
 
+	async getFlops(workspaceId: string, channelId: string) {
+		const result = this.sql.exec(
+			`
+			  SELECT flop, createdAt FROM Flops
+			  WHERE workspaceId = ? AND channelId = ?
+			  `,
+			workspaceId,
+			channelId
+		);
+
+		const flops = [];
+		for (const row of result) {
+			flops.push(row);
+		}
+
+		return flops;
+	}
+
 	createGame(workspaceId: string, channelId: string, game: any): void {
 		this.sql.exec(
 			`
@@ -196,6 +214,8 @@ const MESSAGE_HANDLERS = {
 	prenh: preNH,
 	preah: preAH,
 	predeal: preDeal,
+	tsa: preCheck,
+	flops: showFlops,
 };
 
 async function handleMessage(env: Env, context, payload) {
@@ -222,6 +242,45 @@ async function getGameState(env, context, payload) {
 
 	game.getGameStateEvent();
 	await sendGameEventMessages(env, context, game);
+}
+
+async function showFlops(env, context, payload) {
+	const workspaceId = context.teamId;
+	const channelId = context.channelId;
+	const stub = getDurableObject(env, context);
+
+	const flops = await stub.getFlops(workspaceId, channelId);
+
+	let message = '';
+
+	for (const flop of flops) {
+		const date = new Date(flop.createdAt).toLocaleDateString('en-US', {
+			year: 'numeric',
+			month: '2-digit',
+			day: '2-digit',
+		});
+		// message += `${flop.flop
+		// 	.replaceAll('d', ':diamonds:')
+		// 	.replaceAll('s', ':spades:')
+		// 	.replaceAll('h', ':hearts:')
+		// 	.replaceAll('c', ':clubs:')} on ${date}\n`;
+		message += `${flop.flop.replace(/[dhsc]/g, (match: any) => {
+			switch (match) {
+				case 'd':
+					return ':diamonds:';
+				case 'h':
+					return ':hearts:';
+				case 's':
+					return ':spades:';
+				case 'c':
+					return ':clubs:';
+				default:
+					return match;
+			}
+		})} on ${date}\n`;
+	}
+
+	await context.say({ text: message });
 }
 
 async function ass(env, context, payload) {
@@ -617,7 +676,13 @@ async function sendGameEventMessages(env, context, game: TexasHoldem) {
 	for (const event of events) {
 		let message = event.getDescription();
 
+		let skipFlop = false;
 		if (message.startsWith('Flop:') && event.getCards() && event.getCards().length == 3) {
+			skipFlop = Math.random() < 0.01;
+			if (skipFlop) {
+				message = 'No flop this time';
+			}
+
 			const stub = getDurableObject(env, context);
 
 			const workspaceId = context.teamId;
@@ -636,10 +701,11 @@ async function sendGameEventMessages(env, context, game: TexasHoldem) {
 					day: '2-digit',
 				});
 				message = `Flop (First Seen ${human}):`;
+				skipFlop = false;
 			}
 		}
 
-		if (event.getCards() && event.getCards().length > 0) {
+		if (event.getCards() && event.getCards().length > 0 && !skipFlop) {
 			message += `\n${event
 				.getCards()
 				.map((card) => card.toSlackString())
