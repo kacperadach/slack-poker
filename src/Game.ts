@@ -690,7 +690,13 @@ export class TexasHoldem {
 			return 'Not your turn to fold';
 		}
 
-		this.events.push(new GameEvent(`${playerId} folded!`));
+		let message = `${playerId} folded!`;
+
+		if (this.currentBetAmount == 0 || player.getCurrentBet() >= this.currentBetAmount) {
+			message += ' :narp-brain:';
+		}
+
+		this.events.push(new GameEvent(message));
 
 		this.foldedPlayers.add(playerId);
 		player.setHadTurnThisRound(true);

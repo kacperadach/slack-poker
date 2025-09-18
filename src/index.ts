@@ -163,6 +163,9 @@ export default {
 	},
 } satisfies ExportedHandler<Env>;
 
+const ALGO_MESSAGE =
+	'Complaining about the algo? How about you try tightening up ranges, punishing leaks, and owning your position. Cut trash hands, widen late, and 3-bet light when stacks and image align. Always clock SPR, ICM, and blocker dynamics. Dont just run hot—range merge, polarize, and balance frequencies. Table select like a shark, exploit the fish, and never bleed chips OOP. To level up: study solvers, drill GTO, then weaponize exploit when villains deviate.';
+
 const MESSAGE_HANDLERS = {
 	'new game': newGame,
 	'join table': joinGame,
@@ -230,6 +233,10 @@ async function handleMessage(env: Env, context, payload) {
 			await handler(env, context, payload);
 			return;
 		}
+	}
+
+	if (messageText.toLowerCase().includes('algo')) {
+		await context.say({ text: ALGO_MESSAGE });
 	}
 }
 
@@ -679,9 +686,7 @@ async function sendGameEventMessages(env, context, game: TexasHoldem) {
 		let skipFlop = false;
 		if (message.startsWith('Flop:') && event.getCards() && event.getCards().length == 3) {
 			skipFlop = Math.random() < 0.01;
-			if (skipFlop) {
-				message = 'No flop this time';
-			}
+			
 
 			const stub = getDurableObject(env, context);
 
@@ -702,6 +707,10 @@ async function sendGameEventMessages(env, context, game: TexasHoldem) {
 				});
 				message = `Flop (First Seen ${human}):`;
 				skipFlop = false;
+			}
+
+			if (skipFlop) {
+				message = ':no-bump-this-time: No flop this time';
 			}
 		}
 
