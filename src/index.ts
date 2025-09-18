@@ -103,6 +103,25 @@ export class PokerDurableObject extends DurableObject<Env> {
 		return flops;
 	}
 
+	async searchFlops(workspaceId: string, channelId: string, flopSearch: string) {
+		const result = this.sql.exec(
+			`
+			  SELECT flop, createdAt FROM Flops
+			  WHERE workspaceId = ? AND channelId = ? AND flop LIKE ?
+			  `,
+			workspaceId,
+			channelId,
+			`%${flopSearch}%`
+		);
+
+		const flops = [];
+		for (const row of result) {
+			flops.push(row);
+		}
+
+		return flops;
+	}
+
 	createGame(workspaceId: string, channelId: string, game: any): void {
 		this.sql.exec(
 			`
@@ -219,6 +238,7 @@ const MESSAGE_HANDLERS = {
 	predeal: preDeal,
 	tsa: preCheck,
 	flops: showFlops,
+	fsearch: searchFlops,
 };
 
 async function handleMessage(env: Env, context, payload) {
@@ -251,6 +271,24 @@ async function getGameState(env, context, payload) {
 	await sendGameEventMessages(env, context, game);
 }
 
+async function searchFlops(env, context, payload) {
+	const workspaceId = context.teamId;
+	const channelId = context.channelId;
+	const stub = getDurableObject(env, context);
+
+	const flopSearchQuery = payload.text.replace('fsearch', '').trim();
+
+	let message = '';
+
+	const flops = await stub.searchFlops(workspaceId, channelId, flopSearchQuery);
+
+	for (const flop of flops) {
+		message += formatFlop(flop);
+	}
+
+	await context.say({ text: message });
+}
+
 async function showFlops(env, context, payload) {
 	const workspaceId = context.teamId;
 	const channelId = context.channelId;
@@ -261,30 +299,27 @@ async function showFlops(env, context, payload) {
 	let message = '';
 
 	for (const flop of flops) {
-		const date = new Date(flop.createdAt).toLocaleDateString('en-US', {
-			year: 'numeric',
-			month: '2-digit',
-			day: '2-digit',
-		});
-		// message += `${flop.flop
-		// 	.replaceAll('d', ':diamonds:')
-		// 	.replaceAll('s', ':spades:')
-		// 	.replaceAll('h', ':hearts:')
-		// 	.replaceAll('c', ':clubs:')} on ${date}\n`;
-		message += `${flop.flop.replace(/[dhsc]/g, (match: any) => {
-			switch (match) {
-				case 'd':
-					return ':diamonds:';
-				case 'h':
-					return ':hearts:';
-				case 's':
-					return ':spades:';
-				case 'c':
-					return ':clubs:';
-				default:
-					return match;
-			}
-		})} on ${date}\n`;
+		message += formatFlop(flop);
+
+		// const date = new Date(flop.createdAt).toLocaleDateString('en-US', {
+		// 	year: 'numeric',
+		// 	month: '2-digit',
+		// 	day: '2-digit',
+		// });
+		// message += `${flop.flop.replace(/[dhsc]/g, (match: any) => {
+		// 	switch (match) {
+		// 		case 'd':
+		// 			return ':diamonds:';
+		// 		case 'h':
+		// 			return ':hearts:';
+		// 		case 's':
+		// 			return ':spades:';
+		// 		case 'c':
+		// 			return ':clubs:';
+		// 		default:
+		// 			return match;
+		// 	}
+		// })} on ${date}\n`;
 	}
 
 	await context.say({ text: message });
@@ -686,7 +721,6 @@ async function sendGameEventMessages(env, context, game: TexasHoldem) {
 		let skipFlop = false;
 		if (message.startsWith('Flop:') && event.getCards() && event.getCards().length == 3) {
 			skipFlop = Math.random() < 0.01;
-			
 
 			const stub = getDurableObject(env, context);
 
@@ -752,4 +786,26 @@ function getFlopString(cards: Card[]) {
 		.map((card) => card.toString())
 		.sort((a, b) => a.localeCompare(b))
 		.join('');
+}
+
+function formatFlop(flop) {
+	const date = new Date(flop.createdAt).toLocaleDateString('en-US', {
+		year: 'numeric',
+		month: '2-digit',
+		day: '2-digit',
+	});
+	return `${flop.flop.replace(/[dhsc]/g, (match: any) => {
+		switch (match) {
+			case 'd':
+				return ':diamonds:';
+			case 'h':
+				return ':hearts:';
+			case 's':
+				return ':spades:';
+			case 'c':
+				return ':clubs:';
+			default:
+				return match;
+		}
+	})} on ${date}\n`;
 }
