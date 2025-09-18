@@ -962,16 +962,18 @@ export class TexasHoldem {
 			player.setAllIn(true);
 		}
 
-		const message = player.getIsAllIn()
-			? `${playerId} called ${this.currentBetAmount} chips and went all-in!`
-			: `${playerId} called ${this.currentBetAmount} chips!`;
-		this.events.push(new GameEvent(message));
-
 		player.removeChips(callAmount);
 		player.setCurrentBet(player.getCurrentBet() + callAmount);
 		player.setHadTurnThisRound(true);
 
 		this.addToPot(callAmount);
+
+		const message = player.getIsAllIn()
+			? `${playerId} called ${this.currentBetAmount} chips and went all-in! Total Pot: ${this.currentPot}`
+			: `${playerId} called ${this.currentBetAmount} chips! Total Pot: ${this.currentPot}`;
+
+		this.events.push(new GameEvent(message));
+
 		this.advanceToNextPlayer();
 		this.progressGame();
 

@@ -248,15 +248,16 @@ async function handleMessage(env: Env, context, payload) {
 
 	const messageText = payload.text.trim();
 
+	if (messageText.toLowerCase().includes('algo')) {
+		await context.say({ text: ALGO_MESSAGE });
+		return;
+	}
+
 	for (const [key, handler] of Object.entries(MESSAGE_HANDLERS)) {
 		if (messageText.toLowerCase().startsWith(key)) {
 			await handler(env, context, payload);
 			return;
 		}
-	}
-
-	if (messageText.toLowerCase().includes('algo')) {
-		await context.say({ text: ALGO_MESSAGE });
 	}
 }
 
