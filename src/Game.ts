@@ -239,17 +239,11 @@ export class TexasHoldem {
 			this.dealerPosition = 0;
 		}
 
-		// this.reorderPlayers();
-
-		// const activePlayerIds = this.activePlayers.map((p) => p.getId()).join(', ');
-
 		let startGameMessage = 'Starting round with players: \n';
 		this.activePlayers.forEach((player) => {
 			startGameMessage += `${player.getId()} ${player.getChips()} chips\n`;
 		});
 		this.events.push(new GameEvent(startGameMessage));
-
-		// this.events.push(new GameEvent(`Starting round with players: ${activePlayerIds}`));
 
 		this.events.push(new GameEvent(`${this.activePlayers[this.dealerPosition]?.getId()} has the dealer button`));
 
@@ -259,6 +253,9 @@ export class TexasHoldem {
 		this.deck.reset();
 		this.deck.shuffle();
 		this.dealInitialCards();
+
+		this.smallBlind = this.getSmallBlindByDay();
+		this.bigBlind = 2 * this.smallBlind;
 
 		const smallBlindPlayer = this.activePlayers[(this.dealerPosition + 1) % this.activePlayers.length];
 		const bigBlindPlayer = this.activePlayers[(this.dealerPosition + 2) % this.activePlayers.length];
@@ -1264,5 +1261,43 @@ export class TexasHoldem {
 	// only for testing
 	public setCommunityCards(cards: Card[]): void {
 		this.communityCards = cards;
+	}
+
+	private getSmallBlindByDay(): number {
+		const now = new Date();
+
+		// Always in Eastern Time (handles EST/EDT correctly)
+		const options: Intl.DateTimeFormatOptions = { weekday: 'long', timeZone: 'America/New_York' };
+		const dayOfWeek = new Intl.DateTimeFormat('en-US', options).format(now);
+
+		let smallBlind = 10;
+
+		switch (dayOfWeek) {
+			case 'Monday':
+				smallBlind = 10;
+				break;
+			case 'Tuesday':
+				smallBlind = 15;
+				break;
+			case 'Wednesday':
+				smallBlind = 20;
+				break;
+			case 'Thursday':
+				smallBlind = 30;
+				break;
+			case 'Friday':
+				smallBlind = 40;
+				break;
+			case 'Saturday':
+				smallBlind = 10;
+				break;
+			case 'Sunday':
+				smallBlind = 10;
+				break;
+			default:
+				smallBlind = 10;
+		}
+
+		return smallBlind;
 	}
 }
