@@ -277,7 +277,7 @@ async function searchFlops(env, context, payload) {
 	const channelId = context.channelId;
 	const stub = getDurableObject(env, context);
 
-	const flopSearchQuery = payload.text.replace('fsearch', '').trim();
+	const flopSearchQuery = payload.text.toLowerCase().replace('fsearch', '').trim();
 
 	let message = '';
 
