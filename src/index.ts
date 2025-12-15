@@ -391,6 +391,10 @@ async function revealCards(env, context, payload) {
 		await context.say({ text: `No game exists! Type 'New Game'` });
 		return;
 	}
+	if (game.getGameState() !== GameState.WaitingForPlayers) {
+		await context.say({ text: `<@${context.userId}> :narp-brain: Nice try bud` });
+		return;
+	}
 
 	game.showCards(context.userId, true);
 	await sendGameEventMessages(env, context, game);
@@ -428,7 +432,7 @@ async function preDeal(env, context, payload) {
 	}
 
 	game.preDeal(context.userId);
-	saveGame(env, context, game);
+	await saveGame(env, context, game);
 	await sendGameEventMessages(env, context, game);
 }
 
@@ -440,7 +444,7 @@ async function preNH(env, context, payload) {
 	}
 
 	game.preNH(context.userId);
-	saveGame(env, context, game);
+	await saveGame(env, context, game);
 	await sendGameEventMessages(env, context, game);
 }
 
@@ -452,7 +456,7 @@ async function preAH(env, context, payload) {
 	}
 
 	game.preAH(context.userId);
-	saveGame(env, context, game);
+	await saveGame(env, context, game);
 	await sendGameEventMessages(env, context, game);
 }
 
@@ -464,7 +468,7 @@ async function preCheck(env, context, payload) {
 	}
 
 	game.preCheck(context.userId);
-	saveGame(env, context, game);
+	await saveGame(env, context, game);
 	await sendGameEventMessages(env, context, game);
 }
 
@@ -476,7 +480,7 @@ async function preFold(env, context, payload) {
 	}
 
 	game.preFold(context.userId);
-	saveGame(env, context, game);
+	await saveGame(env, context, game);
 	await sendGameEventMessages(env, context, game);
 }
 
@@ -488,7 +492,7 @@ async function preCall(env, context, payload) {
 	}
 
 	game.preCall(context.userId);
-	saveGame(env, context, game);
+	await saveGame(env, context, game);
 	await sendGameEventMessages(env, context, game);
 }
 
@@ -508,7 +512,7 @@ async function preBet(env, context, payload) {
 	}
 
 	game.preBet(context.userId, betAmount);
-	saveGame(env, context, game);
+	await saveGame(env, context, game);
 	await sendGameEventMessages(env, context, game);
 }
 
@@ -528,7 +532,7 @@ async function bet(env, context, payload) {
 	}
 
 	game.bet(context.userId, betAmount);
-	saveGame(env, context, game);
+	await saveGame(env, context, game);
 	await sendGameEventMessages(env, context, game);
 }
 
@@ -540,7 +544,7 @@ async function call(env, context, payload) {
 	}
 
 	game.call(context.userId);
-	saveGame(env, context, game);
+	await saveGame(env, context, game);
 	await sendGameEventMessages(env, context, game);
 }
 
@@ -552,7 +556,7 @@ async function check(env, context, payload) {
 	}
 
 	game.check(context.userId);
-	saveGame(env, context, game);
+	await saveGame(env, context, game);
 	await sendGameEventMessages(env, context, game);
 }
 
@@ -564,7 +568,7 @@ async function fold(env, context, payload) {
 	}
 
 	game.fold(context.userId);
-	saveGame(env, context, game);
+	await saveGame(env, context, game);
 	await sendGameEventMessages(env, context, game);
 }
 
@@ -576,7 +580,7 @@ async function startRound(env, context, payload) {
 	}
 
 	game.startRound(context.userId);
-	saveGame(env, context, game);
+	await saveGame(env, context, game);
 	await sendGameEventMessages(env, context, game);
 }
 
@@ -606,7 +610,7 @@ async function cashOut(env, context, payload) {
 	}
 
 	game.cashOut(context.userId);
-	saveGame(env, context, game);
+	await saveGame(env, context, game);
 	await sendGameEventMessages(env, context, game);
 }
 
@@ -626,7 +630,7 @@ async function buyIn(env, context, payload) {
 	}
 
 	game.buyIn(context.userId, buyInAmount);
-	saveGame(env, context, game);
+	await saveGame(env, context, game);
 	await sendGameEventMessages(env, context, game);
 }
 
@@ -638,7 +642,7 @@ async function leaveGame(env, context) {
 	}
 
 	game.removePlayer(context.userId);
-	saveGame(env, context, game);
+	await saveGame(env, context, game);
 	await sendGameEventMessages(env, context, game);
 }
 
@@ -650,7 +654,7 @@ async function joinGame(env, context) {
 	}
 
 	game.addPlayer(context.userId);
-	saveGame(env, context, game);
+	await saveGame(env, context, game);
 	await sendGameEventMessages(env, context, game);
 }
 
@@ -685,12 +689,12 @@ async function fetchGame(env, context) {
 	return TexasHoldem.fromJson(game);
 }
 
-function saveGame(env, context, game: TexasHoldem) {
+async function saveGame(env, context, game: TexasHoldem) {
 	const workspaceId = context.teamId;
 	const channelId = context.channelId;
 	const stub = getDurableObject(env, context);
 
-	stub.saveGame(workspaceId, channelId, JSON.stringify(game.toJson()));
+	await stub.saveGame(workspaceId, channelId, JSON.stringify(game.toJson()));
 }
 
 function getDurableObject(env, context) {
@@ -733,7 +737,7 @@ async function sendGameEventMessages(env, context, game: TexasHoldem) {
 			const flop = await stub.getFlop(workspaceId, channelId, flopString);
 			if (!flop) {
 				message = `*NEW* ` + message;
-				stub.addFlop(workspaceId, channelId, flopString, Date.now());
+				await stub.addFlop(workspaceId, channelId, flopString, Date.now());
 			} else {
 				const human = new Date(flop.createdAt).toLocaleDateString('en-US', {
 					year: 'numeric',
