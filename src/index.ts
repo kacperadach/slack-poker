@@ -53,7 +53,7 @@ export class PokerDurableObject extends DurableObject<Env> {
 		`);
 	}
 
-	addFlop(workspaceId: string, channelId: string, flop: string, createdAt: number): void {
+	addFlop(workspaceId: string, channelId: string, flop: string, createdAt: number): number {
 		this.sql.exec(
 			`
 			INSERT INTO Flops (workspaceId, channelId, flop, createdAt)
@@ -64,6 +64,18 @@ export class PokerDurableObject extends DurableObject<Env> {
 			flop,
 			createdAt
 		);
+
+		const result = this.sql.exec(
+			`
+			SELECT COUNT(*) AS count
+			FROM Flops
+			WHERE workspaceId = ?
+			  AND channelId = ?
+			`,
+			workspaceId,
+			channelId
+		  );
+		  return result.one().count as number;
 	}
 
 	async getFlop(workspaceId: string, channelId: string, flop: string) {
@@ -737,7 +749,11 @@ async function sendGameEventMessages(env, context, game: TexasHoldem) {
 			const flop = await stub.getFlop(workspaceId, channelId, flopString);
 			if (!flop) {
 				message = `*NEW* ` + message;
-				await stub.addFlop(workspaceId, channelId, flopString, Date.now());
+				const flopCount = await stub.addFlop(workspaceId, channelId, flopString, Date.now());
+				const flopsDiscoveredPercentage = (flopCount / 22100) * 100;
+				const numberFormatter = new Intl.NumberFormat('en-US');
+				const percentFormatter = new Intl.NumberFormat('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+				message = `\n${numberFormatter.format(flopCount)} flops discovered (${percentFormatter.format(flopsDiscoveredPercentage)}%), ${numberFormatter.format(22100 - flopCount)} remain`
 			} else {
 				const human = new Date(flop.createdAt).toLocaleDateString('en-US', {
 					year: 'numeric',
