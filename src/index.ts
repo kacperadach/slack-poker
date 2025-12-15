@@ -753,7 +753,7 @@ async function sendGameEventMessages(env, context, game: TexasHoldem) {
 				const flopsDiscoveredPercentage = (flopCount / 22100) * 100;
 				const numberFormatter = new Intl.NumberFormat('en-US');
 				const percentFormatter = new Intl.NumberFormat('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
-				message = `${numberFormatter.format(flopCount)} flops discovered (${percentFormatter.format(flopsDiscoveredPercentage)}%), ${numberFormatter.format(22100 - flopCount)} remain`
+				message = `\n${numberFormatter.format(flopCount)} flops discovered (${percentFormatter.format(flopsDiscoveredPercentage)}%), ${numberFormatter.format(22100 - flopCount)} remain`
 			} else {
 				const human = new Date(flop.createdAt).toLocaleDateString('en-US', {
 					year: 'numeric',
