@@ -299,7 +299,7 @@ async function handleMessage(env: Env, context, payload) {
 		return;
 	}
 
-	const messageText = payload.text.trim().toLowerCase().replace(/'/g, '').replace(/oh+\s*buddy\s*/g, '');
+	const messageText = payload.text.toLowerCase().replace(/'/g, '').replace(/oh+\s*buddy\s*/g, '').replace(/shi+/g, ''.trim();
 
 	if (messageText.includes('algo')) {
 		await context.say({ text: ALGO_MESSAGE });
