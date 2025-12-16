@@ -245,7 +245,7 @@ const MESSAGE_HANDLERS = {
 	'i choose to deal': startRound,
 	'i choose to predeal': preDeal,
 	'i choose to pre-deal': preDeal,
-	'i choose to roll': roll,
+	'i choose to roll': rollDice,
 	'i choose to see my dards': showCards,
 	'i choose to cut my trash hand': fold,
 	"it's going to be a call for me": call,
