@@ -49,7 +49,7 @@ export class PokerDurableObject extends DurableObject<Env> {
 				flop TEXT NOT NULL,
 				createdAt INTEGER,
 				PRIMARY KEY (workspaceId, channelId, flop)
-			);	
+			);
 		`);
 	}
 
@@ -249,12 +249,35 @@ const MESSAGE_HANDLERS = {
 	'i choose to roll': rollDice,
 	'i choose to see my dards': showCards,
 	'i choose to cut my trash hand': fold,
-	"it's going to be a call for me": call,
-	"it'll be a call for me": call,
-	"it's going to be a check for me": check,
-	"it'll be a check for me": check,
-	"it's going to be a fold for me": fold,
-	"it'll be a fold for me": fold,
+	'i choose to poke': nudgePlayer,
+	"its going to be a call for me": call,
+	"itll be a call for me": call,
+	"its gonna be a call for me": call,
+	"its going to be a precall for me": preCall,
+	"itll be a precall for me": preCall,
+	"its gonna be a precall for me": preCall,
+	"its going to be a precheck for me": preCheck,
+	"itll be a precheck for me": preCheck,
+	"its gonna be a precheck for me": preCheck,
+	"its going to be a prefold for me": preFold,
+	"itll be a prefold for me": preFold,
+	"its gonna be a prefold for me": preFold,
+	"its going to be a check for me": check,
+	"itll be a check for me": check,
+	"its gonna be a check for me": check,
+	"its going to be a fold for me": fold,
+	"itll be a fold for me": fold,
+	"its gonna be a fold for me": fold,
+	"im gonna go ahead and bet": bet,
+	"im gonna go ahead and check": check,
+	"im gonna go ahead and fold": fold,
+	"im gonna go ahead and precall": preCall,
+	"im gonna go ahead and precheck": preCheck,
+	"im gonna go ahead and prefold": preFold,
+	"im gonna go ahead and prebet": preBet,
+	"im gonna go ahead and donk": bet,
+	"im gonna go ahead and call": call,
+	"im gonna go ahead and poke": nudgePlayer,
 	'drill gto': drillGto,
 	'i choose to drill gto': drillGto,
 	donk: bet,
@@ -271,20 +294,24 @@ const MESSAGE_HANDLERS = {
 	context: context,
 };
 
+function cleanMessageText(messageText: string) {
+	return messageText.toLowerCase().replace(/'/g, '').replace(/oh+\s*buddy\s*/g, '').replace(/shi+/g, '').trim();
+}
+
 async function handleMessage(env: Env, context, payload) {
 	if (!isPostedMessageEvent(payload)) {
 		return;
 	}
 
-	const messageText = payload.text.trim();
+	const messageText = cleanMessageText(payload.text);
 
-	if (messageText.toLowerCase().includes('algo')) {
+	if (messageText.includes('algo')) {
 		await context.say({ text: ALGO_MESSAGE });
 		return;
 	}
 
 	for (const [key, handler] of Object.entries(MESSAGE_HANDLERS)) {
-		if (messageText.toLowerCase().startsWith(key)) {
+		if (messageText.startsWith(key)) {
 			await handler(env, context, payload);
 			return;
 		}
@@ -555,8 +582,8 @@ async function preBet(env, context, payload) {
 }
 
 async function bet(env, context, payload) {
-	const messageText = payload.text.toLowerCase();
-	const betAmount = parseFloat(messageText.replace('i choose to', '').replace('bet', '').replace('donk', '').trim());
+	const messageText = cleanMessageText(payload.text);
+	const betAmount = parseFloat(messageText.replace('i choose to', '').replace('im gonna go ahead and', '').replace('bet', '').replace('donk', '').trim());
 
 	if (isNaN(betAmount) || betAmount <= 0) {
 		await context.say({ text: 'Invalid bet amount! Please use format: "bet {chips}"' });
