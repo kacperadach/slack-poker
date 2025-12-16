@@ -242,6 +242,22 @@ const MESSAGE_HANDLERS = {
 	'i choose to precall': preCall,
 	'i choose to pre-bet': preBet,
 	'i choose to prebet': preBet,
+	'i choose to deal': startRound,
+	'i choose to predeal': preDeal,
+	'i choose to pre-deal': preDeal,
+	'i choose to roll': roll,
+	'i choose to see my dards': showCards,
+	'i choose to cut my trash hand': fold,
+	"it's going to be a call for me": call,
+	"it'll be a call for me": call,
+	"it's going to be a check for me": check,
+	"it'll be a check for me": check,
+	"it's going to be a fold for me": fold,
+	"it'll be a fold for me": fold,
+	"drill gto": drillGto,
+	"i choose to drill gto": drillGto,
+	'donk': bet,
+	'i choose to donk': bet,
 	d: showCards,
 	a: ass,
 	cjecl: check,
@@ -340,6 +356,10 @@ async function showFlops(env, context, payload) {
 
 async function ass(env, context, payload) {
 	await context.say({ text: 'ASS' });
+}
+
+async function drillGto(env, context, payload) {
+	await context.say({ text: `<@${currentPlayer.getId()}> is drilling GTO!` });
 }
 
 async function nudgePlayer(env, context, payload) {
