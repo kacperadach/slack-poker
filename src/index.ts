@@ -74,8 +74,8 @@ export class PokerDurableObject extends DurableObject<Env> {
 			`,
 			workspaceId,
 			channelId
-		  );
-		  return result.one().count as number;
+		);
+		return result.one().count as number;
 	}
 
 	async getFlop(workspaceId: string, channelId: string, flop: string) {
@@ -254,9 +254,9 @@ const MESSAGE_HANDLERS = {
 	"it'll be a check for me": check,
 	"it's going to be a fold for me": fold,
 	"it'll be a fold for me": fold,
-	"drill gto": drillGto,
-	"i choose to drill gto": drillGto,
-	'donk': bet,
+	'drill gto': drillGto,
+	'i choose to drill gto': drillGto,
+	donk: bet,
 	'i choose to donk': bet,
 	d: showCards,
 	a: ass,
@@ -550,7 +550,7 @@ async function preBet(env, context, payload) {
 
 async function bet(env, context, payload) {
 	const messageText = payload.text.toLowerCase();
-	const betAmount = parseFloat(messageText.replace('i choose to', '').replace('bet', '').trim());
+	const betAmount = parseFloat(messageText.replace('i choose to', '').replace('bet', '').replace('donk', '').trim());
 
 	if (isNaN(betAmount) || betAmount <= 0) {
 		await context.say({ text: 'Invalid bet amount! Please use format: "bet {chips}"' });
@@ -773,7 +773,11 @@ async function sendGameEventMessages(env, context, game: TexasHoldem) {
 				const flopsDiscoveredPercentage = (flopCount / 22100) * 100;
 				const numberFormatter = new Intl.NumberFormat('en-US');
 				const percentFormatter = new Intl.NumberFormat('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
-				message = message + `\n${numberFormatter.format(flopCount)} flops discovered (${percentFormatter.format(flopsDiscoveredPercentage)}%), ${numberFormatter.format(22100 - flopCount)} remain`
+				message =
+					message +
+					`\n${numberFormatter.format(flopCount)} flops discovered (${percentFormatter.format(
+						flopsDiscoveredPercentage
+					)}%), ${numberFormatter.format(22100 - flopCount)} remain`;
 			} else {
 				const human = new Date(flop.createdAt).toLocaleDateString('en-US', {
 					year: 'numeric',
