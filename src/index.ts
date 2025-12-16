@@ -227,6 +227,7 @@ const MESSAGE_HANDLERS = {
 	rank: getGameState,
 	help: help,
 	poke: nudgePlayer,
+	"it'll be a poke for me": nudgePlayer,
 	seppuku: commitSeppuku,
 	':phone:': call,
 	chexk: check,
@@ -267,6 +268,7 @@ const MESSAGE_HANDLERS = {
 	tsa: preCheck,
 	flops: showFlops,
 	fsearch: searchFlops,
+	context: context,
 };
 
 async function handleMessage(env: Env, context, payload) {
@@ -298,6 +300,10 @@ async function getGameState(env, context, payload) {
 
 	game.getGameStateEvent();
 	await sendGameEventMessages(env, context, game);
+}
+
+async function context(env, context, payload) {
+	await context.say({ text: 'TODO: Marcus implement this' });
 }
 
 async function searchFlops(env, context, payload) {
