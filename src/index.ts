@@ -249,6 +249,7 @@ const MESSAGE_HANDLERS = {
 	'i choose to roll': rollDice,
 	'i choose to see my dards': showCards,
 	'i choose to cut my trash hand': fold,
+	'i choose to poke': nudgePlayer,
 	"its going to be a call for me": call,
 	"itll be a call for me": call,
 	"its gonna be a call for me": call,
@@ -267,15 +268,16 @@ const MESSAGE_HANDLERS = {
 	"its going to be a fold for me": fold,
 	"itll be a fold for me": fold,
 	"its gonna be a fold for me": fold,
-	"oh buddy i think im gonna go ahead and bet": bet,
-	"oh buddy i think im gonna go ahead and check": check,
-	"oh buddy i think im gonna go ahead and fold": fold,
-	"oh buddy i think im gonna go ahead and precall": preCall,
-	"oh buddy i think im gonna go ahead and precheck": preCheck,
-	"oh buddy i think im gonna go ahead and prefold": preFold,
-	"oh buddy i think im gonna go ahead and prebet": preBet,
-	"oh buddy i think im gonna go ahead and donk": bet,
-	"oh buddy i think im gonna go ahead and call": call,
+	"im gonna go ahead and bet": bet,
+	"im gonna go ahead and check": check,
+	"im gonna go ahead and fold": fold,
+	"im gonna go ahead and precall": preCall,
+	"im gonna go ahead and precheck": preCheck,
+	"im gonna go ahead and prefold": preFold,
+	"im gonna go ahead and prebet": preBet,
+	"im gonna go ahead and donk": bet,
+	"im gonna go ahead and call": call,
+	"im gonna go ahead and poke": nudgePlayer,
 	'drill gto': drillGto,
 	'i choose to drill gto': drillGto,
 	donk: bet,
@@ -297,7 +299,7 @@ async function handleMessage(env: Env, context, payload) {
 		return;
 	}
 
-	const messageText = payload.text.trim().toLowerCase().replace(/'/g, '');
+	const messageText = payload.text.trim().toLowerCase().replace(/'/g, '').replace(/oh+\s*buddy\s*/g, '');
 
 	if (messageText.includes('algo')) {
 		await context.say({ text: ALGO_MESSAGE });
