@@ -294,12 +294,16 @@ const MESSAGE_HANDLERS = {
 	context: context,
 };
 
+function cleanMessageText(messageText: string) {
+	return messageText.toLowerCase().replace(/'/g, '').replace(/oh+\s*buddy\s*/g, '').replace(/shi+/g, '').trim();
+}
+
 async function handleMessage(env: Env, context, payload) {
 	if (!isPostedMessageEvent(payload)) {
 		return;
 	}
 
-	const messageText = payload.text.toLowerCase().replace(/'/g, '').replace(/oh+\s*buddy\s*/g, '').replace(/shi+/g, ''.trim();
+	const messageText = cleanMessageText(payload.text);
 
 	if (messageText.includes('algo')) {
 		await context.say({ text: ALGO_MESSAGE });
@@ -578,8 +582,8 @@ async function preBet(env, context, payload) {
 }
 
 async function bet(env, context, payload) {
-	const messageText = payload.text.toLowerCase();
-	const betAmount = parseFloat(messageText.replace('i choose to', '').replace('oh buddy i think im gonna go ahead and', '').replace('bet', '').replace('donk', '').trim());
+	const messageText = cleanMessageText(payload.text);
+	const betAmount = parseFloat(messageText.replace('i choose to', '').replace('im gonna go ahead and', '').replace('bet', '').replace('donk', '').trim());
 
 	if (isNaN(betAmount) || betAmount <= 0) {
 		await context.say({ text: 'Invalid bet amount! Please use format: "bet {chips}"' });
