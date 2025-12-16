@@ -252,7 +252,7 @@ const MESSAGE_HANDLERS = {
 	"it'll be a call for me": call,
 	"it's going to be a check for me": check,
 	"it'll be a check for me": check,
-	"it' going to be a fold for me": "fold",
+	"it's going to be a fold for me": fold,
 	"it'll be a fold for me": fold,
 	"drill gto": drillGto,
 	"i choose to drill gto": drillGto,
