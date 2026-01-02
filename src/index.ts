@@ -393,7 +393,7 @@ async function ass(env, context, payload) {
 }
 
 async function drillGto(env, context, payload) {
-	await context.say({ text: `<@${context.userId}> is drilling GTO!` });
+	await context.say({ text: `<@${context.userId}> is drilling GTO! :drill-gto:` });
 }
 
 async function nudgePlayer(env, context, payload) {
