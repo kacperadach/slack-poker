@@ -265,6 +265,7 @@ const MESSAGE_HANDLERS = {
 	"its going to be a check for me": check,
 	"itll be a check for me": check,
 	"its gonna be a check for me": check,
+	"too rich for me": fold,
 	"its going to be a fold for me": fold,
 	"itll be a fold for me": fold,
 	"its gonna be a fold for me": fold,
