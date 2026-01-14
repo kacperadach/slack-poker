@@ -301,6 +301,7 @@ function cleanMessageText(messageText: string) {
 		.replace(/'/g, '')
 		.replace(/oh+\s*buddy\s*/g, '')
 		.replace(/shi+/g, '')
+		.replace(/fu+ck/g, '')
 		.trim();
 }
 
