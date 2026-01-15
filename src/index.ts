@@ -5,6 +5,8 @@ import { GameEvent } from './GameEvent';
 import { Player } from './Player';
 import { Card } from './Card';
 
+const { rankDescription, rankCards } = require('phe');
+
 /**
  * Welcome to Cloudflare Workers! This is your first Durable Objects application.
  *
@@ -337,7 +339,145 @@ async function getGameState(env, context, payload) {
 }
 
 async function context(env, context, payload) {
-	await context.say({ text: 'TODO: Marcus implement this' });
+	const game = await fetchGame(env, context);
+	if (!game) {
+		await context.client.chat.postEphemeral({
+			channel: context.channelId,
+			user: context.userId,
+			text: `No game exists! Type 'New Game'`,
+		});
+		return;
+	}
+
+	// Get game state
+	const gameState = game.getGameState();
+	let gameStateText = '';
+	switch (gameState) {
+		case GameState.PreFlop:
+			gameStateText = 'Pre-Flop';
+			break;
+		case GameState.Flop:
+			gameStateText = 'Flop';
+			break;
+		case GameState.Turn:
+			gameStateText = 'Turn';
+			break;
+		case GameState.River:
+			gameStateText = 'River';
+			break;
+		case GameState.WaitingForPlayers:
+			gameStateText = 'Waiting for Players';
+			break;
+	}
+
+	// Get current pot
+	const potSize = game.getCurrentPot();
+
+	// Find the player
+	const activePlayers = game.getActivePlayers();
+	const inactivePlayers = game.getInactivePlayers();
+	const activePlayer = activePlayers.find((p) => p.getId() === context.userId);
+	const inactivePlayer = inactivePlayers.find((p) => p.getId() === context.userId);
+
+	if (!activePlayer) {
+		await context.client.chat.postEphemeral({
+			channel: context.channelId,
+			user: context.userId,
+			text: `You are not in the game!`,
+		});
+		return;
+	}
+
+	if (inactivePlayer) {
+		await context.client.chat.postEphemeral({
+			channel: context.channelId,
+			user: context.userId,
+			text: `You are inactive. You are not at the table.`,
+		});
+		return;
+	}
+
+	const player = activePlayer;
+
+	// Determine if player can check or needs to call
+	const currentBetAmount = game.getCurrentBetAmount();
+	const playerCurrentBet = player.getCurrentBet();
+	const foldedPlayers = game.getFoldedPlayers();
+	const hasFolded = foldedPlayers.has(context.userId);
+
+	let actionText = '';
+	if (gameState === GameState.WaitingForPlayers) {
+		actionText = 'Game has not started yet';
+	} else if (hasFolded) {
+		actionText = 'You have folded';
+	} else if (currentBetAmount === 0 || playerCurrentBet >= currentBetAmount) {
+		actionText = 'You can check';
+	} else {
+		const amountToCall = currentBetAmount - playerCurrentBet;
+		actionText = `You must call ${amountToCall} chips (current bet: ${currentBetAmount})`;
+	}
+
+	// Get player's cards and community cards
+	const playerCards = game.getPlayerHand(context.userId);
+	const communityCards = game.getCommunityCards();
+
+	// Get turn information
+	const currentPlayer = game.getCurrentPlayer();
+	let turnText = '';
+	if (gameState === GameState.WaitingForPlayers) {
+		turnText = 'No active round';
+	} else if (currentPlayer && currentPlayer.getId() === context.userId) {
+		turnText = "It's your turn";
+	} else if (currentPlayer) {
+		turnText = `It's <@${currentPlayer.getId()}>'s turn`;
+	} else {
+		turnText = 'No current player';
+	}
+
+	// Build the message
+	let message = `*Game Context*\n\n`;
+	message += `*Game State:* ${gameStateText}\n`;
+	message += `*Pot Size:* ${potSize} chips\n`;
+	message += `*Turn:* ${turnText}\n`;
+	message += `*Action:* ${actionText}\n\n`;
+
+	if (playerCards && playerCards.length > 0) {
+		// Calculate hand description if there are community cards
+		let handDescription = '';
+		if (communityCards && communityCards.length > 0) {
+			const cardStrings = [...communityCards, ...playerCards].map((card) => {
+				const rank = card.getRank() === '10' ? 'T' : card.getRank().charAt(0);
+				const suit = card.getSuit().charAt(0).toLowerCase();
+				return `${rank}${suit}`;
+			});
+			handDescription = rankDescription[rankCards(cardStrings)];
+			if (handDescription == 'High Card') {
+				handDescription = 'Ass';
+			}
+		}
+
+		if (handDescription) {
+			message += `*You have ${handDescription}:*\n`;
+		} else {
+			message += `*Your Cards:*\n`;
+		}
+		message += `${playerCards.map((card) => card.toSlackString()).join(' ')}\n\n`;
+	} else {
+		message += `*Your Cards:* No cards yet\n\n`;
+	}
+
+	if (communityCards && communityCards.length > 0) {
+		message += `*Community Cards:*\n`;
+		message += `${communityCards.map((card) => card.toSlackString()).join(' ')}\n`;
+	} else {
+		message += `*Community Cards:* None yet`;
+	}
+
+	await context.client.chat.postEphemeral({
+		channel: context.channelId,
+		user: context.userId,
+		text: message,
+	});
 }
 
 async function searchFlops(env, context, payload) {
