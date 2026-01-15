@@ -286,6 +286,7 @@ const MESSAGE_HANDLERS = {
 	donk: bet,
 	'i choose to donk': bet,
 	d: showCards,
+	c: context,
 	a: ass,
 	cjecl: check,
 	prenh: preNH,
