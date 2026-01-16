@@ -1244,18 +1244,24 @@ export class TexasHoldem {
     const winnings = potSize / winners.length;
     winners.forEach((winner) => winner.player.addChips(winnings));
 
-    this.events.push(
-      new GameEvent("Community Cards:", this.getCommunityCards())
-    );
+    // If it's a sidepot with only 1 winner, don't show cards (like real poker - single player gets it without showing)
+    const shouldShowCards = !(isSidePot && winners.length === 1);
 
-    playerHands.forEach(({ player, hand }) => {
+    if (shouldShowCards) {
       this.events.push(
-        new GameEvent(
-          `${player.getId()} had ${hand.description}`,
-          player.getCards()
-        )
+        new GameEvent("Community Cards:", this.getCommunityCards())
       );
-    });
+
+      // Only show winning players' hands (losers can muck their cards)
+      winners.forEach(({ player, hand }) => {
+        this.events.push(
+          new GameEvent(
+            `${player.getId()} had ${hand.description}`,
+            player.getCards()
+          )
+        );
+      });
+    }
 
     if (isSidePot) {
       this.events.push(
