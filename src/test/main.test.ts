@@ -52,7 +52,259 @@ describe("Poker Durable Object", () => {
           name: string;
         }>("SELECT name FROM sqlite_master WHERE type='table'")
         .toArray();
-      expect(result).toEqual([{ name: "PokerGames" }, { name: "Flops" }]);
+      expect(result).toContainEqual({ name: "PokerGames" });
+      expect(result).toContainEqual({ name: "Flops" });
+      expect(result).toContainEqual({ name: "ActionLog" });
+    });
+  });
+
+  it("creates ActionLog index", async () => {
+    const id = env.POKER_DURABLE_OBJECT.idFromName("test-indexes");
+    const stub = env.POKER_DURABLE_OBJECT.get(id);
+
+    await runInDurableObject(stub, async (_instance, state) => {
+      const result = state.storage.sql
+        .exec<{
+          name: string;
+        }>(
+          "SELECT name FROM sqlite_master WHERE type='index' AND name LIKE 'idx_actionlog%'"
+        )
+        .toArray();
+      expect(result).toEqual([{ name: "idx_actionlog_lookup" }]);
+    });
+  });
+
+  it("logs actions to ActionLog table", async () => {
+    const workspaceId = "actionlog-test-workspace";
+    const channelId = "actionlog-test-channel";
+    const stub = getStub({ workspaceId, channelId });
+
+    await runInDurableObject(stub, async (instance) => {
+      // Log a series of actions with proper types
+      instance.logAction({
+        schemaVersion: 1,
+        workspaceId,
+        channelId,
+        timestamp: 1000,
+        actionType: "new_game",
+        messageText: "new game",
+        playerId: "player1",
+        smallBlind: 10,
+        bigBlind: 20,
+      });
+
+      instance.logAction({
+        schemaVersion: 1,
+        workspaceId,
+        channelId,
+        timestamp: 2000,
+        actionType: "join",
+        messageText: "join table",
+        playerId: "player1",
+      });
+
+      instance.logAction({
+        schemaVersion: 1,
+        workspaceId,
+        channelId,
+        timestamp: 3000,
+        actionType: "join",
+        messageText: "join table",
+        playerId: "player2",
+      });
+
+      instance.logAction({
+        schemaVersion: 1,
+        workspaceId,
+        channelId,
+        timestamp: 4000,
+        actionType: "buy_in",
+        messageText: "buy in 500",
+        playerId: "player1",
+        amount: 500,
+      });
+
+      // Retrieve and verify
+      const logs = instance.getActionLogs(workspaceId, channelId);
+
+      expect(logs.length).toBe(4);
+      expect(logs[0].data.actionType).toBe("new_game");
+      expect(logs[1].data.actionType).toBe("join");
+      expect(logs[2].data.actionType).toBe("join");
+      expect(logs[3].data.actionType).toBe("buy_in");
+
+      // Verify data is self-contained
+      expect(logs[0].data.workspaceId).toBe(workspaceId);
+      expect(logs[0].data.channelId).toBe(channelId);
+      expect(logs[0].data.timestamp).toBe(1000);
+      expect(logs[0].data.messageText).toBe("new game");
+
+      // Type-safe access using discriminated union
+      if (logs[3].data.actionType === "buy_in") {
+        expect(logs[3].data.amount).toBe(500);
+        expect(logs[3].data.messageText).toBe("buy in 500");
+      }
+    });
+  });
+
+  it("queries ActionLog with time range filters", async () => {
+    const workspaceId = "actionlog-filter-workspace";
+    const channelId = "actionlog-filter-channel";
+    const stub = getStub({ workspaceId, channelId });
+
+    await runInDurableObject(stub, async (instance) => {
+      // Log actions at different times using valid action types
+      instance.logAction({
+        schemaVersion: 1,
+        workspaceId,
+        channelId,
+        timestamp: 1000,
+        actionType: "check",
+        messageText: "check",
+        playerId: "player1",
+      });
+      instance.logAction({
+        schemaVersion: 1,
+        workspaceId,
+        channelId,
+        timestamp: 2000,
+        actionType: "call",
+        messageText: "call",
+        playerId: "player2",
+        amount: 50,
+      });
+      instance.logAction({
+        schemaVersion: 1,
+        workspaceId,
+        channelId,
+        timestamp: 3000,
+        actionType: "fold",
+        messageText: "fold",
+        playerId: "player3",
+      });
+      instance.logAction({
+        schemaVersion: 1,
+        workspaceId,
+        channelId,
+        timestamp: 4000,
+        actionType: "bet",
+        messageText: "bet 100",
+        playerId: "player1",
+        amount: 100,
+      });
+
+      // Filter by start time
+      const afterStart = instance.getActionLogs(workspaceId, channelId, {
+        startTime: 2500,
+      });
+      expect(afterStart.length).toBe(2);
+      expect(afterStart[0].data.actionType).toBe("fold");
+      expect(afterStart[1].data.actionType).toBe("bet");
+
+      // Filter by end time
+      const beforeEnd = instance.getActionLogs(workspaceId, channelId, {
+        endTime: 2500,
+      });
+      expect(beforeEnd.length).toBe(2);
+      expect(beforeEnd[0].data.actionType).toBe("check");
+      expect(beforeEnd[1].data.actionType).toBe("call");
+
+      // Filter by time range
+      const inRange = instance.getActionLogs(workspaceId, channelId, {
+        startTime: 1500,
+        endTime: 3500,
+      });
+      expect(inRange.length).toBe(2);
+      expect(inRange[0].data.actionType).toBe("call");
+      expect(inRange[1].data.actionType).toBe("fold");
+
+      // Limit and offset
+      const limited = instance.getActionLogs(workspaceId, channelId, {
+        limit: 2,
+      });
+      expect(limited.length).toBe(2);
+
+      const offsetted = instance.getActionLogs(workspaceId, channelId, {
+        limit: 2,
+        offset: 2,
+      });
+      expect(offsetted.length).toBe(2);
+      expect(offsetted[0].data.actionType).toBe("fold");
+    });
+  });
+
+  it("ActionLog stores complex round_start data", async () => {
+    const workspaceId = "actionlog-complex-workspace";
+    const channelId = "actionlog-complex-channel";
+    const stub = getStub({ workspaceId, channelId });
+
+    await runInDurableObject(stub, async (instance) => {
+      // Log a round_start with all the round initialization data
+      instance.logAction({
+        schemaVersion: 1,
+        workspaceId,
+        channelId,
+        timestamp: Date.now(),
+        actionType: "round_start",
+        messageText: "deal",
+        roundNumber: 1,
+        dealerPosition: 0,
+        playerOrder: ["player1", "player2"],
+        playerStacks: { player1: 500, player2: 500 },
+        playerCards: {
+          player1: ["Ah", "Kh"],
+          player2: ["2c", "7d"],
+        },
+        communityCards: ["Qs", "Jd", "10c", "5h", "2s"],
+        smallBlindPlayerId: "player2",
+        smallBlindAmount: 10,
+        bigBlindPlayerId: "player1",
+        bigBlindAmount: 20,
+      });
+
+      // Log some player actions
+      instance.logAction({
+        schemaVersion: 1,
+        workspaceId,
+        channelId,
+        timestamp: Date.now() + 1000,
+        actionType: "call",
+        messageText: "call",
+        playerId: "player2",
+        amount: 10,
+      });
+
+      instance.logAction({
+        schemaVersion: 1,
+        workspaceId,
+        channelId,
+        timestamp: Date.now() + 2000,
+        actionType: "check",
+        messageText: "check",
+        playerId: "player1",
+      });
+
+      const logs = instance.getActionLogs(workspaceId, channelId);
+      expect(logs.length).toBe(3);
+
+      // Verify round_start data preserved with type-safe access
+      const roundStart = logs[0].data;
+      expect(roundStart.actionType).toBe("round_start");
+
+      if (roundStart.actionType === "round_start") {
+        expect(roundStart.communityCards).toEqual([
+          "Qs",
+          "Jd",
+          "10c",
+          "5h",
+          "2s",
+        ]);
+        expect(roundStart.playerCards.player1).toEqual(["Ah", "Kh"]);
+        expect(roundStart.playerCards.player2).toEqual(["2c", "7d"]);
+        expect(roundStart.playerStacks).toEqual({ player1: 500, player2: 500 });
+        expect(roundStart.smallBlindPlayerId).toBe("player2");
+        expect(roundStart.bigBlindPlayerId).toBe("player1");
+      }
     });
   });
 

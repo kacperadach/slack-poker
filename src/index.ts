@@ -10,6 +10,7 @@ import { Card } from "./Card";
 // @ts-ignore phe is not typed
 import { rankDescription, rankCards } from "phe";
 import { userIdToName } from "./users";
+import type { ActionLogEntry } from "./ActionLog";
 
 /**
  * Welcome to Cloudflare Workers! This is your first Durable Objects application.
@@ -56,6 +57,21 @@ export class PokerDurableObject extends DurableObject<Env> {
 				createdAt INTEGER,
 				PRIMARY KEY (workspaceId, channelId, flop)
 			);
+		`);
+
+    this.sql.exec(`
+			CREATE TABLE IF NOT EXISTS ActionLog (
+				id INTEGER PRIMARY KEY AUTOINCREMENT,
+				workspaceId TEXT NOT NULL,
+				channelId TEXT NOT NULL,
+				timestamp INTEGER NOT NULL,
+				data JSON NOT NULL
+			);
+		`);
+
+    this.sql.exec(`
+			CREATE INDEX IF NOT EXISTS idx_actionlog_lookup
+			ON ActionLog (workspaceId, channelId, timestamp);
 		`);
   }
 
@@ -196,6 +212,121 @@ export class PokerDurableObject extends DurableObject<Env> {
       workspaceId,
       channelId
     );
+  }
+
+  /**
+   * Save game state and log action atomically.
+   * Both operations happen in the same DO request, ensuring consistency.
+   */
+  saveGameWithAction(
+    workspaceId: string,
+    channelId: string,
+    game: any,
+    action: ActionLogEntry
+  ): void {
+    // Save game state
+    this.sql.exec(
+      `
+			UPDATE PokerGames
+			SET game = ?
+			WHERE workspaceId = ? AND channelId = ?
+		`,
+      game,
+      workspaceId,
+      channelId
+    );
+
+    // Log the action
+    this.sql.exec(
+      `
+			INSERT INTO ActionLog (workspaceId, channelId, timestamp, data)
+			VALUES (?, ?, ?, ?)
+		`,
+      action.workspaceId,
+      action.channelId,
+      action.timestamp,
+      JSON.stringify(action)
+    );
+  }
+
+  /**
+   * Log an action to the immutable ActionLog.
+   * The data object should be self-contained with all relevant information.
+   * workspaceId, channelId, and timestamp are duplicated in columns for indexing
+   * and also stored in the JSON data for completeness.
+   *
+   * @param data - Typed action log entry (see ActionLog.ts for all types)
+   */
+  logAction(data: ActionLogEntry): void {
+    this.sql.exec(
+      `
+			INSERT INTO ActionLog (workspaceId, channelId, timestamp, data)
+			VALUES (?, ?, ?, ?)
+		`,
+      data.workspaceId,
+      data.channelId,
+      data.timestamp,
+      JSON.stringify(data)
+    );
+  }
+
+  /**
+   * Get action logs for a game, ordered by timestamp ascending.
+   * Returns typed ActionLogEntry objects for type-safe access.
+   */
+  getActionLogs(
+    workspaceId: string,
+    channelId: string,
+    options: {
+      limit?: number;
+      offset?: number;
+      startTime?: number;
+      endTime?: number;
+    } = {}
+  ): Array<{
+    id: number;
+    data: ActionLogEntry;
+  }> {
+    let query = `
+			SELECT id, data
+			FROM ActionLog
+			WHERE workspaceId = ? AND channelId = ?
+		`;
+    const params: (string | number)[] = [workspaceId, channelId];
+
+    if (options.startTime !== undefined) {
+      query += ` AND timestamp >= ?`;
+      params.push(options.startTime);
+    }
+
+    if (options.endTime !== undefined) {
+      query += ` AND timestamp <= ?`;
+      params.push(options.endTime);
+    }
+
+    query += ` ORDER BY timestamp ASC`;
+
+    if (options.limit) {
+      query += ` LIMIT ?`;
+      params.push(options.limit);
+    }
+
+    if (options.offset) {
+      query += ` OFFSET ?`;
+      params.push(options.offset);
+    }
+
+    const result = this.sql.exec(query, ...params);
+
+    const logs: Array<{ id: number; data: ActionLogEntry }> = [];
+    for (const row of result) {
+      logs.push({
+        id: row.id as number,
+        data: JSON.parse(row.data as string) as ActionLogEntry,
+      });
+    }
+
+    return logs;
   }
 }
 
@@ -754,7 +885,7 @@ export async function showCards(
 export async function preDeal(
   env: Env,
   context: SlackAppContextWithChannelId,
-  _payload: PostedMessage
+  payload: PostedMessage
 ) {
   const game = await fetchGame(env, context);
   if (!game) {
@@ -763,14 +894,22 @@ export async function preDeal(
   }
 
   game.preDeal(context.userId!);
-  await saveGame(env, context, game);
+  await saveGameWithAction(env, context, game, {
+    schemaVersion: 1,
+    workspaceId: context.teamId!,
+    channelId: context.channelId,
+    timestamp: Date.now(),
+    actionType: "pre_deal",
+    messageText: payload.text ?? "",
+    playerId: context.userId!,
+  });
   await sendGameEventMessages(env, context, game);
 }
 
 export async function preNH(
   env: Env,
   context: SlackAppContextWithChannelId,
-  _payload: PostedMessage
+  payload: PostedMessage
 ) {
   const game = await fetchGame(env, context);
   if (!game) {
@@ -779,14 +918,22 @@ export async function preNH(
   }
 
   game.preNH(context.userId!);
-  await saveGame(env, context, game);
+  await saveGameWithAction(env, context, game, {
+    schemaVersion: 1,
+    workspaceId: context.teamId!,
+    channelId: context.channelId,
+    timestamp: Date.now(),
+    actionType: "pre_deal",
+    messageText: payload.text ?? "",
+    playerId: context.userId!,
+  });
   await sendGameEventMessages(env, context, game);
 }
 
 export async function preAH(
   env: Env,
   context: SlackAppContextWithChannelId,
-  _payload: PostedMessage
+  payload: PostedMessage
 ) {
   const game = await fetchGame(env, context);
   if (!game) {
@@ -795,14 +942,22 @@ export async function preAH(
   }
 
   game.preAH(context.userId!);
-  await saveGame(env, context, game);
+  await saveGameWithAction(env, context, game, {
+    schemaVersion: 1,
+    workspaceId: context.teamId!,
+    channelId: context.channelId,
+    timestamp: Date.now(),
+    actionType: "pre_deal",
+    messageText: payload.text ?? "",
+    playerId: context.userId!,
+  });
   await sendGameEventMessages(env, context, game);
 }
 
 export async function preCheck(
   env: Env,
   context: SlackAppContextWithChannelId,
-  _payload: PostedMessage
+  payload: PostedMessage
 ) {
   const game = await fetchGame(env, context);
   if (!game) {
@@ -811,14 +966,23 @@ export async function preCheck(
   }
 
   game.preCheck(context.userId!);
-  await saveGame(env, context, game);
+  await saveGameWithAction(env, context, game, {
+    schemaVersion: 1,
+    workspaceId: context.teamId!,
+    channelId: context.channelId,
+    timestamp: Date.now(),
+    actionType: "pre_action",
+    messageText: payload.text ?? "",
+    playerId: context.userId!,
+    queuedAction: "check",
+  });
   await sendGameEventMessages(env, context, game);
 }
 
 export async function preFold(
   env: Env,
   context: SlackAppContextWithChannelId,
-  _payload: PostedMessage
+  payload: PostedMessage
 ) {
   const game = await fetchGame(env, context);
   if (!game) {
@@ -827,14 +991,23 @@ export async function preFold(
   }
 
   game.preFold(context.userId!);
-  await saveGame(env, context, game);
+  await saveGameWithAction(env, context, game, {
+    schemaVersion: 1,
+    workspaceId: context.teamId!,
+    channelId: context.channelId,
+    timestamp: Date.now(),
+    actionType: "pre_action",
+    messageText: payload.text ?? "",
+    playerId: context.userId!,
+    queuedAction: "fold",
+  });
   await sendGameEventMessages(env, context, game);
 }
 
 export async function preCall(
   env: Env,
   context: SlackAppContextWithChannelId,
-  _payload: PostedMessage
+  payload: PostedMessage
 ) {
   const game = await fetchGame(env, context);
   if (!game) {
@@ -843,7 +1016,16 @@ export async function preCall(
   }
 
   game.preCall(context.userId!);
-  await saveGame(env, context, game);
+  await saveGameWithAction(env, context, game, {
+    schemaVersion: 1,
+    workspaceId: context.teamId!,
+    channelId: context.channelId,
+    timestamp: Date.now(),
+    actionType: "pre_action",
+    messageText: payload.text ?? "",
+    playerId: context.userId!,
+    queuedAction: "call",
+  });
   await sendGameEventMessages(env, context, game);
 }
 
@@ -876,7 +1058,17 @@ export async function preBet(
   }
 
   game.preBet(context.userId!, betAmount);
-  await saveGame(env, context, game);
+  await saveGameWithAction(env, context, game, {
+    schemaVersion: 1,
+    workspaceId: context.teamId!,
+    channelId: context.channelId,
+    timestamp: Date.now(),
+    actionType: "pre_action",
+    messageText: payload.text ?? "",
+    playerId: context.userId!,
+    queuedAction: "bet",
+    amount: betAmount,
+  });
   await sendGameEventMessages(env, context, game);
 }
 
@@ -909,14 +1101,23 @@ export async function bet(
   }
 
   game.bet(context.userId!, betAmount);
-  await saveGame(env, context, game);
+  await saveGameWithAction(env, context, game, {
+    schemaVersion: 1,
+    workspaceId: context.teamId!,
+    channelId: context.channelId,
+    timestamp: Date.now(),
+    actionType: "bet",
+    messageText: payload.text ?? "",
+    playerId: context.userId!,
+    amount: betAmount,
+  });
   await sendGameEventMessages(env, context, game);
 }
 
 export async function call(
   env: Env,
   context: SlackAppContextWithChannelId,
-  _payload: PostedMessage
+  payload: PostedMessage
 ) {
   const game = await fetchGame(env, context);
   if (!game) {
@@ -924,15 +1125,27 @@ export async function call(
     return;
   }
 
+  const callAmount =
+    game.getCurrentBetAmount() -
+    (game.getCurrentPlayer()?.getCurrentBet() ?? 0);
   game.call(context.userId!);
-  await saveGame(env, context, game);
+  await saveGameWithAction(env, context, game, {
+    schemaVersion: 1,
+    workspaceId: context.teamId!,
+    channelId: context.channelId,
+    timestamp: Date.now(),
+    actionType: "call",
+    messageText: payload.text ?? "",
+    playerId: context.userId!,
+    amount: callAmount,
+  });
   await sendGameEventMessages(env, context, game);
 }
 
 export async function check(
   env: Env,
   context: SlackAppContextWithChannelId,
-  _payload: PostedMessage
+  payload: PostedMessage
 ) {
   const game = await fetchGame(env, context);
   if (!game) {
@@ -941,7 +1154,15 @@ export async function check(
   }
 
   game.check(context.userId!);
-  await saveGame(env, context, game);
+  await saveGameWithAction(env, context, game, {
+    schemaVersion: 1,
+    workspaceId: context.teamId!,
+    channelId: context.channelId,
+    timestamp: Date.now(),
+    actionType: "check",
+    messageText: payload.text ?? "",
+    playerId: context.userId!,
+  });
   await sendGameEventMessages(env, context, game);
 }
 
@@ -962,32 +1183,65 @@ export async function takeHerToThe(
   // Match exact phrases and validate game state
   if (messageText.startsWith("lets take her to the flop")) {
     if (currentState !== GameState.PreFlop) {
-      await context.say({ text: `We're not in pre-flop! Can't take her to the flop from here.` });
+      await context.say({
+        text: `We're not in pre-flop! Can't take her to the flop from here.`,
+      });
       return;
     }
   } else if (messageText.startsWith("lets take her to the turn")) {
     if (currentState !== GameState.Flop) {
-      await context.say({ text: `We're not on the flop! Can't take her to the turn from here.` });
+      await context.say({
+        text: `We're not on the flop! Can't take her to the turn from here.`,
+      });
       return;
     }
   } else if (messageText.startsWith("lets take her to the river")) {
     if (currentState !== GameState.Turn) {
-      await context.say({ text: `We're not on the turn! Can't take her to the river from here.` });
+      await context.say({
+        text: `We're not on the turn! Can't take her to the river from here.`,
+      });
       return;
     }
   } else {
     return;
   }
 
+  // Determine if this is a call or check
+  const currentBet = game.getCurrentBetAmount();
+  const playerBet = game.getCurrentPlayer()?.getCurrentBet() ?? 0;
+  const isCall = currentBet > playerBet;
+
   game.callOrCheck(context.userId!);
-  await saveGame(env, context, game);
+
+  if (isCall) {
+    await saveGameWithAction(env, context, game, {
+      schemaVersion: 1,
+      workspaceId: context.teamId!,
+      channelId: context.channelId,
+      timestamp: Date.now(),
+      actionType: "call",
+      messageText: payload.text ?? "",
+      playerId: context.userId!,
+      amount: currentBet - playerBet,
+    });
+  } else {
+    await saveGameWithAction(env, context, game, {
+      schemaVersion: 1,
+      workspaceId: context.teamId!,
+      channelId: context.channelId,
+      timestamp: Date.now(),
+      actionType: "check",
+      messageText: payload.text ?? "",
+      playerId: context.userId!,
+    });
+  }
   await sendGameEventMessages(env, context, game);
 }
 
 export async function fold(
   env: Env,
   context: SlackAppContextWithChannelId,
-  _payload: PostedMessage
+  payload: PostedMessage
 ) {
   const game = await fetchGame(env, context);
   if (!game) {
@@ -996,14 +1250,22 @@ export async function fold(
   }
 
   game.fold(context.userId!);
-  await saveGame(env, context, game);
+  await saveGameWithAction(env, context, game, {
+    schemaVersion: 1,
+    workspaceId: context.teamId!,
+    channelId: context.channelId,
+    timestamp: Date.now(),
+    actionType: "fold",
+    messageText: payload.text ?? "",
+    playerId: context.userId!,
+  });
   await sendGameEventMessages(env, context, game);
 }
 
 export async function startRound(
   env: Env,
   context: SlackAppContextWithChannelId,
-  _payload: PostedMessage
+  payload: PostedMessage
 ) {
   const game = await fetchGame(env, context);
   if (!game) {
@@ -1012,7 +1274,58 @@ export async function startRound(
   }
 
   game.startRound(context.userId!);
-  await saveGame(env, context, game);
+
+  // Build round_start action with all the round initialization data
+  const state = game.getState();
+  const playerOrder = state.activePlayers.map((p) => p.id);
+  const playerStacks: Record<string, number> = {};
+  const playerCards: Record<string, [string, string]> = {};
+
+  state.activePlayers.forEach((p) => {
+    playerStacks[p.id] = p.chips;
+    if (p.cards.length === 2) {
+      playerCards[p.id] = [p.cards[0].toString(), p.cards[1].toString()];
+    }
+  });
+
+  // Get community cards from deck (they're predetermined at shuffle)
+  const communityCards = state.communityCards.map((c) => c.toString());
+  // Pad to 5 cards if not all dealt yet - get from deck
+  const fullCommunityCards: [string, string, string, string, string] = [
+    communityCards[0] ?? "",
+    communityCards[1] ?? "",
+    communityCards[2] ?? "",
+    communityCards[3] ?? "",
+    communityCards[4] ?? "",
+  ];
+
+  // Determine small blind and big blind players
+  const numPlayers = playerOrder.length;
+  const dealerPos = state.dealerPosition;
+  const sbPos = numPlayers === 2 ? dealerPos : (dealerPos + 1) % numPlayers;
+  const bbPos =
+    numPlayers === 2
+      ? (dealerPos + 1) % numPlayers
+      : (dealerPos + 2) % numPlayers;
+
+  await saveGameWithAction(env, context, game, {
+    schemaVersion: 1,
+    workspaceId: context.teamId!,
+    channelId: context.channelId,
+    timestamp: Date.now(),
+    actionType: "round_start",
+    messageText: payload.text ?? "",
+    roundNumber: state.dealerPosition, // Use as proxy for round number for now
+    dealerPosition: state.dealerPosition,
+    playerOrder,
+    playerStacks,
+    playerCards,
+    communityCards: fullCommunityCards,
+    smallBlindPlayerId: playerOrder[sbPos] ?? "",
+    smallBlindAmount: state.smallBlind * 4, // Game uses 4x multiplier
+    bigBlindPlayerId: playerOrder[bbPos] ?? "",
+    bigBlindAmount: state.bigBlind * 4,
+  });
   await sendGameEventMessages(env, context, game);
 }
 
@@ -1070,7 +1383,7 @@ export async function showStacks(
 export async function cashOut(
   env: Env,
   context: SlackAppContextWithChannelId,
-  _payload: PostedMessage
+  payload: PostedMessage
 ) {
   const game = await fetchGame(env, context);
   if (!game) {
@@ -1078,8 +1391,20 @@ export async function cashOut(
     return;
   }
 
+  const allPlayers = [...game.getActivePlayers(), ...game.getInactivePlayers()];
+  const player = allPlayers.find((p) => p.getId() === context.userId);
+  const cashOutAmount = player?.getChips() ?? 0;
   game.cashOut(context.userId!);
-  await saveGame(env, context, game);
+  await saveGameWithAction(env, context, game, {
+    schemaVersion: 1,
+    workspaceId: context.teamId!,
+    channelId: context.channelId,
+    timestamp: Date.now(),
+    actionType: "cash_out",
+    messageText: payload.text ?? "",
+    playerId: context.userId!,
+    amount: cashOutAmount,
+  });
   await sendGameEventMessages(env, context, game);
 }
 
@@ -1105,14 +1430,23 @@ export async function buyIn(
   }
 
   game.buyIn(context.userId!, buyInAmount);
-  await saveGame(env, context, game);
+  await saveGameWithAction(env, context, game, {
+    schemaVersion: 1,
+    workspaceId: context.teamId!,
+    channelId: context.channelId,
+    timestamp: Date.now(),
+    actionType: "buy_in",
+    messageText: payload.text ?? "",
+    playerId: context.userId!,
+    amount: buyInAmount,
+  });
   await sendGameEventMessages(env, context, game);
 }
 
 export async function leaveGame(
   env: Env,
   context: SlackAppContextWithChannelId,
-  _payload: PostedMessage
+  payload: PostedMessage
 ) {
   const game = await fetchGame(env, context);
   if (!game) {
@@ -1121,14 +1455,22 @@ export async function leaveGame(
   }
 
   game.removePlayer(context.userId!);
-  await saveGame(env, context, game);
+  await saveGameWithAction(env, context, game, {
+    schemaVersion: 1,
+    workspaceId: context.teamId!,
+    channelId: context.channelId,
+    timestamp: Date.now(),
+    actionType: "leave",
+    messageText: payload.text ?? "",
+    playerId: context.userId!,
+  });
   await sendGameEventMessages(env, context, game);
 }
 
 export async function joinGame(
   env: Env,
   context: SlackAppContextWithChannelId,
-  _payload: PostedMessage
+  payload: PostedMessage
 ) {
   const game = await fetchGame(env, context);
   if (!game) {
@@ -1137,14 +1479,22 @@ export async function joinGame(
   }
 
   game.addPlayer(context.userId!);
-  await saveGame(env, context, game);
+  await saveGameWithAction(env, context, game, {
+    schemaVersion: 1,
+    workspaceId: context.teamId!,
+    channelId: context.channelId,
+    timestamp: Date.now(),
+    actionType: "join",
+    messageText: payload.text ?? "",
+    playerId: context.userId!,
+  });
   await sendGameEventMessages(env, context, game);
 }
 
 export async function newGame(
   env: Env,
   context: SlackAppContextWithChannelId,
-  _payload: PostedMessage
+  payload: PostedMessage
 ) {
   const game = await fetchGame(env, context);
   if (game) {
@@ -1162,11 +1512,24 @@ export async function newGame(
     }
   }
   const stub = getDurableObject(env, context);
+  const newGameInstance = new TexasHoldem();
   stub.createGame(
     context.teamId!,
     context.channelId,
-    JSON.stringify(new TexasHoldem().toJson())
+    JSON.stringify(newGameInstance.toJson())
   );
+  // Log the new_game action
+  stub.logAction({
+    schemaVersion: 1,
+    workspaceId: context.teamId!,
+    channelId: context.channelId,
+    timestamp: Date.now(),
+    actionType: "new_game",
+    messageText: payload.text ?? "",
+    playerId: context.userId!,
+    smallBlind: newGameInstance.getSmallBlind(),
+    bigBlind: newGameInstance.getBigBlind(),
+  });
   await context.say({ text: `New Poker Game created!` });
 }
 
@@ -1193,6 +1556,24 @@ async function saveGame(
   const stub = getDurableObject(env, context);
 
   await stub.saveGame(workspaceId, channelId, JSON.stringify(game.toJson()));
+}
+
+async function saveGameWithAction(
+  env: Env,
+  context: SlackAppContextWithChannelId,
+  game: TexasHoldem,
+  action: ActionLogEntry
+) {
+  const workspaceId = context.teamId!;
+  const channelId = context.channelId;
+  const stub = getDurableObject(env, context);
+
+  await stub.saveGameWithAction(
+    workspaceId,
+    channelId,
+    JSON.stringify(game.toJson()),
+    action
+  );
 }
 
 function getDurableObject(env: Env, context: SlackAppContextWithChannelId) {

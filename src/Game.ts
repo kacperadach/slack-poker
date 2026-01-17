@@ -1153,7 +1153,10 @@ export class TexasHoldem {
     }
 
     // If no bets or player has already matched, check. Otherwise call.
-    if (this.currentBetAmount === 0 || player.getCurrentBet() >= this.currentBetAmount) {
+    if (
+      this.currentBetAmount === 0 ||
+      player.getCurrentBet() >= this.currentBetAmount
+    ) {
       return this.check(playerId);
     } else {
       return this.call(playerId);
@@ -1514,7 +1517,6 @@ export class TexasHoldem {
       timeZone: "America/New_York",
     };
     const dayOfWeek = new Intl.DateTimeFormat("en-US", options).format(now);
-    console.log("dayOfWeek", dayOfWeek);
 
     let smallBlind = 10;
 
