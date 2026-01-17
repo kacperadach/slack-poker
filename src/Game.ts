@@ -127,11 +127,12 @@ export class TexasHoldem {
         this.events.push(
           new GameEvent(`${currentPlayer.getId()} is pre-moving!`)
         );
-        if (preMove?.move.toLowerCase() === "check") {
+        const move = preMove?.move.toLowerCase();
+        if (move === "check") {
           this.check(currentPlayer.getId());
-        } else if (preMove?.move.toLowerCase() === "fold") {
+        } else if (move === "fold") {
           this.fold(currentPlayer.getId());
-        } else if (preMove?.move.toLowerCase() === "call") {
+        } else if (move === "call") {
           const callAmount = preMove?.amount;
           if (!callAmount) {
             this.events.push(
@@ -151,7 +152,7 @@ export class TexasHoldem {
           }
 
           this.call(currentPlayer.getId());
-        } else if (preMove?.move.toLowerCase() === "bet") {
+        } else if (move === "bet") {
           const betAmount = preMove?.amount;
           if (!betAmount) {
             this.events.push(

@@ -149,59 +149,20 @@ export interface FoldActionV1 extends ActionLogBase {
 }
 
 // =============================================================================
-// Pre-Actions (Queued Actions)
-// =============================================================================
-
-export interface PreCheckActionV1 extends ActionLogBase {
-  actionType: "pre_check";
-  schemaVersion: 1;
-  /** Player queuing the check */
-  playerId: string;
-}
-
-export interface PreFoldActionV1 extends ActionLogBase {
-  actionType: "pre_fold";
-  schemaVersion: 1;
-  /** Player queuing the fold */
-  playerId: string;
-}
-
-export interface PreCallActionV1 extends ActionLogBase {
-  actionType: "pre_call";
-  schemaVersion: 1;
-  /** Player queuing the call */
-  playerId: string;
-  /** Expected call amount at time of queuing (used to detect if raise invalidates) */
-  expectedAmount: number;
-}
-
-export interface PreBetActionV1 extends ActionLogBase {
-  actionType: "pre_bet";
-  schemaVersion: 1;
-  /** Player queuing the bet */
-  playerId: string;
-  /** Intended bet amount */
-  amount: number;
-}
-
-export interface PreDealActionV1 extends ActionLogBase {
-  actionType: "pre_deal";
-  schemaVersion: 1;
-  /** Player queuing next deal */
-  playerId: string;
-}
-
-// =============================================================================
 // Utility Actions
 // =============================================================================
 
-export interface ShowCardsActionV1 extends ActionLogBase {
-  actionType: "show_cards";
+export interface MessageReceivedActionV1 extends ActionLogBase {
+  actionType: "message_received";
   schemaVersion: 1;
-  /** Player showing cards */
+  /** Player who sent the message */
   playerId: string;
-  /** Whether revealed to all (true) or just to self (false) */
-  revealedToAll: boolean;
+  /** Slack message timestamp (payload ts) */
+  slackMessageTs: string;
+  /** Normalized message text used for handler matching */
+  normalizedText: string;
+  /** Handler key that matched the message */
+  handlerKey: string;
 }
 
 // =============================================================================
@@ -224,14 +185,8 @@ export type ActionLogEntry =
   | CallActionV1
   | CheckActionV1
   | FoldActionV1
-  // Pre-actions
-  | PreCheckActionV1
-  | PreFoldActionV1
-  | PreCallActionV1
-  | PreBetActionV1
-  | PreDealActionV1
   // Utility
-  | ShowCardsActionV1;
+  | MessageReceivedActionV1;
 
 /** All action type strings */
 export type ActionType = ActionLogEntry["actionType"];
@@ -244,19 +199,6 @@ export function isPlayerAction(
   action: ActionLogEntry
 ): action is BetActionV1 | CallActionV1 | CheckActionV1 | FoldActionV1 {
   return ["bet", "call", "check", "fold"].includes(action.actionType);
-}
-
-export function isPreAction(
-  action: ActionLogEntry
-): action is
-  | PreCheckActionV1
-  | PreFoldActionV1
-  | PreCallActionV1
-  | PreBetActionV1
-  | PreDealActionV1 {
-  return ["pre_check", "pre_fold", "pre_call", "pre_bet", "pre_deal"].includes(
-    action.actionType
-  );
 }
 
 export function isPlayerManagementAction(
@@ -309,28 +251,10 @@ export function isFold(action: ActionLike): action is FoldActionV1 {
   return action.actionType === "fold";
 }
 
-export function isPreCheck(action: ActionLike): action is PreCheckActionV1 {
-  return action.actionType === "pre_check";
-}
-
-export function isPreFold(action: ActionLike): action is PreFoldActionV1 {
-  return action.actionType === "pre_fold";
-}
-
-export function isPreCall(action: ActionLike): action is PreCallActionV1 {
-  return action.actionType === "pre_call";
-}
-
-export function isPreBet(action: ActionLike): action is PreBetActionV1 {
-  return action.actionType === "pre_bet";
-}
-
-export function isPreDeal(action: ActionLike): action is PreDealActionV1 {
-  return action.actionType === "pre_deal";
-}
-
-export function isShowCards(action: ActionLike): action is ShowCardsActionV1 {
-  return action.actionType === "show_cards";
+export function isMessageReceived(
+  action: ActionLike
+): action is MessageReceivedActionV1 {
+  return action.actionType === "message_received";
 }
 
 // Assertion helpers - throw if wrong type, return narrowed type
@@ -393,39 +317,11 @@ export function assertFold(action: ActionLike): FoldActionV1 {
   return action;
 }
 
-export function assertPreCheck(action: ActionLike): PreCheckActionV1 {
-  if (!isPreCheck(action))
-    throw new Error(`Expected pre_check, got ${action.actionType}`);
-  return action;
-}
-
-export function assertPreFold(action: ActionLike): PreFoldActionV1 {
-  if (!isPreFold(action))
-    throw new Error(`Expected pre_fold, got ${action.actionType}`);
-  return action;
-}
-
-export function assertPreCall(action: ActionLike): PreCallActionV1 {
-  if (!isPreCall(action))
-    throw new Error(`Expected pre_call, got ${action.actionType}`);
-  return action;
-}
-
-export function assertPreBet(action: ActionLike): PreBetActionV1 {
-  if (!isPreBet(action))
-    throw new Error(`Expected pre_bet, got ${action.actionType}`);
-  return action;
-}
-
-export function assertPreDeal(action: ActionLike): PreDealActionV1 {
-  if (!isPreDeal(action))
-    throw new Error(`Expected pre_deal, got ${action.actionType}`);
-  return action;
-}
-
-export function assertShowCards(action: ActionLike): ShowCardsActionV1 {
-  if (!isShowCards(action))
-    throw new Error(`Expected show_cards, got ${action.actionType}`);
+export function assertMessageReceived(
+  action: ActionLike
+): MessageReceivedActionV1 {
+  if (!isMessageReceived(action))
+    throw new Error(`Expected message_received, got ${action.actionType}`);
   return action;
 }
 
@@ -462,10 +358,5 @@ export const ALL_ACTION_TYPES: ActionType[] = [
   "call",
   "check",
   "fold",
-  "pre_check",
-  "pre_fold",
-  "pre_call",
-  "pre_bet",
-  "pre_deal",
-  "show_cards",
+  "message_received",
 ];

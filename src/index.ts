@@ -7,10 +7,16 @@ import {
 } from "slack-cloudflare-workers";
 import { GameState, TexasHoldem } from "./Game";
 import { Card } from "./Card";
+import type { GameEvent } from "./GameEvent";
 // @ts-ignore phe is not typed
 import { rankDescription, rankCards } from "phe";
 import { userIdToName } from "./users";
-import type { ActionLogEntry } from "./ActionLog";
+import type {
+  ActionLogEntry,
+  MessageReceivedActionV1,
+  NewGameActionV1,
+  RoundStartActionV1,
+} from "./ActionLog";
 
 /**
  * Welcome to Cloudflare Workers! This is your first Durable Objects application.
@@ -199,6 +205,124 @@ export class PokerDurableObject extends DurableObject<Env> {
     }
 
     return JSON.parse(game.value.game as string);
+  }
+
+  async newGameWithAction(data: {
+    workspaceId: string;
+    channelId: string;
+    playerId: string;
+    messageText: string;
+    normalizedText: string;
+    handlerKey: string;
+    slackMessageTs: string;
+    timestamp: number;
+  }): Promise<{ ok: true } | { ok: false; blockingPlayerId: string }> {
+    const existing = await this.fetchGame(data.workspaceId, data.channelId);
+    if (existing) {
+      const game = TexasHoldem.fromJson(existing);
+      const allPlayers = [
+        ...game.getActivePlayers(),
+        ...game.getInactivePlayers(),
+      ];
+      const blockingPlayer = allPlayers.find(
+        (player) => player.getChips() !== 0
+      );
+      if (blockingPlayer) {
+        return { ok: false, blockingPlayerId: blockingPlayer.getId() };
+      }
+    }
+
+    const newGameInstance = new TexasHoldem();
+    this.createGame(
+      data.workspaceId,
+      data.channelId,
+      JSON.stringify(newGameInstance.toJson())
+    );
+
+    const messageReceivedAction: MessageReceivedActionV1 = {
+      schemaVersion: 1,
+      workspaceId: data.workspaceId,
+      channelId: data.channelId,
+      timestamp: data.timestamp,
+      actionType: "message_received",
+      messageText: data.messageText,
+      playerId: data.playerId,
+      slackMessageTs: data.slackMessageTs,
+      normalizedText: data.normalizedText,
+      handlerKey: data.handlerKey,
+    };
+    this.logAction(messageReceivedAction);
+
+    const newGameAction: NewGameActionV1 = {
+      schemaVersion: 1,
+      workspaceId: data.workspaceId,
+      channelId: data.channelId,
+      timestamp: Date.now(),
+      actionType: "new_game",
+      messageText: data.messageText,
+      playerId: data.playerId,
+      smallBlind: newGameInstance.getSmallBlind(),
+      bigBlind: newGameInstance.getBigBlind(),
+    };
+    this.logAction(newGameAction);
+
+    return { ok: true };
+  }
+
+  async joinGameWithAction(data: {
+    workspaceId: string;
+    channelId: string;
+    playerId: string;
+    messageText: string;
+    normalizedText: string;
+    handlerKey: string;
+    slackMessageTs: string;
+    timestamp: number;
+  }): Promise<
+    | { ok: true; events: ReturnType<GameEvent["toJson"]>[] }
+    | { ok: false; reason: "no_game" }
+  > {
+    const existing = await this.fetchGame(data.workspaceId, data.channelId);
+    if (!existing) {
+      return { ok: false, reason: "no_game" };
+    }
+
+    const game = TexasHoldem.fromJson(existing);
+    game.addPlayer(data.playerId);
+    const events = game.getEvents().map((event) => event.toJson());
+
+    const messageReceivedAction: MessageReceivedActionV1 = {
+      schemaVersion: 1,
+      workspaceId: data.workspaceId,
+      channelId: data.channelId,
+      timestamp: data.timestamp,
+      actionType: "message_received",
+      messageText: data.messageText,
+      playerId: data.playerId,
+      slackMessageTs: data.slackMessageTs,
+      normalizedText: data.normalizedText,
+      handlerKey: data.handlerKey,
+    };
+    this.logAction(messageReceivedAction);
+
+    const joinAction: ActionLogEntry = {
+      schemaVersion: 1,
+      workspaceId: data.workspaceId,
+      channelId: data.channelId,
+      timestamp: Date.now(),
+      actionType: "join",
+      messageText: data.messageText,
+      playerId: data.playerId,
+    };
+
+    this.saveGameWithAction(
+      data.workspaceId,
+      data.channelId,
+      JSON.stringify(game.toJson()),
+      joinAction
+    );
+
+    return { ok: true, events };
   }
 
   saveGame(workspaceId: string, channelId: string, game: any): void {
@@ -471,6 +595,72 @@ function cleanMessageText(messageText: string) {
     .trim();
 }
 
+type HandlerMeta = {
+  normalizedText: string;
+  handlerKey: string;
+  slackMessageTs: string;
+  messageText: string;
+  timestamp: number;
+};
+
+type GameEventJson = ReturnType<GameEvent["toJson"]>;
+
+function buildRoundStartAction(
+  game: TexasHoldem,
+  context: SlackAppContextWithChannelId,
+  payload: PostedMessage
+): RoundStartActionV1 {
+  const state = game.getState();
+  const playerOrder = state.activePlayers.map((p) => p.id);
+  const playerStacks: Record<string, number> = {};
+  const playerCards: Record<string, [string, string]> = {};
+
+  state.activePlayers.forEach((p) => {
+    playerStacks[p.id] = p.chips;
+    if (p.cards.length === 2) {
+      playerCards[p.id] = [p.cards[0].toString(), p.cards[1].toString()];
+    }
+  });
+
+  // Get community cards from deck (they're predetermined at shuffle)
+  const communityCards = state.communityCards.map((c) => c.toString());
+  // Pad to 5 cards if not all dealt yet - get from deck
+  const fullCommunityCards: [string, string, string, string, string] = [
+    communityCards[0] ?? "",
+    communityCards[1] ?? "",
+    communityCards[2] ?? "",
+    communityCards[3] ?? "",
+    communityCards[4] ?? "",
+  ];
+
+  // Determine small blind and big blind players
+  const numPlayers = playerOrder.length;
+  const dealerPos = state.dealerPosition;
+  const sbPos = numPlayers === 2 ? dealerPos : (dealerPos + 1) % numPlayers;
+  const bbPos =
+    numPlayers === 2
+      ? (dealerPos + 1) % numPlayers
+      : (dealerPos + 2) % numPlayers;
+
+  return {
+    schemaVersion: 1,
+    workspaceId: context.teamId!,
+    channelId: context.channelId,
+    timestamp: Date.now(),
+    actionType: "round_start",
+    messageText: payload.text ?? "",
+    dealerPosition: state.dealerPosition,
+    playerOrder,
+    playerStacks,
+    playerCards,
+    communityCards: fullCommunityCards,
+    smallBlindPlayerId: playerOrder[sbPos] ?? "",
+    smallBlindAmount: state.smallBlind,
+    bigBlindPlayerId: playerOrder[bbPos] ?? "",
+    bigBlindAmount: state.bigBlind,
+  };
+}
+
 async function handleMessage(
   env: Env,
   context: SlackAppContextWithChannelId,
@@ -489,7 +679,30 @@ async function handleMessage(
 
   for (const [key, handler] of Object.entries(MESSAGE_HANDLERS)) {
     if (messageText.startsWith(key)) {
-      await handler(env, context, payload);
+      const meta: HandlerMeta = {
+        normalizedText: messageText,
+        handlerKey: key,
+        slackMessageTs: payload.ts ?? "",
+        messageText: payload.text ?? "",
+        timestamp: Date.now(),
+      };
+      if (handler !== newGame && handler !== joinGame) {
+        const stub = getDurableObject(env, context);
+        const messageAction: MessageReceivedActionV1 = {
+          schemaVersion: 1,
+          workspaceId: context.teamId!,
+          channelId: context.channelId,
+          timestamp: meta.timestamp,
+          actionType: "message_received",
+          messageText: meta.messageText,
+          playerId: context.userId!,
+          slackMessageTs: meta.slackMessageTs,
+          normalizedText: meta.normalizedText,
+          handlerKey: meta.handlerKey,
+        };
+        stub.logAction(messageAction);
+      }
+      await (handler as any)(env, context, payload, meta);
       return;
     }
   }
@@ -893,16 +1106,14 @@ export async function preDeal(
     return;
   }
 
+  const wasWaiting = game.getGameState() === GameState.WaitingForPlayers;
   game.preDeal(context.userId!);
-  await saveGameWithAction(env, context, game, {
-    schemaVersion: 1,
-    workspaceId: context.teamId!,
-    channelId: context.channelId,
-    timestamp: Date.now(),
-    actionType: "pre_deal",
-    messageText: payload.text ?? "",
-    playerId: context.userId!,
-  });
+  if (wasWaiting && game.getGameState() !== GameState.WaitingForPlayers) {
+    const roundStartAction = buildRoundStartAction(game, context, payload);
+    await saveGameWithAction(env, context, game, roundStartAction);
+  } else {
+    await saveGame(env, context, game);
+  }
   await sendGameEventMessages(env, context, game);
 }
 
@@ -918,15 +1129,7 @@ export async function preNH(
   }
 
   game.preNH(context.userId!);
-  await saveGameWithAction(env, context, game, {
-    schemaVersion: 1,
-    workspaceId: context.teamId!,
-    channelId: context.channelId,
-    timestamp: Date.now(),
-    actionType: "pre_deal",
-    messageText: payload.text ?? "",
-    playerId: context.userId!,
-  });
+  await saveGame(env, context, game);
   await sendGameEventMessages(env, context, game);
 }
 
@@ -942,15 +1145,7 @@ export async function preAH(
   }
 
   game.preAH(context.userId!);
-  await saveGameWithAction(env, context, game, {
-    schemaVersion: 1,
-    workspaceId: context.teamId!,
-    channelId: context.channelId,
-    timestamp: Date.now(),
-    actionType: "pre_deal",
-    messageText: payload.text ?? "",
-    playerId: context.userId!,
-  });
+  await saveGame(env, context, game);
   await sendGameEventMessages(env, context, game);
 }
 
@@ -966,15 +1161,7 @@ export async function preCheck(
   }
 
   game.preCheck(context.userId!);
-  await saveGameWithAction(env, context, game, {
-    schemaVersion: 1,
-    workspaceId: context.teamId!,
-    channelId: context.channelId,
-    timestamp: Date.now(),
-    actionType: "pre_check",
-    messageText: payload.text ?? "",
-    playerId: context.userId!,
-  });
+  await saveGame(env, context, game);
   await sendGameEventMessages(env, context, game);
 }
 
@@ -990,15 +1177,7 @@ export async function preFold(
   }
 
   game.preFold(context.userId!);
-  await saveGameWithAction(env, context, game, {
-    schemaVersion: 1,
-    workspaceId: context.teamId!,
-    channelId: context.channelId,
-    timestamp: Date.now(),
-    actionType: "pre_fold",
-    messageText: payload.text ?? "",
-    playerId: context.userId!,
-  });
+  await saveGame(env, context, game);
   await sendGameEventMessages(env, context, game);
 }
 
@@ -1013,19 +1192,8 @@ export async function preCall(
     return;
   }
 
-  // Capture expected call amount before the action
-  const expectedAmount = game.getCurrentBetAmount();
   game.preCall(context.userId!);
-  await saveGameWithAction(env, context, game, {
-    schemaVersion: 1,
-    workspaceId: context.teamId!,
-    channelId: context.channelId,
-    timestamp: Date.now(),
-    actionType: "pre_call",
-    messageText: payload.text ?? "",
-    playerId: context.userId!,
-    expectedAmount,
-  });
+  await saveGame(env, context, game);
   await sendGameEventMessages(env, context, game);
 }
 
@@ -1058,16 +1226,7 @@ export async function preBet(
   }
 
   game.preBet(context.userId!, betAmount);
-  await saveGameWithAction(env, context, game, {
-    schemaVersion: 1,
-    workspaceId: context.teamId!,
-    channelId: context.channelId,
-    timestamp: Date.now(),
-    actionType: "pre_bet",
-    messageText: payload.text ?? "",
-    playerId: context.userId!,
-    amount: betAmount,
-  });
+  await saveGame(env, context, game);
   await sendGameEventMessages(env, context, game);
 }
 
@@ -1273,57 +1432,8 @@ export async function startRound(
   }
 
   game.startRound(context.userId!);
-
-  // Build round_start action with all the round initialization data
-  const state = game.getState();
-  const playerOrder = state.activePlayers.map((p) => p.id);
-  const playerStacks: Record<string, number> = {};
-  const playerCards: Record<string, [string, string]> = {};
-
-  state.activePlayers.forEach((p) => {
-    playerStacks[p.id] = p.chips;
-    if (p.cards.length === 2) {
-      playerCards[p.id] = [p.cards[0].toString(), p.cards[1].toString()];
-    }
-  });
-
-  // Get community cards from deck (they're predetermined at shuffle)
-  const communityCards = state.communityCards.map((c) => c.toString());
-  // Pad to 5 cards if not all dealt yet - get from deck
-  const fullCommunityCards: [string, string, string, string, string] = [
-    communityCards[0] ?? "",
-    communityCards[1] ?? "",
-    communityCards[2] ?? "",
-    communityCards[3] ?? "",
-    communityCards[4] ?? "",
-  ];
-
-  // Determine small blind and big blind players
-  const numPlayers = playerOrder.length;
-  const dealerPos = state.dealerPosition;
-  const sbPos = numPlayers === 2 ? dealerPos : (dealerPos + 1) % numPlayers;
-  const bbPos =
-    numPlayers === 2
-      ? (dealerPos + 1) % numPlayers
-      : (dealerPos + 2) % numPlayers;
-
-  await saveGameWithAction(env, context, game, {
-    schemaVersion: 1,
-    workspaceId: context.teamId!,
-    channelId: context.channelId,
-    timestamp: Date.now(),
-    actionType: "round_start",
-    messageText: payload.text ?? "",
-    dealerPosition: state.dealerPosition,
-    playerOrder,
-    playerStacks,
-    playerCards,
-    communityCards: fullCommunityCards,
-    smallBlindPlayerId: playerOrder[sbPos] ?? "",
-    smallBlindAmount: state.smallBlind,
-    bigBlindPlayerId: playerOrder[bbPos] ?? "",
-    bigBlindAmount: state.bigBlind,
-  });
+  const roundStartAction = buildRoundStartAction(game, context, payload);
+  await saveGameWithAction(env, context, game, roundStartAction);
   await sendGameEventMessages(env, context, game);
 }
 
@@ -1468,66 +1578,69 @@ export async function leaveGame(
 export async function joinGame(
   env: Env,
   context: SlackAppContextWithChannelId,
-  payload: PostedMessage
+  payload: PostedMessage,
+  meta?: HandlerMeta
 ) {
-  const game = await fetchGame(env, context);
-  if (!game) {
+  const stub = getDurableObject(env, context);
+  const messageText = meta?.messageText ?? payload.text ?? "";
+  const normalizedText = meta?.normalizedText ?? cleanMessageText(messageText);
+  const handlerKey = meta?.handlerKey ?? "join table";
+  const slackMessageTs = meta?.slackMessageTs ?? payload.ts ?? "";
+  const timestamp = meta?.timestamp ?? Date.now();
+
+  const result = await stub.joinGameWithAction({
+    workspaceId: context.teamId!,
+    channelId: context.channelId,
+    playerId: context.userId!,
+    messageText,
+    normalizedText,
+    handlerKey,
+    slackMessageTs,
+    timestamp,
+  });
+
+  if (!result.ok) {
     await context.say({ text: `No game exists! Type 'New Game'` });
     return;
   }
 
-  game.addPlayer(context.userId!);
-  await saveGameWithAction(env, context, game, {
-    schemaVersion: 1,
-    workspaceId: context.teamId!,
-    channelId: context.channelId,
-    timestamp: Date.now(),
-    actionType: "join",
-    messageText: payload.text ?? "",
-    playerId: context.userId!,
-  });
-  await sendGameEventMessages(env, context, game);
+  const game = await fetchGame(env, context);
+  if (game) {
+    await sendEventJsonMessages(env, context, game, result.events);
+  }
 }
 
 export async function newGame(
   env: Env,
   context: SlackAppContextWithChannelId,
-  payload: PostedMessage
+  payload: PostedMessage,
+  meta?: HandlerMeta
 ) {
-  const game = await fetchGame(env, context);
-  if (game) {
-    const allPlayers = [
-      ...game.getActivePlayers(),
-      ...game.getInactivePlayers(),
-    ];
-    for (const player of allPlayers) {
-      if (player.getChips() !== 0) {
-        await context.say({
-          text: `Cannot start new game - ${player.getId()} still has chips!`,
-        });
-        return;
-      }
-    }
-  }
   const stub = getDurableObject(env, context);
-  const newGameInstance = new TexasHoldem();
-  stub.createGame(
-    context.teamId!,
-    context.channelId,
-    JSON.stringify(newGameInstance.toJson())
-  );
-  // Log the new_game action
-  stub.logAction({
-    schemaVersion: 1,
+  const messageText = meta?.messageText ?? payload.text ?? "";
+  const normalizedText = meta?.normalizedText ?? cleanMessageText(messageText);
+  const handlerKey = meta?.handlerKey ?? "new game";
+  const slackMessageTs = meta?.slackMessageTs ?? payload.ts ?? "";
+  const timestamp = meta?.timestamp ?? Date.now();
+
+  const result = await stub.newGameWithAction({
     workspaceId: context.teamId!,
     channelId: context.channelId,
-    timestamp: Date.now(),
-    actionType: "new_game",
-    messageText: payload.text ?? "",
     playerId: context.userId!,
-    smallBlind: newGameInstance.getSmallBlind(),
-    bigBlind: newGameInstance.getBigBlind(),
+    messageText,
+    normalizedText,
+    handlerKey,
+    slackMessageTs,
+    timestamp,
   });
+
+  if (!result.ok) {
+    await context.say({
+      text: `Cannot start new game - ${result.blockingPlayerId} still has chips!`,
+    });
+    return;
+  }
+
   await context.say({ text: `New Poker Game created!` });
 }
 
@@ -1572,6 +1685,60 @@ async function saveGameWithAction(
     JSON.stringify(game.toJson()),
     action
   );
+}
+
+async function sendEventJsonMessages(
+  env: Env,
+  context: SlackAppContextWithChannelId,
+  game: TexasHoldem,
+  events: GameEventJson[]
+) {
+  // Filter turn messages to keep only the last one
+  let lastTurnMessageIndex = -1;
+  events.forEach((event, index) => {
+    if (event.isTurnMessage) {
+      lastTurnMessageIndex = index;
+    }
+  });
+  const filteredEvents = events.filter(
+    (event, index) => !event.isTurnMessage || index === lastTurnMessageIndex
+  );
+
+  const playerIds = game.getActivePlayers().map((player) => player.getId());
+  const inactivePlayerIds = game
+    .getInactivePlayers()
+    .map((player) => player.getId());
+  playerIds.push(...inactivePlayerIds);
+
+  let publicMessages: string[] = [];
+
+  for (const event of filteredEvents) {
+    let message = event.description;
+    if (event.cards && event.cards.length > 0) {
+      const cardStrings = event.cards.map((card) =>
+        Card.fromJson(card).toSlackString()
+      );
+      message += `\n${cardStrings.join(" ")}`;
+    }
+
+    playerIds.forEach((playerId) => {
+      message = message.replace(new RegExp(playerId, "g"), `<@${playerId}>`);
+    });
+
+    if (event.ephemeral) {
+      await context.client.chat.postEphemeral({
+        channel: context.channelId,
+        user: event.playerId,
+        text: message,
+      });
+    } else {
+      publicMessages.push(message);
+    }
+  }
+
+  if (publicMessages.length > 0) {
+    await context.say({ text: publicMessages.join("\n") });
+  }
 }
 
 function getDurableObject(env: Env, context: SlackAppContextWithChannelId) {

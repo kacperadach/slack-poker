@@ -33,6 +33,7 @@ import {
 } from "slack-cloudflare-workers";
 import {
   assertNewGame,
+  assertMessageReceived,
   assertJoin,
   assertBuyIn,
   assertRoundStart,
@@ -40,10 +41,37 @@ import {
   assertCall,
   assertCheck,
   assertFold,
-  assertPreCheck,
-  assertPreFold,
-  assertPreCall,
 } from "../ActionLog";
+
+async function getActionLogSnapshot(
+  stub: DurableObjectStub,
+  workspaceId: string,
+  channelId: string
+) {
+  return await runInDurableObject(stub, async (_instance, state) => {
+    const result = state.storage.sql
+      .exec<{
+        id: number;
+        workspaceId: string;
+        channelId: string;
+        timestamp: number;
+        data: string;
+      }>(
+        "SELECT id, workspaceId, channelId, timestamp, data FROM ActionLog WHERE workspaceId = ? AND channelId = ? ORDER BY id",
+        workspaceId,
+        channelId
+      )
+      .toArray();
+
+    return result.map((row) => ({
+      id: row.id,
+      workspaceId: row.workspaceId,
+      channelId: row.channelId,
+      timestamp: row.timestamp,
+      data: JSON.parse(row.data),
+    }));
+  });
+}
 
 beforeAll(() => {
   vi.useFakeTimers();
@@ -258,7 +286,6 @@ describe("Poker Durable Object", () => {
         timestamp: Date.now(),
         actionType: "round_start",
         messageText: "deal",
-        roundNumber: 1,
         dealerPosition: 0,
         playerOrder: ["player1", "player2"],
         playerStacks: { player1: 500, player2: 500 },
@@ -1074,8 +1101,11 @@ describe("Poker Durable Object", () => {
     // Verify the sequence of actions
     const actionTypes = actionLogs.map((log) => log.data.actionType);
     expect(actionTypes).toEqual([
+      "message_received", // new_game message
       "new_game", // newGame
+      "message_received", // join alice message
       "join", // alice joins
+      "message_received", // join bob message
       "join", // bob joins
       "buy_in", // alice buys in 500
       "buy_in", // bob buys in 500
@@ -1089,52 +1119,59 @@ describe("Poker Durable Object", () => {
     ]);
 
     // Verify specific action details using type guards
-    const newGameAction = assertNewGame(actionLogs[0].data);
+    const newGameMessage = assertMessageReceived(actionLogs[0].data);
+    expect(newGameMessage.handlerKey).toBe("new game");
+    const joinAliceMessage = assertMessageReceived(actionLogs[2].data);
+    expect(joinAliceMessage.handlerKey).toBe("join table");
+    const joinBobMessage = assertMessageReceived(actionLogs[4].data);
+    expect(joinBobMessage.handlerKey).toBe("join table");
+
+    const newGameAction = assertNewGame(actionLogs[1].data);
     expect(newGameAction.workspaceId).toBe(workspaceId);
     expect(newGameAction.channelId).toBe(channelId);
     expect(newGameAction.schemaVersion).toBe(1);
 
-    const joinAlice = assertJoin(actionLogs[1].data);
+    const joinAlice = assertJoin(actionLogs[3].data);
     expect(joinAlice.playerId).toBe("alice");
 
-    const joinBob = assertJoin(actionLogs[2].data);
+    const joinBob = assertJoin(actionLogs[5].data);
     expect(joinBob.playerId).toBe("bob");
 
-    const buyInAlice = assertBuyIn(actionLogs[3].data);
+    const buyInAlice = assertBuyIn(actionLogs[6].data);
     expect(buyInAlice.playerId).toBe("alice");
     expect(buyInAlice.amount).toBe(500);
 
-    const buyInBob = assertBuyIn(actionLogs[4].data);
+    const buyInBob = assertBuyIn(actionLogs[7].data);
     expect(buyInBob.playerId).toBe("bob");
     expect(buyInBob.amount).toBe(500);
 
-    const roundStart = assertRoundStart(actionLogs[5].data);
+    const roundStart = assertRoundStart(actionLogs[8].data);
     expect(roundStart.playerOrder).toContain("alice");
     expect(roundStart.playerOrder).toContain("bob");
     expect(roundStart.playerStacks).toEqual({ alice: 420, bob: 460 }); // after blinds
 
-    const bobBet160 = assertBet(actionLogs[6].data);
+    const bobBet160 = assertBet(actionLogs[9].data);
     expect(bobBet160.playerId).toBe("bob");
     expect(bobBet160.amount).toBe(160);
     expect(bobBet160.messageText).toBe("bet 160");
 
-    const aliceCall160 = assertCall(actionLogs[7].data);
+    const aliceCall160 = assertCall(actionLogs[10].data);
     expect(aliceCall160.playerId).toBe("alice");
     expect(aliceCall160.amount).toBe(80); // 160 - 80 (BB already posted)
 
-    const bobBet100 = assertBet(actionLogs[8].data);
+    const bobBet100 = assertBet(actionLogs[11].data);
     expect(bobBet100.playerId).toBe("bob");
     expect(bobBet100.amount).toBe(100);
 
-    const aliceCall100 = assertCall(actionLogs[9].data);
+    const aliceCall100 = assertCall(actionLogs[12].data);
     expect(aliceCall100.playerId).toBe("alice");
     expect(aliceCall100.amount).toBe(100);
 
-    const bobBet150 = assertBet(actionLogs[10].data);
+    const bobBet150 = assertBet(actionLogs[13].data);
     expect(bobBet150.playerId).toBe("bob");
     expect(bobBet150.amount).toBe(150);
 
-    const aliceFold = assertFold(actionLogs[11].data);
+    const aliceFold = assertFold(actionLogs[14].data);
     expect(aliceFold.playerId).toBe("alice");
 
     // Verify timestamps are in ascending order
@@ -1143,6 +1180,12 @@ describe("Poker Durable Object", () => {
         actionLogs[i - 1].data.timestamp
       );
     }
+
+    const actionLogSnapshot = await getActionLogSnapshot(
+      stub,
+      workspaceId,
+      channelId
+    );
   });
 
   /**
@@ -1864,54 +1907,53 @@ describe("Poker Durable Object", () => {
     // Verify the sequence of actions
     const actionTypes = actionLogs.map((log) => log.data.actionType);
     expect(actionTypes).toEqual([
+      "message_received", // new_game message
       "new_game", // alice creates game
+      "message_received", // join alice message
       "join", // alice joins
+      "message_received", // join bob message
       "join", // bob joins
+      "message_received", // join charlie message
       "join", // charlie joins
       "buy_in", // alice buys in 1000
       "buy_in", // bob buys in 1000
       "buy_in", // charlie buys in 1000
       "round_start", // round starts
-      "pre_check", // charlie pre-checks (queued)
       "call", // alice calls
       "call", // bob calls (triggers charlie's pre-check, advancing to flop)
-      "pre_fold", // charlie pre-folds (queued)
       "bet", // bob bets 100 on flop
       "call", // alice calls (charlie's pre-fold executes)
       "bet", // bob bets 100 on turn
-      "pre_call", // alice pre-calls (executes immediately as call)
     ]);
 
-    // Verify the pre-action details
-    const charliePreCheck = assertPreCheck(actionLogs[8].data);
-    expect(charliePreCheck.playerId).toBe("charlie");
-
-    const charliePreFold = assertPreFold(actionLogs[11].data);
-    expect(charliePreFold.playerId).toBe("charlie");
-
-    const alicePreCall = assertPreCall(actionLogs[15].data);
-    expect(alicePreCall.playerId).toBe("alice");
-    expect(alicePreCall.expectedAmount).toBe(100); // Expected to call bob's 100 bet
-
     // Verify bob's bets are logged with correct amounts
-    const bobBetFlop = assertBet(actionLogs[12].data);
+    const newGameMessage = assertMessageReceived(actionLogs[0].data);
+    expect(newGameMessage.handlerKey).toBe("new game");
+    const joinAliceMessage = assertMessageReceived(actionLogs[2].data);
+    expect(joinAliceMessage.handlerKey).toBe("join table");
+    const joinBobMessage = assertMessageReceived(actionLogs[4].data);
+    expect(joinBobMessage.handlerKey).toBe("join table");
+    const joinCharlieMessage = assertMessageReceived(actionLogs[6].data);
+    expect(joinCharlieMessage.handlerKey).toBe("join table");
+
+    const bobBetFlop = assertBet(actionLogs[14].data);
     expect(bobBetFlop.playerId).toBe("bob");
     expect(bobBetFlop.amount).toBe(100);
 
-    const bobBetTurn = assertBet(actionLogs[14].data);
+    const bobBetTurn = assertBet(actionLogs[16].data);
     expect(bobBetTurn.playerId).toBe("bob");
     expect(bobBetTurn.amount).toBe(100);
 
     // Verify alice's calls
-    const aliceCallPreflop = assertCall(actionLogs[9].data);
+    const aliceCallPreflop = assertCall(actionLogs[12].data);
     expect(aliceCallPreflop.playerId).toBe("alice");
 
-    const aliceCallFlop = assertCall(actionLogs[13].data);
+    const aliceCallFlop = assertCall(actionLogs[15].data);
     expect(aliceCallFlop.playerId).toBe("alice");
     expect(aliceCallFlop.amount).toBe(100);
 
     // Verify round_start contains all three players
-    const roundStart = assertRoundStart(actionLogs[7].data);
+    const roundStart = assertRoundStart(actionLogs[11].data);
     expect(roundStart.playerOrder).toContain("alice");
     expect(roundStart.playerOrder).toContain("bob");
     expect(roundStart.playerOrder).toContain("charlie");
@@ -3900,39 +3942,46 @@ describe("Poker Durable Object", () => {
     // Verify the sequence of actions
     const actionTypes = actionLogs.map((log) => log.data.actionType);
     expect(actionTypes).toEqual([
+      "message_received", // new_game message
       "new_game", // alice creates game
+      "message_received", // join alice message
       "join", // alice joins
+      "message_received", // join bob message
       "join", // bob joins
+      "message_received", // join charlie message
       "join", // charlie joins
       "buy_in", // alice buys in 1000
       "buy_in", // bob buys in 1000
       "buy_in", // charlie buys in 1000
       "round_start", // round starts
-      "pre_call", // charlie pre-calls (queued at bet amount 80)
       "call", // alice calls 80
       "bet", // bob raises to 200 (charlie's pre-call fails)
       "call", // charlie calls manually (200 - 80 = 120)
       "call", // alice calls the raise (120 more)
     ]);
 
-    // Verify charlie's pre-call was logged with the expected amount at time of queuing
-    const charliePreCall = assertPreCall(actionLogs[8].data);
-    expect(charliePreCall.playerId).toBe("charlie");
-    expect(charliePreCall.expectedAmount).toBe(80); // BB amount when queued
+    const newGameMessage = assertMessageReceived(actionLogs[0].data);
+    expect(newGameMessage.handlerKey).toBe("new game");
+    const joinAliceMessage = assertMessageReceived(actionLogs[2].data);
+    expect(joinAliceMessage.handlerKey).toBe("join table");
+    const joinBobMessage = assertMessageReceived(actionLogs[4].data);
+    expect(joinBobMessage.handlerKey).toBe("join table");
+    const joinCharlieMessage = assertMessageReceived(actionLogs[6].data);
+    expect(joinCharlieMessage.handlerKey).toBe("join table");
 
     // Verify bob's raise
-    const bobRaise = assertBet(actionLogs[10].data);
+    const bobRaise = assertBet(actionLogs[13].data);
     expect(bobRaise.playerId).toBe("bob");
     expect(bobRaise.amount).toBe(200);
 
     // Verify charlie's manual call after pre-call failed
-    const charlieManualCall = assertCall(actionLogs[11].data);
+    const charlieManualCall = assertCall(actionLogs[14].data);
     expect(charlieManualCall.playerId).toBe("charlie");
     // Charlie had posted 80 BB, now needs to call 120 more to match 200
     expect(charlieManualCall.amount).toBe(120);
 
     // Verify alice's call to match the raise
-    const aliceCallRaise = assertCall(actionLogs[12].data);
+    const aliceCallRaise = assertCall(actionLogs[15].data);
     expect(aliceCallRaise.playerId).toBe("alice");
     // Alice had called 80, now needs to call 120 more to match 200
     expect(aliceCallRaise.amount).toBe(120);
