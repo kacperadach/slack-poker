@@ -1145,6 +1145,21 @@ export class TexasHoldem {
     return player.getIsAllIn() ? Success + ": Player went all-in" : Success;
   }
 
+  public callOrCheck(playerId: string): string {
+    const player = this.getCurrentPlayer();
+    if (!player || player.getId() !== playerId) {
+      this.events.push(new GameEvent(`${playerId} It's not your turn!`));
+      return "Not your turn";
+    }
+
+    // If no bets or player has already matched, check. Otherwise call.
+    if (this.currentBetAmount === 0 || player.getCurrentBet() >= this.currentBetAmount) {
+      return this.check(playerId);
+    } else {
+      return this.call(playerId);
+    }
+  }
+
   private handleSidePots(): void {
     // Get active players who haven't folded
     const activeNonFoldedPlayers = this.activePlayers.filter(
@@ -1499,6 +1514,7 @@ export class TexasHoldem {
       timeZone: "America/New_York",
     };
     const dayOfWeek = new Intl.DateTimeFormat("en-US", options).format(now);
+    console.log("dayOfWeek", dayOfWeek);
 
     let smallBlind = 10;
 

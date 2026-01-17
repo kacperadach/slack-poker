@@ -8,7 +8,25 @@ Game scenario tests simulate full poker games turn-by-turn, verifying both the g
 
 ## Key Components
 
-### 1. Mock `Math.random` for Deterministic Card Dealing
+### 1. Mocked Date and Blinds
+
+The tests use fake timers with a fixed date, which determines the blind amounts:
+
+```typescript
+beforeAll(() => {
+  vi.useFakeTimers();
+  vi.setSystemTime(new Date("2026-01-12T12:00:00Z"));
+});
+```
+
+**Because of this mocked date (Monday in America/New_York timezone):**
+
+- Small blind = 10
+- Big blind = 20
+
+The game uses day-of-week based blinds (via `getSmallBlindByDay()`), so this mock ensures consistent blind amounts across all tests. Blinds vary by day: Monday (10/20), Tuesday (15/30), Wednesday (20/40), Thursday (30/60), Friday (40/80), etc.
+
+### 2. Mock `Math.random` for Deterministic Card Dealing
 
 The deck shuffle uses `Math.random`, so mocking it ensures the same cards are dealt every test run:
 
