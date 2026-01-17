@@ -119,7 +119,10 @@ export class PokerDurableObject extends DurableObject<Env> {
 
     const flops = [];
     for (const row of result) {
-      flops.push(row);
+      flops.push({
+        createdAt: row.createdAt as number,
+        flop: row.flop as string,
+      });
     }
 
     return flops;
@@ -371,7 +374,11 @@ async function getGameState(
   await sendGameEventMessages(env, context, game);
 }
 
-async function context(env: Env, context: SlackAppContextWithChannelId) {
+async function context(
+  env: Env,
+  context: SlackAppContextWithChannelId,
+  _payload: PostedMessage
+) {
   const game = await fetchGame(env, context);
   if (!game) {
     await context.client.chat.postEphemeral({
@@ -540,7 +547,11 @@ async function searchFlops(
   await context.say({ text: message });
 }
 
-async function showFlops(env: Env, context: SlackAppContextWithChannelId) {
+async function showFlops(
+  env: Env,
+  context: SlackAppContextWithChannelId,
+  _payload: PostedMessage
+) {
   const workspaceId = context.teamId!;
   const channelId = context.channelId;
   const stub = getDurableObject(env, context);
@@ -576,17 +587,29 @@ async function showFlops(env: Env, context: SlackAppContextWithChannelId) {
   await context.say({ text: message });
 }
 
-async function ass(_env: Env, context: SlackAppContextWithChannelId) {
+async function ass(
+  _env: Env,
+  context: SlackAppContextWithChannelId,
+  _payload: PostedMessage
+) {
   await context.say({ text: "ASS" });
 }
 
-async function drillGto(env: Env, context: SlackAppContextWithChannelId) {
+async function drillGto(
+  _env: Env,
+  context: SlackAppContextWithChannelId,
+  _payload: PostedMessage
+) {
   await context.say({
     text: `<@${context.userId}> is drilling GTO! :drill-gto:`,
   });
 }
 
-async function nudgePlayer(env: Env, context: SlackAppContextWithChannelId) {
+async function nudgePlayer(
+  env: Env,
+  context: SlackAppContextWithChannelId,
+  _payload: PostedMessage
+) {
   const game = await fetchGame(env, context);
   if (!game) {
     await context.say({ text: `No game exists! Type 'New Game'` });
@@ -613,7 +636,11 @@ async function nudgePlayer(env: Env, context: SlackAppContextWithChannelId) {
   });
 }
 
-async function commitSeppuku(_env: Env, context: SlackAppContextWithChannelId) {
+async function commitSeppuku(
+  _env: Env,
+  context: SlackAppContextWithChannelId,
+  _payload: PostedMessage
+) {
   await context.say({ text: `Hai` });
 }
 
@@ -656,7 +683,11 @@ async function rollDice(
   await context.say({ text: `Here are some dice: *${diceRolls.join(" ")}*` });
 }
 
-async function help(_env: Env, context: SlackAppContextWithChannelId) {
+async function help(
+  _env: Env,
+  context: SlackAppContextWithChannelId,
+  _payload: PostedMessage
+) {
   const commands = Object.keys(MESSAGE_HANDLERS).join("\n");
   await context.say({
     text: `Available commands:\n${commands
@@ -1005,7 +1036,11 @@ async function buyIn(
   await sendGameEventMessages(env, context, game);
 }
 
-async function leaveGame(env: Env, context: SlackAppContextWithChannelId) {
+async function leaveGame(
+  env: Env,
+  context: SlackAppContextWithChannelId,
+  _payload: PostedMessage
+) {
   const game = await fetchGame(env, context);
   if (!game) {
     await context.say({ text: `No game exists! Type 'New Game'` });
@@ -1160,11 +1195,14 @@ async function sendGameEventMessages(
             flopsDiscoveredPercentage
           )}%), ${numberFormatter.format(22100 - flopCount)} remain`;
       } else {
-        const human = new Date(flop.createdAt).toLocaleDateString("en-US", {
-          year: "numeric",
-          month: "2-digit",
-          day: "2-digit",
-        });
+        const human = new Date(flop.createdAt as number).toLocaleDateString(
+          "en-US",
+          {
+            year: "numeric",
+            month: "2-digit",
+            day: "2-digit",
+          }
+        );
         message = `Flop (First Seen ${human}):`;
         skipFlop = false;
       }
@@ -1216,13 +1254,13 @@ function getFlopString(cards: Card[]) {
     .join("");
 }
 
-function formatFlop(flop) {
+function formatFlop(flop: { createdAt: number; flop: string }) {
   const date = new Date(flop.createdAt).toLocaleDateString("en-US", {
     year: "numeric",
     month: "2-digit",
     day: "2-digit",
   });
-  return `${flop.flop.replace(/[dhsc]/g, (match: any) => {
+  return `${flop.flop.replace(/[dhsc]/g, (match: string) => {
     switch (match) {
       case "d":
         return ":diamonds:";
