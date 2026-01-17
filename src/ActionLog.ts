@@ -154,18 +154,36 @@ export interface FoldActionV1 extends ActionLogBase {
 // Pre-Actions (Queued Actions)
 // =============================================================================
 
-/** Action types that can be queued */
-export type QueuedActionType = "check" | "fold" | "call" | "bet";
-
-export interface PreActionActionV1 extends ActionLogBase {
-  actionType: "pre_action";
+export interface PreCheckActionV1 extends ActionLogBase {
+  actionType: "pre_check";
   schemaVersion: 1;
-  /** Player queuing the action */
+  /** Player queuing the check */
   playerId: string;
-  /** The action being queued */
-  queuedAction: QueuedActionType;
-  /** Amount for bet/call actions */
-  amount?: number;
+}
+
+export interface PreFoldActionV1 extends ActionLogBase {
+  actionType: "pre_fold";
+  schemaVersion: 1;
+  /** Player queuing the fold */
+  playerId: string;
+}
+
+export interface PreCallActionV1 extends ActionLogBase {
+  actionType: "pre_call";
+  schemaVersion: 1;
+  /** Player queuing the call */
+  playerId: string;
+  /** Expected call amount at time of queuing (used to detect if raise invalidates) */
+  expectedAmount: number;
+}
+
+export interface PreBetActionV1 extends ActionLogBase {
+  actionType: "pre_bet";
+  schemaVersion: 1;
+  /** Player queuing the bet */
+  playerId: string;
+  /** Intended bet amount */
+  amount: number;
 }
 
 export interface PreDealActionV1 extends ActionLogBase {
@@ -209,7 +227,10 @@ export type ActionLogEntry =
   | CheckActionV1
   | FoldActionV1
   // Pre-actions
-  | PreActionActionV1
+  | PreCheckActionV1
+  | PreFoldActionV1
+  | PreCallActionV1
+  | PreBetActionV1
   | PreDealActionV1
   // Utility
   | ShowCardsActionV1;
@@ -229,14 +250,185 @@ export function isPlayerAction(
 
 export function isPreAction(
   action: ActionLogEntry
-): action is PreActionActionV1 | PreDealActionV1 {
-  return ["pre_action", "pre_deal"].includes(action.actionType);
+): action is
+  | PreCheckActionV1
+  | PreFoldActionV1
+  | PreCallActionV1
+  | PreBetActionV1
+  | PreDealActionV1 {
+  return ["pre_check", "pre_fold", "pre_call", "pre_bet", "pre_deal"].includes(
+    action.actionType
+  );
 }
 
 export function isPlayerManagementAction(
   action: ActionLogEntry
 ): action is JoinActionV1 | LeaveActionV1 | BuyInActionV1 | CashOutActionV1 {
   return ["join", "leave", "buy_in", "cash_out"].includes(action.actionType);
+}
+
+// Individual type guards for each action type
+// These accept a generic object with actionType to support data from database queries
+type ActionLike = { actionType: string };
+
+export function isNewGame(action: ActionLike): action is NewGameActionV1 {
+  return action.actionType === "new_game";
+}
+
+export function isJoin(action: ActionLike): action is JoinActionV1 {
+  return action.actionType === "join";
+}
+
+export function isLeave(action: ActionLike): action is LeaveActionV1 {
+  return action.actionType === "leave";
+}
+
+export function isBuyIn(action: ActionLike): action is BuyInActionV1 {
+  return action.actionType === "buy_in";
+}
+
+export function isCashOut(action: ActionLike): action is CashOutActionV1 {
+  return action.actionType === "cash_out";
+}
+
+export function isRoundStart(action: ActionLike): action is RoundStartActionV1 {
+  return action.actionType === "round_start";
+}
+
+export function isBet(action: ActionLike): action is BetActionV1 {
+  return action.actionType === "bet";
+}
+
+export function isCall(action: ActionLike): action is CallActionV1 {
+  return action.actionType === "call";
+}
+
+export function isCheck(action: ActionLike): action is CheckActionV1 {
+  return action.actionType === "check";
+}
+
+export function isFold(action: ActionLike): action is FoldActionV1 {
+  return action.actionType === "fold";
+}
+
+export function isPreCheck(action: ActionLike): action is PreCheckActionV1 {
+  return action.actionType === "pre_check";
+}
+
+export function isPreFold(action: ActionLike): action is PreFoldActionV1 {
+  return action.actionType === "pre_fold";
+}
+
+export function isPreCall(action: ActionLike): action is PreCallActionV1 {
+  return action.actionType === "pre_call";
+}
+
+export function isPreBet(action: ActionLike): action is PreBetActionV1 {
+  return action.actionType === "pre_bet";
+}
+
+export function isPreDeal(action: ActionLike): action is PreDealActionV1 {
+  return action.actionType === "pre_deal";
+}
+
+export function isShowCards(action: ActionLike): action is ShowCardsActionV1 {
+  return action.actionType === "show_cards";
+}
+
+// Assertion helpers - throw if wrong type, return narrowed type
+export function assertNewGame(action: ActionLike): NewGameActionV1 {
+  if (!isNewGame(action))
+    throw new Error(`Expected new_game, got ${action.actionType}`);
+  return action;
+}
+
+export function assertJoin(action: ActionLike): JoinActionV1 {
+  if (!isJoin(action))
+    throw new Error(`Expected join, got ${action.actionType}`);
+  return action;
+}
+
+export function assertLeave(action: ActionLike): LeaveActionV1 {
+  if (!isLeave(action))
+    throw new Error(`Expected leave, got ${action.actionType}`);
+  return action;
+}
+
+export function assertBuyIn(action: ActionLike): BuyInActionV1 {
+  if (!isBuyIn(action))
+    throw new Error(`Expected buy_in, got ${action.actionType}`);
+  return action;
+}
+
+export function assertCashOut(action: ActionLike): CashOutActionV1 {
+  if (!isCashOut(action))
+    throw new Error(`Expected cash_out, got ${action.actionType}`);
+  return action;
+}
+
+export function assertRoundStart(action: ActionLike): RoundStartActionV1 {
+  if (!isRoundStart(action))
+    throw new Error(`Expected round_start, got ${action.actionType}`);
+  return action;
+}
+
+export function assertBet(action: ActionLike): BetActionV1 {
+  if (!isBet(action)) throw new Error(`Expected bet, got ${action.actionType}`);
+  return action;
+}
+
+export function assertCall(action: ActionLike): CallActionV1 {
+  if (!isCall(action))
+    throw new Error(`Expected call, got ${action.actionType}`);
+  return action;
+}
+
+export function assertCheck(action: ActionLike): CheckActionV1 {
+  if (!isCheck(action))
+    throw new Error(`Expected check, got ${action.actionType}`);
+  return action;
+}
+
+export function assertFold(action: ActionLike): FoldActionV1 {
+  if (!isFold(action))
+    throw new Error(`Expected fold, got ${action.actionType}`);
+  return action;
+}
+
+export function assertPreCheck(action: ActionLike): PreCheckActionV1 {
+  if (!isPreCheck(action))
+    throw new Error(`Expected pre_check, got ${action.actionType}`);
+  return action;
+}
+
+export function assertPreFold(action: ActionLike): PreFoldActionV1 {
+  if (!isPreFold(action))
+    throw new Error(`Expected pre_fold, got ${action.actionType}`);
+  return action;
+}
+
+export function assertPreCall(action: ActionLike): PreCallActionV1 {
+  if (!isPreCall(action))
+    throw new Error(`Expected pre_call, got ${action.actionType}`);
+  return action;
+}
+
+export function assertPreBet(action: ActionLike): PreBetActionV1 {
+  if (!isPreBet(action))
+    throw new Error(`Expected pre_bet, got ${action.actionType}`);
+  return action;
+}
+
+export function assertPreDeal(action: ActionLike): PreDealActionV1 {
+  if (!isPreDeal(action))
+    throw new Error(`Expected pre_deal, got ${action.actionType}`);
+  return action;
+}
+
+export function assertShowCards(action: ActionLike): ShowCardsActionV1 {
+  if (!isShowCards(action))
+    throw new Error(`Expected show_cards, got ${action.actionType}`);
+  return action;
 }
 
 // =============================================================================
@@ -272,7 +464,10 @@ export const ALL_ACTION_TYPES: ActionType[] = [
   "call",
   "check",
   "fold",
-  "pre_action",
+  "pre_check",
+  "pre_fold",
+  "pre_call",
+  "pre_bet",
   "pre_deal",
   "show_cards",
 ];

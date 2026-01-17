@@ -971,10 +971,9 @@ export async function preCheck(
     workspaceId: context.teamId!,
     channelId: context.channelId,
     timestamp: Date.now(),
-    actionType: "pre_action",
+    actionType: "pre_check",
     messageText: payload.text ?? "",
     playerId: context.userId!,
-    queuedAction: "check",
   });
   await sendGameEventMessages(env, context, game);
 }
@@ -996,10 +995,9 @@ export async function preFold(
     workspaceId: context.teamId!,
     channelId: context.channelId,
     timestamp: Date.now(),
-    actionType: "pre_action",
+    actionType: "pre_fold",
     messageText: payload.text ?? "",
     playerId: context.userId!,
-    queuedAction: "fold",
   });
   await sendGameEventMessages(env, context, game);
 }
@@ -1015,16 +1013,18 @@ export async function preCall(
     return;
   }
 
+  // Capture expected call amount before the action
+  const expectedAmount = game.getCurrentBetAmount();
   game.preCall(context.userId!);
   await saveGameWithAction(env, context, game, {
     schemaVersion: 1,
     workspaceId: context.teamId!,
     channelId: context.channelId,
     timestamp: Date.now(),
-    actionType: "pre_action",
+    actionType: "pre_call",
     messageText: payload.text ?? "",
     playerId: context.userId!,
-    queuedAction: "call",
+    expectedAmount,
   });
   await sendGameEventMessages(env, context, game);
 }
@@ -1063,10 +1063,9 @@ export async function preBet(
     workspaceId: context.teamId!,
     channelId: context.channelId,
     timestamp: Date.now(),
-    actionType: "pre_action",
+    actionType: "pre_bet",
     messageText: payload.text ?? "",
     playerId: context.userId!,
-    queuedAction: "bet",
     amount: betAmount,
   });
   await sendGameEventMessages(env, context, game);
