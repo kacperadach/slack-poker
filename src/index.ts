@@ -569,7 +569,7 @@ async function drillGto(env, context, payload) {
   });
 }
 
-async function nudgePlayer(env, context, payload) {
+export async function nudgePlayer(env, context, payload) {
   const game = await fetchGame(env, context);
   if (!game) {
     await context.say({ text: `No game exists! Type 'New Game'` });
@@ -636,7 +636,7 @@ async function help(env, context, payload) {
   });
 }
 
-async function revealCards(env, context, payload) {
+export async function revealCards(env, context, payload) {
   const game = await fetchGame(env, context);
   if (!game) {
     await context.say({ text: `No game exists! Type 'New Game'` });
@@ -653,7 +653,7 @@ async function revealCards(env, context, payload) {
   await sendGameEventMessages(env, context, game);
 }
 
-async function showCards(env, context, payload) {
+export async function showCards(env, context, payload) {
   const game = await fetchGame(env, context);
   if (!game) {
     await context.say({ text: `No game exists! Type 'New Game'` });
@@ -701,7 +701,7 @@ export async function preNH(env, context, payload) {
   await sendGameEventMessages(env, context, game);
 }
 
-async function preAH(env, context, payload) {
+export async function preAH(env, context, payload) {
   const game = await fetchGame(env, context);
   if (!game) {
     await context.say({ text: `No game exists! Type 'New Game'` });
@@ -749,7 +749,7 @@ export async function preCall(env, context, payload) {
   await sendGameEventMessages(env, context, game);
 }
 
-async function preBet(env, context, payload) {
+export async function preBet(env, context, payload) {
   const messageText = payload.text.toLowerCase();
   const betAmount = parseFloat(
     messageText
@@ -855,7 +855,7 @@ export async function startRound(env, context, payload) {
   await sendGameEventMessages(env, context, game);
 }
 
-async function showChips(env, context, payload) {
+export async function showChips(env, context, payload) {
   const game = await fetchGame(env, context);
   if (!game) {
     await context.say({ text: `No game exists! Type 'New Game'` });

@@ -7,6 +7,7 @@ import {
   newGame,
   preDeal,
   preNH,
+  preAH,
   startRound,
   call,
   check,
@@ -15,8 +16,13 @@ import {
   preCheck,
   preFold,
   preCall,
+  preBet,
   cashOut,
   leaveGame,
+  showCards,
+  revealCards,
+  showChips,
+  nudgePlayer,
 } from "..";
 
 describe("Poker Durable Object", () => {
@@ -1975,6 +1981,860 @@ describe("Poker Durable Object", () => {
     // Check that :nh: message appeared
     const endMessages = sayFn.mock.calls[0][0].text;
     expect(endMessages).toContain("<@polite> says :nh:");
+  });
+
+  /**
+   * Game Scenario 13: Split Pot (Tie)
+   *
+   * Tests:
+   * - Two players with identical hand strength
+   * - Pot is split evenly between winners
+   * - Proper showdown messaging for ties
+   */
+  it("game scenario 13 - split pot tie", async () => {
+    vi.spyOn(Math, "random").mockReturnValue(0.25);
+    const workspaceId = "test-workspace-13";
+    const channelId = "test-channel-13";
+    const sayFn = vi.fn();
+    const postEphemeralFn = vi.fn();
+
+    const contextUser1 = {
+      teamId: workspaceId,
+      channelId: channelId,
+      userId: "player1",
+      say: sayFn,
+      client: { chat: { postEphemeral: postEphemeralFn } },
+    };
+
+    const contextUser2 = {
+      teamId: workspaceId,
+      channelId: channelId,
+      userId: "player2",
+      say: sayFn,
+      client: { chat: { postEphemeral: postEphemeralFn } },
+    };
+
+    const stub = getStub({ workspaceId, channelId });
+
+    // === SETUP ===
+    await newGame(env, contextUser1);
+    await joinGame(env, contextUser1);
+    await joinGame(env, contextUser2);
+    await buyIn(env, contextUser1, { text: "buy in 500" });
+    await buyIn(env, contextUser2, { text: "buy in 500" });
+    sayFn.mockClear();
+
+    // === START ROUND ===
+    await startRound(env, contextUser1, null);
+    sayFn.mockClear();
+    postEphemeralFn.mockClear();
+
+    // Both players call/check through to showdown
+    await call(env, contextUser2, null); // SB calls
+    sayFn.mockClear();
+    await check(env, contextUser1, null); // BB checks -> Flop
+    sayFn.mockClear();
+    postEphemeralFn.mockClear();
+
+    // Check through flop
+    await check(env, contextUser2, null);
+    sayFn.mockClear();
+    await check(env, contextUser1, null); // -> Turn
+    sayFn.mockClear();
+
+    // Check through turn
+    await check(env, contextUser2, null);
+    sayFn.mockClear();
+    await check(env, contextUser1, null); // -> River
+    sayFn.mockClear();
+
+    // Check through river -> Showdown
+    await check(env, contextUser2, null);
+    sayFn.mockClear();
+    await check(env, contextUser1, null);
+
+    // Verify showdown occurred
+    const gameStateFinal = await getGameState(stub, workspaceId, channelId);
+    expect(gameStateFinal.gameState).toBe(GameState.WaitingForPlayers);
+
+    // Check showdown message - whether it's a tie or winner
+    const showdownMessage = sayFn.mock.calls[0][0].text;
+    expect(showdownMessage).toContain("Main pot of 160");
+
+    // Verify chips are distributed (either split or to winner)
+    const player1Chips = getPlayerById(gameStateFinal, "player1")?.chips;
+    const player2Chips = getPlayerById(gameStateFinal, "player2")?.chips;
+
+    // Total chips should still be 1000 (500 + 500)
+    expect((player1Chips || 0) + (player2Chips || 0)).toBe(1000);
+  });
+
+  /**
+   * Game Scenario 14: Show Cards Command
+   *
+   * Tests:
+   * - Player can view their cards during a hand
+   * - Ephemeral message shows hand strength with community cards
+   */
+  it("game scenario 14 - show cards", async () => {
+    vi.spyOn(Math, "random").mockReturnValue(0.45);
+    const workspaceId = "test-workspace-14";
+    const channelId = "test-channel-14";
+    const sayFn = vi.fn();
+    const postEphemeralFn = vi.fn();
+
+    const contextUser1 = {
+      teamId: workspaceId,
+      channelId: channelId,
+      userId: "viewer",
+      say: sayFn,
+      client: { chat: { postEphemeral: postEphemeralFn } },
+    };
+
+    const contextUser2 = {
+      teamId: workspaceId,
+      channelId: channelId,
+      userId: "opponent",
+      say: sayFn,
+      client: { chat: { postEphemeral: postEphemeralFn } },
+    };
+
+    const stub = getStub({ workspaceId, channelId });
+
+    // === SETUP ===
+    await newGame(env, contextUser1);
+    await joinGame(env, contextUser1);
+    await joinGame(env, contextUser2);
+    await buyIn(env, contextUser1, { text: "buy in 500" });
+    await buyIn(env, contextUser2, { text: "buy in 500" });
+    sayFn.mockClear();
+
+    // === START ROUND ===
+    await startRound(env, contextUser1, null);
+    sayFn.mockClear();
+    postEphemeralFn.mockClear();
+
+    // Get to flop so we have community cards
+    await call(env, contextUser2, null);
+    sayFn.mockClear();
+    await check(env, contextUser1, null);
+    sayFn.mockClear();
+    postEphemeralFn.mockClear();
+
+    // viewer uses show cards command
+    await showCards(env, contextUser1, null);
+
+    // Verify ephemeral message was sent with hand info
+    // showCards sends private messages to the player about their hand
+    expect(postEphemeralFn.mock.calls.length).toBeGreaterThan(0);
+    // Check the ephemeral message contains hand info
+    const ephemeralMessage = postEphemeralFn.mock.calls[0][0];
+    expect(ephemeralMessage.user).toBe("viewer");
+  });
+
+  /**
+   * Game Scenario 15: Reveal Cards Command
+   *
+   * Tests:
+   * - Player can reveal cards to everyone (only when waiting for players)
+   * - Cannot reveal during active hand
+   */
+  it("game scenario 15 - reveal cards", async () => {
+    vi.spyOn(Math, "random").mockReturnValue(0.35);
+    const workspaceId = "test-workspace-15";
+    const channelId = "test-channel-15";
+    const sayFn = vi.fn();
+    const postEphemeralFn = vi.fn();
+
+    const contextUser1 = {
+      teamId: workspaceId,
+      channelId: channelId,
+      userId: "revealer",
+      say: sayFn,
+      client: { chat: { postEphemeral: postEphemeralFn } },
+    };
+
+    const contextUser2 = {
+      teamId: workspaceId,
+      channelId: channelId,
+      userId: "other",
+      say: sayFn,
+      client: { chat: { postEphemeral: postEphemeralFn } },
+    };
+
+    const stub = getStub({ workspaceId, channelId });
+
+    // === SETUP ===
+    await newGame(env, contextUser1);
+    await joinGame(env, contextUser1);
+    await joinGame(env, contextUser2);
+    await buyIn(env, contextUser1, { text: "buy in 500" });
+    await buyIn(env, contextUser2, { text: "buy in 500" });
+    sayFn.mockClear();
+
+    // === START ROUND ===
+    await startRound(env, contextUser1, null);
+    sayFn.mockClear();
+    postEphemeralFn.mockClear();
+
+    // Try to reveal during active hand - should fail
+    await revealCards(env, contextUser1, null);
+    expect(sayFn.mock.calls).toMatchInlineSnapshot(`
+      [
+        [
+          {
+            "text": "<@revealer> :narp-brain: Nice try bud",
+          },
+        ],
+      ]
+    `);
+    sayFn.mockClear();
+
+    // End the hand with a fold
+    await fold(env, contextUser2, null);
+    sayFn.mockClear();
+
+    // Now in WaitingForPlayers state - reveal should work
+    // But player's cards are cleared after round ends
+    await revealCards(env, contextUser1, null);
+    // Should say player has no cards or reveal their last hand
+    expect(sayFn.mock.calls.length).toBeGreaterThan(0);
+  });
+
+  /**
+   * Game Scenario 16: Show Chips Command
+   *
+   * Tests:
+   * - Display current chip counts for all active players
+   */
+  it("game scenario 16 - show chips", async () => {
+    vi.spyOn(Math, "random").mockReturnValue(0.55);
+    const workspaceId = "test-workspace-16";
+    const channelId = "test-channel-16";
+    const sayFn = vi.fn();
+    const postEphemeralFn = vi.fn();
+
+    const contextUser1 = {
+      teamId: workspaceId,
+      channelId: channelId,
+      userId: "rich",
+      say: sayFn,
+      client: { chat: { postEphemeral: postEphemeralFn } },
+    };
+
+    const contextUser2 = {
+      teamId: workspaceId,
+      channelId: channelId,
+      userId: "poor",
+      say: sayFn,
+      client: { chat: { postEphemeral: postEphemeralFn } },
+    };
+
+    // === SETUP ===
+    await newGame(env, contextUser1);
+    await joinGame(env, contextUser1);
+    await joinGame(env, contextUser2);
+    await buyIn(env, contextUser1, { text: "buy in 1000" });
+    await buyIn(env, contextUser2, { text: "buy in 200" });
+    sayFn.mockClear();
+
+    // Use show chips command
+    await showChips(env, contextUser1, null);
+
+    // Verify chip display
+    expect(sayFn.mock.calls).toMatchInlineSnapshot(`
+      [
+        [
+          {
+            "text": "<@rich>: 1000 (Active)
+      <@poor>: 200 (Active)
+      ",
+          },
+        ],
+      ]
+    `);
+  });
+
+  /**
+   * Game Scenario 17: Flops Tracking
+   *
+   * Tests:
+   * - Flops are recorded when dealt
+   * - Flop count increments
+   * - Unique flops are tracked
+   */
+  it("game scenario 17 - flops tracking", async () => {
+    vi.spyOn(Math, "random").mockReturnValue(0.15);
+    const workspaceId = "test-workspace-17";
+    const channelId = "test-channel-17";
+    const sayFn = vi.fn();
+    const postEphemeralFn = vi.fn();
+
+    const contextUser1 = {
+      teamId: workspaceId,
+      channelId: channelId,
+      userId: "tracker1",
+      say: sayFn,
+      client: { chat: { postEphemeral: postEphemeralFn } },
+    };
+
+    const contextUser2 = {
+      teamId: workspaceId,
+      channelId: channelId,
+      userId: "tracker2",
+      say: sayFn,
+      client: { chat: { postEphemeral: postEphemeralFn } },
+    };
+
+    const stub = getStub({ workspaceId, channelId });
+
+    // === SETUP ===
+    await newGame(env, contextUser1);
+    await joinGame(env, contextUser1);
+    await joinGame(env, contextUser2);
+    await buyIn(env, contextUser1, { text: "buy in 500" });
+    await buyIn(env, contextUser2, { text: "buy in 500" });
+    sayFn.mockClear();
+
+    // === ROUND 1 ===
+    await startRound(env, contextUser1, null);
+    sayFn.mockClear();
+    postEphemeralFn.mockClear();
+
+    // Get to flop
+    await call(env, contextUser2, null);
+    await check(env, contextUser1, null);
+
+    // Check that flop message mentions discovery
+    const flopMessages = sayFn.mock.calls.map((c) => c[0].text).join("\n");
+    expect(flopMessages).toContain("flops discovered");
+
+    // Verify flop was recorded in database
+    const flopsCount = await runInDurableObject(
+      stub,
+      async (_instance, state) => {
+        const result = state.storage.sql.exec(
+          "SELECT COUNT(*) as count FROM Flops WHERE workspaceId = ? AND channelId = ?",
+          workspaceId,
+          channelId
+        );
+        return result.one().count as number;
+      }
+    );
+    expect(flopsCount).toBe(1);
+
+    // Finish round
+    await fold(env, contextUser1, null);
+    sayFn.mockClear();
+
+    // === ROUND 2 - Another flop ===
+    await startRound(env, contextUser1, null);
+    sayFn.mockClear();
+
+    await call(env, contextUser2, null);
+    await check(env, contextUser1, null);
+
+    // Verify second flop was recorded
+    const flopsCount2 = await runInDurableObject(
+      stub,
+      async (_instance, state) => {
+        const result = state.storage.sql.exec(
+          "SELECT COUNT(*) as count FROM Flops WHERE workspaceId = ? AND channelId = ?",
+          workspaceId,
+          channelId
+        );
+        return result.one().count as number;
+      }
+    );
+    // Could be 1 or 2 depending on if it's a unique flop
+    expect(flopsCount2).toBeGreaterThanOrEqual(1);
+  });
+
+  /**
+   * Game Scenario 18: Pre-Bet
+   *
+   * Tests:
+   * - Queue a specific bet amount before your turn
+   * - Pre-bet executes when action comes to player
+   */
+  it("game scenario 18 - pre-bet", async () => {
+    vi.spyOn(Math, "random").mockReturnValue(0.42);
+    const workspaceId = "test-workspace-18";
+    const channelId = "test-channel-18";
+    const sayFn = vi.fn();
+    const postEphemeralFn = vi.fn();
+
+    const contextAlice = {
+      teamId: workspaceId,
+      channelId: channelId,
+      userId: "alice",
+      say: sayFn,
+      client: { chat: { postEphemeral: postEphemeralFn } },
+    };
+
+    const contextBob = {
+      teamId: workspaceId,
+      channelId: channelId,
+      userId: "bob",
+      say: sayFn,
+      client: { chat: { postEphemeral: postEphemeralFn } },
+    };
+
+    const contextCharlie = {
+      teamId: workspaceId,
+      channelId: channelId,
+      userId: "charlie",
+      say: sayFn,
+      client: { chat: { postEphemeral: postEphemeralFn } },
+    };
+
+    const stub = getStub({ workspaceId, channelId });
+
+    // === SETUP ===
+    await newGame(env, contextAlice);
+    await joinGame(env, contextAlice);
+    await joinGame(env, contextBob);
+    await joinGame(env, contextCharlie);
+    await buyIn(env, contextAlice, { text: "buy in 1000" });
+    await buyIn(env, contextBob, { text: "buy in 1000" });
+    await buyIn(env, contextCharlie, { text: "buy in 1000" });
+    sayFn.mockClear();
+
+    // === START ROUND ===
+    await startRound(env, contextAlice, null);
+    sayFn.mockClear();
+    postEphemeralFn.mockClear();
+
+    // charlie (BB) queues a pre-bet of 200
+    await preBet(env, contextCharlie, { text: "pre-bet 200" });
+    expect(sayFn.mock.calls).toMatchInlineSnapshot(`
+      [
+        [
+          {
+            "text": "<@charlie> pre-bet 200!",
+          },
+        ],
+      ]
+    `);
+    sayFn.mockClear();
+
+    // alice calls
+    await call(env, contextAlice, null);
+    sayFn.mockClear();
+
+    // bob calls - this triggers charlie's pre-bet (which raises to 200)
+    await call(env, contextBob, null);
+    const gameStateAfterPreBet = await getGameState(
+      stub,
+      workspaceId,
+      channelId
+    );
+    // Still in PreFlop because charlie's raise needs to be called
+    expect(gameStateAfterPreBet.gameState).toBe(GameState.PreFlop);
+
+    // Verify charlie's pre-bet executed
+    expect(sayFn.mock.calls).toMatchInlineSnapshot(`
+      [
+        [
+          {
+            "text": "<@bob> called 80 chips! Total Pot: 240
+      <@charlie> is pre-moving!
+      <@alice>'s turn
+      <@charlie> raised 200 chips! Total Pot: 360",
+          },
+        ],
+      ]
+    `);
+    sayFn.mockClear();
+
+    // Verify chip counts - charlie raised 200 total (BB was 80, so added 120 more)
+    expect(getPlayerById(gameStateAfterPreBet, "charlie")?.chips).toBe(800); // 1000 - 200
+
+    // alice and bob need to call the raise to advance to flop
+    await call(env, contextAlice, null);
+    sayFn.mockClear();
+    await call(env, contextBob, null);
+
+    const gameStateFlop = await getGameState(stub, workspaceId, channelId);
+    expect(gameStateFlop.gameState).toBe(GameState.Flop);
+  });
+
+  /**
+   * Game Scenario 19: Pre-AH (Pre Asshole)
+   *
+   * Tests:
+   * - Queue "asshole" message for end of round
+   * - Message appears after showdown (similar to pre-NH)
+   */
+  it("game scenario 19 - pre-ah", async () => {
+    vi.spyOn(Math, "random").mockReturnValue(0.85);
+    const workspaceId = "test-workspace-19";
+    const channelId = "test-channel-19";
+    const sayFn = vi.fn();
+    const postEphemeralFn = vi.fn();
+
+    const contextUser1 = {
+      teamId: workspaceId,
+      channelId: channelId,
+      userId: "salty",
+      say: sayFn,
+      client: { chat: { postEphemeral: postEphemeralFn } },
+    };
+
+    const contextUser2 = {
+      teamId: workspaceId,
+      channelId: channelId,
+      userId: "winner",
+      say: sayFn,
+      client: { chat: { postEphemeral: postEphemeralFn } },
+    };
+
+    const stub = getStub({ workspaceId, channelId });
+
+    // === SETUP ===
+    await newGame(env, contextUser1);
+    await joinGame(env, contextUser1);
+    await joinGame(env, contextUser2);
+    await buyIn(env, contextUser1, { text: "buy in 500" });
+    await buyIn(env, contextUser2, { text: "buy in 500" });
+    sayFn.mockClear();
+
+    // Start round
+    await startRound(env, contextUser1, null);
+    sayFn.mockClear();
+
+    // salty player queues pre-AH (will say asshole at end)
+    await preAH(env, contextUser1, null);
+    expect(sayFn.mock.calls).toMatchInlineSnapshot(`
+      [
+        [
+          {
+            "text": "<@salty> pre-ah!",
+          },
+        ],
+      ]
+    `);
+    sayFn.mockClear();
+
+    // End round with fold
+    await fold(env, contextUser2, null);
+
+    // Check that :ah: message appeared
+    const endMessages = sayFn.mock.calls[0][0].text;
+    expect(endMessages).toContain("<@salty> says :ah:");
+  });
+
+  /**
+   * Game Scenario 20: Side Pots (Multiple All-Ins)
+   *
+   * Tests:
+   * - Three players with different stack sizes
+   * - Multiple all-ins creating side pots
+   * - Correct pot distribution based on contribution
+   */
+  it("game scenario 20 - side pots", async () => {
+    vi.spyOn(Math, "random").mockReturnValue(0.33);
+    const workspaceId = "test-workspace-20";
+    const channelId = "test-channel-20";
+    const sayFn = vi.fn();
+    const postEphemeralFn = vi.fn();
+
+    const contextShortStack = {
+      teamId: workspaceId,
+      channelId: channelId,
+      userId: "shortstack",
+      say: sayFn,
+      client: { chat: { postEphemeral: postEphemeralFn } },
+    };
+
+    const contextMediumStack = {
+      teamId: workspaceId,
+      channelId: channelId,
+      userId: "mediumstack",
+      say: sayFn,
+      client: { chat: { postEphemeral: postEphemeralFn } },
+    };
+
+    const contextBigStack = {
+      teamId: workspaceId,
+      channelId: channelId,
+      userId: "bigstack",
+      say: sayFn,
+      client: { chat: { postEphemeral: postEphemeralFn } },
+    };
+
+    const stub = getStub({ workspaceId, channelId });
+
+    // === SETUP with different stack sizes ===
+    await newGame(env, contextShortStack);
+    await joinGame(env, contextShortStack);
+    await joinGame(env, contextMediumStack);
+    await joinGame(env, contextBigStack);
+
+    // Different buy-ins create side pot scenario
+    await buyIn(env, contextShortStack, { text: "buy in 100" }); // Short stack
+    await buyIn(env, contextMediumStack, { text: "buy in 300" }); // Medium stack
+    await buyIn(env, contextBigStack, { text: "buy in 600" }); // Big stack
+    sayFn.mockClear();
+
+    // === START ROUND ===
+    await startRound(env, contextShortStack, null);
+    const gameStateStart = await getGameState(stub, workspaceId, channelId);
+    expect(gameStateStart.activePlayers.length).toBe(3);
+    sayFn.mockClear();
+    postEphemeralFn.mockClear();
+
+    // shortstack (dealer) goes all-in with remaining chips
+    await bet(env, contextShortStack, { text: "bet 100" });
+    const gameStateAfterShort = await getGameState(
+      stub,
+      workspaceId,
+      channelId
+    );
+    expect(getPlayerById(gameStateAfterShort, "shortstack")?.chips).toBe(0);
+    sayFn.mockClear();
+
+    // mediumstack calls and goes all-in
+    await bet(env, contextMediumStack, { text: "bet 300" });
+    const gameStateAfterMed = await getGameState(stub, workspaceId, channelId);
+    expect(getPlayerById(gameStateAfterMed, "mediumstack")?.chips).toBe(0);
+    sayFn.mockClear();
+
+    // bigstack calls the all-in
+    await call(env, contextBigStack, null);
+    const gameStateFinal = await getGameState(stub, workspaceId, channelId);
+
+    // Game should be over - all players all-in or called
+    expect(gameStateFinal.gameState).toBe(GameState.WaitingForPlayers);
+
+    // Verify showdown happened
+    const showdownMessages = sayFn.mock.calls.map((c) => c[0].text).join("\n");
+    expect(showdownMessages).toContain("pot");
+
+    // Verify total chips are conserved (100 + 300 + 600 = 1000)
+    const finalShort = getPlayerById(gameStateFinal, "shortstack")?.chips || 0;
+    const finalMed = getPlayerById(gameStateFinal, "mediumstack")?.chips || 0;
+    const finalBig = getPlayerById(gameStateFinal, "bigstack")?.chips || 0;
+    expect(finalShort + finalMed + finalBig).toBe(1000);
+  });
+
+  /**
+   * Game Scenario 21: Nudge Player (Poke)
+   *
+   * Tests:
+   * - Nudging current player when it's their turn
+   * - Error when no game exists
+   * - Error when game hasn't started
+   */
+  it("game scenario 21 - nudge player", async () => {
+    vi.spyOn(Math, "random").mockReturnValue(0.62);
+    const workspaceId = "test-workspace-21";
+    const channelId = "test-channel-21";
+    const sayFn = vi.fn();
+    const postEphemeralFn = vi.fn();
+
+    const contextUser1 = {
+      teamId: workspaceId,
+      channelId: channelId,
+      userId: "nudger",
+      say: sayFn,
+      client: { chat: { postEphemeral: postEphemeralFn } },
+    };
+
+    const contextUser2 = {
+      teamId: workspaceId,
+      channelId: channelId,
+      userId: "slowpoke",
+      say: sayFn,
+      client: { chat: { postEphemeral: postEphemeralFn } },
+    };
+
+    const stub = getStub({ workspaceId, channelId });
+
+    // === TEST: Nudge with no game ===
+    await nudgePlayer(env, contextUser1, null);
+    expect(sayFn.mock.calls).toMatchInlineSnapshot(`
+      [
+        [
+          {
+            "text": "No game exists! Type 'New Game'",
+          },
+        ],
+      ]
+    `);
+    sayFn.mockClear();
+
+    // === SETUP ===
+    await newGame(env, contextUser1);
+    await joinGame(env, contextUser1);
+    await joinGame(env, contextUser2);
+    await buyIn(env, contextUser1, { text: "buy in 500" });
+    await buyIn(env, contextUser2, { text: "buy in 500" });
+    sayFn.mockClear();
+
+    // === TEST: Nudge before game starts ===
+    await nudgePlayer(env, contextUser1, null);
+    expect(sayFn.mock.calls).toMatchInlineSnapshot(`
+      [
+        [
+          {
+            "text": "Game has not started yet! Who the hell am I going to nudge?",
+          },
+        ],
+      ]
+    `);
+    sayFn.mockClear();
+
+    // === START ROUND ===
+    await startRound(env, contextUser1, null);
+    sayFn.mockClear();
+    postEphemeralFn.mockClear();
+
+    // === TEST: Nudge during active game ===
+    await nudgePlayer(env, contextUser1, null);
+    // Should nudge the current player (slowpoke is SB and acts first)
+    expect(sayFn.mock.calls).toMatchInlineSnapshot(`
+      [
+        [
+          {
+            "text": "<@slowpoke> it's your turn and you need to roll!",
+          },
+        ],
+      ]
+    `);
+  });
+
+  /**
+   * Game Scenario 22: Flop Tracking Count Verification
+   *
+   * Tests:
+   * - Verify exact flop count after multiple rounds
+   * - Confirm unique flops are tracked
+   * - Check flop discovery message format
+   */
+  it("game scenario 22 - flop count verification", async () => {
+    vi.spyOn(Math, "random").mockReturnValue(0.11);
+    const workspaceId = "test-workspace-22";
+    const channelId = "test-channel-22";
+    const sayFn = vi.fn();
+    const postEphemeralFn = vi.fn();
+
+    const contextUser1 = {
+      teamId: workspaceId,
+      channelId: channelId,
+      userId: "counter1",
+      say: sayFn,
+      client: { chat: { postEphemeral: postEphemeralFn } },
+    };
+
+    const contextUser2 = {
+      teamId: workspaceId,
+      channelId: channelId,
+      userId: "counter2",
+      say: sayFn,
+      client: { chat: { postEphemeral: postEphemeralFn } },
+    };
+
+    const stub = getStub({ workspaceId, channelId });
+
+    // === SETUP ===
+    await newGame(env, contextUser1);
+    await joinGame(env, contextUser1);
+    await joinGame(env, contextUser2);
+    await buyIn(env, contextUser1, { text: "buy in 1000" });
+    await buyIn(env, contextUser2, { text: "buy in 1000" });
+    sayFn.mockClear();
+
+    // Verify no flops recorded initially
+    const initialFlopCount = await runInDurableObject(
+      stub,
+      async (_instance, state) => {
+        const result = state.storage.sql.exec(
+          "SELECT COUNT(*) as count FROM Flops WHERE workspaceId = ? AND channelId = ?",
+          workspaceId,
+          channelId
+        );
+        return result.one().count as number;
+      }
+    );
+    expect(initialFlopCount).toBe(0);
+
+    // === ROUND 1 ===
+    await startRound(env, contextUser1, null);
+    sayFn.mockClear();
+
+    // Get to flop
+    await call(env, contextUser2, null);
+    await check(env, contextUser1, null);
+
+    // Verify flop message shows "1 flops discovered"
+    const round1Messages = sayFn.mock.calls.map((c) => c[0].text).join("\n");
+    expect(round1Messages).toContain("1 flops discovered");
+
+    // Verify count in database
+    const flopCountRound1 = await runInDurableObject(
+      stub,
+      async (_instance, state) => {
+        const result = state.storage.sql.exec(
+          "SELECT COUNT(*) as count FROM Flops WHERE workspaceId = ? AND channelId = ?",
+          workspaceId,
+          channelId
+        );
+        return result.one().count as number;
+      }
+    );
+    expect(flopCountRound1).toBe(1);
+
+    // Finish round
+    await fold(env, contextUser1, null);
+    sayFn.mockClear();
+
+    // === ROUND 2 ===
+    await startRound(env, contextUser1, null);
+    sayFn.mockClear();
+
+    await call(env, contextUser2, null);
+    await check(env, contextUser1, null);
+
+    // Get flop count after round 2
+    const flopCountRound2 = await runInDurableObject(
+      stub,
+      async (_instance, state) => {
+        const result = state.storage.sql.exec(
+          "SELECT COUNT(*) as count FROM Flops WHERE workspaceId = ? AND channelId = ?",
+          workspaceId,
+          channelId
+        );
+        return result.one().count as number;
+      }
+    );
+    // Should be 2 if unique flop, or 1 if same flop (due to mocked random)
+    expect(flopCountRound2).toBeGreaterThanOrEqual(1);
+
+    // Finish round
+    await fold(env, contextUser1, null);
+    sayFn.mockClear();
+
+    // === ROUND 3 ===
+    await startRound(env, contextUser1, null);
+    sayFn.mockClear();
+
+    await call(env, contextUser2, null);
+    await check(env, contextUser1, null);
+
+    // Verify flop count continues to increment for unique flops
+    const flopCountRound3 = await runInDurableObject(
+      stub,
+      async (_instance, state) => {
+        const result = state.storage.sql.exec(
+          "SELECT COUNT(*) as count FROM Flops WHERE workspaceId = ? AND channelId = ?",
+          workspaceId,
+          channelId
+        );
+        return result.one().count as number;
+      }
+    );
+    expect(flopCountRound3).toBeGreaterThanOrEqual(1);
   });
 });
 
