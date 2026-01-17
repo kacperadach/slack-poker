@@ -24,6 +24,7 @@ import {
   showChips,
   showStacks,
   nudgePlayer,
+  takeHerToThe,
 } from "..";
 import { MARCUS_USER_ID, CAMDEN_USER_ID, YUVI_USER_ID } from "../users";
 import {
@@ -3162,6 +3163,207 @@ describe("Poker Durable Object", () => {
     expect(stacksMessage).toMatch(/Marcus: 500 \(Active\)/);
     expect(stacksMessage).toMatch(/Yuvi: 400 \(Active\)/);
     expect(stacksMessage).toMatch(/Camden: 300 \(Inactive\)/);
+  });
+
+  /**
+   * Game Scenario 23: "Take her to the flop/turn/river" phrases
+   *
+   * Tests:
+   * - "lets take her to the flop" only works in PreFlop (performs call or check)
+   * - "lets take her to the turn" only works on Flop
+   * - "lets take her to the river" only works on Turn
+   * - Error messages when phrase used in wrong state
+   */
+  it("game scenario 23 - take her to the flop/turn/river", async () => {
+    vi.spyOn(Math, "random").mockReturnValue(0.5);
+    const workspaceId = "test-workspace-23";
+    const channelId = "test-channel-23";
+    const sayFn = vi.fn();
+    const postEphemeralFn = vi.fn();
+
+    const contextUser1 = createContext({
+      userId: "player1",
+      sayFn,
+      postEphemeralFn,
+      workspaceId,
+      channelId,
+    });
+    const contextUser2 = createContext({
+      userId: "player2",
+      sayFn,
+      postEphemeralFn,
+      workspaceId,
+      channelId,
+    });
+
+    const stub = getStub({ workspaceId, channelId });
+
+    // === SETUP ===
+    await newGame(env, contextUser1, createGenericMessageEvent("player1"));
+    await joinGame(env, contextUser1, createGenericMessageEvent("player1"));
+    await joinGame(env, contextUser2, createGenericMessageEvent("player2"));
+    await buyIn(
+      env,
+      contextUser1,
+      createGenericMessageEvent("player1", "buy in 500")
+    );
+    await buyIn(
+      env,
+      contextUser2,
+      createGenericMessageEvent("player2", "buy in 500")
+    );
+    sayFn.mockClear();
+
+    // === START ROUND ===
+    await startRound(env, contextUser1, createGenericMessageEvent("player1"));
+    const gameStateStart = await getGameState(stub, workspaceId, channelId);
+    expect(gameStateStart.gameState).toBe(GameState.PreFlop);
+    sayFn.mockClear();
+    postEphemeralFn.mockClear();
+
+    // === TEST: Wrong phrase in PreFlop ===
+    // player2 (SB) tries "lets take her to the turn" - should fail (wrong state)
+    await takeHerToThe(
+      env,
+      contextUser2,
+      createGenericMessageEvent("player2", "lets take her to the turn")
+    );
+    expect(sayFn.mock.calls).toMatchInlineSnapshot(`
+      [
+        [
+          {
+            "text": "We're not on the flop! Can't take her to the turn from here.",
+          },
+        ],
+      ]
+    `);
+    sayFn.mockClear();
+
+    // === TEST: Correct phrase in PreFlop (call) ===
+    // player2 (SB) uses "lets take her to the flop" - should call to match BB
+    await takeHerToThe(
+      env,
+      contextUser2,
+      createGenericMessageEvent("player2", "lets take her to the flop")
+    );
+    expect(sayFn.mock.calls).toMatchInlineSnapshot(`
+      [
+        [
+          {
+            "text": "<@player2> called 80 chips! Total Pot: 160
+      <@player1>'s turn",
+          },
+        ],
+      ]
+    `);
+    sayFn.mockClear();
+
+    // === TEST: Correct phrase in PreFlop (check) ===
+    // player1 (BB) uses "lets take her to the flop" - should check (already matched)
+    await takeHerToThe(
+      env,
+      contextUser1,
+      createGenericMessageEvent("player1", "lets take her to the flop")
+    );
+    const gameStateFlop = await getGameState(stub, workspaceId, channelId);
+    expect(gameStateFlop.gameState).toBe(GameState.Flop);
+    expect(sayFn.mock.calls[0][0].text).toContain("checked");
+    sayFn.mockClear();
+    postEphemeralFn.mockClear();
+
+    // === TEST: Wrong phrase on Flop ===
+    // player2 tries "lets take her to the flop" - should fail (already on flop)
+    await takeHerToThe(
+      env,
+      contextUser2,
+      createGenericMessageEvent("player2", "lets take her to the flop")
+    );
+    expect(sayFn.mock.calls).toMatchInlineSnapshot(`
+      [
+        [
+          {
+            "text": "We're not in pre-flop! Can't take her to the flop from here.",
+          },
+        ],
+      ]
+    `);
+    sayFn.mockClear();
+
+    // === TEST: Correct phrase on Flop (check) ===
+    // player2 uses "lets take her to the turn" - should check (no bets)
+    await takeHerToThe(
+      env,
+      contextUser2,
+      createGenericMessageEvent("player2", "lets take her to the turn")
+    );
+    expect(sayFn.mock.calls[0][0].text).toContain("checked");
+    sayFn.mockClear();
+
+    // player1 also checks to advance to turn
+    await takeHerToThe(
+      env,
+      contextUser1,
+      createGenericMessageEvent("player1", "lets take her to the turn")
+    );
+    const gameStateTurn = await getGameState(stub, workspaceId, channelId);
+    expect(gameStateTurn.gameState).toBe(GameState.Turn);
+    sayFn.mockClear();
+    postEphemeralFn.mockClear();
+
+    // === TEST: Wrong phrase on Turn ===
+    // player2 tries "lets take her to the turn" - should fail (already on turn)
+    await takeHerToThe(
+      env,
+      contextUser2,
+      createGenericMessageEvent("player2", "lets take her to the turn")
+    );
+    expect(sayFn.mock.calls).toMatchInlineSnapshot(`
+      [
+        [
+          {
+            "text": "We're not on the flop! Can't take her to the turn from here.",
+          },
+        ],
+      ]
+    `);
+    sayFn.mockClear();
+
+    // === TEST: Correct phrase on Turn (check) ===
+    // player2 uses "lets take her to the river" - should check
+    await takeHerToThe(
+      env,
+      contextUser2,
+      createGenericMessageEvent("player2", "lets take her to the river")
+    );
+    expect(sayFn.mock.calls[0][0].text).toContain("checked");
+    sayFn.mockClear();
+
+    // player1 also checks to advance to river
+    await takeHerToThe(
+      env,
+      contextUser1,
+      createGenericMessageEvent("player1", "lets take her to the river")
+    );
+    const gameStateRiver = await getGameState(stub, workspaceId, channelId);
+    expect(gameStateRiver.gameState).toBe(GameState.River);
+    sayFn.mockClear();
+
+    // === TEST: Wrong phrase on River ===
+    // player2 tries "lets take her to the river" - should fail (already on river)
+    await takeHerToThe(
+      env,
+      contextUser2,
+      createGenericMessageEvent("player2", "lets take her to the river")
+    );
+    expect(sayFn.mock.calls).toMatchInlineSnapshot(`
+      [
+        [
+          {
+            "text": "We're not on the turn! Can't take her to the river from here.",
+          },
+        ],
+      ]
+    `);
   });
 });
 

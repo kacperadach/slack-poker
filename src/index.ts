@@ -325,6 +325,9 @@ const MESSAGE_HANDLERS = {
   fsearch: searchFlops,
   context: context,
   stacks: showStacks,
+  "lets take her to the flop": takeHerToThe,
+  "lets take her to the turn": takeHerToThe,
+  "lets take her to the river": takeHerToThe,
 };
 
 function cleanMessageText(messageText: string) {
@@ -942,6 +945,45 @@ export async function check(
   await sendGameEventMessages(env, context, game);
 }
 
+export async function takeHerToThe(
+  env: Env,
+  context: SlackAppContextWithChannelId,
+  payload: PostedMessage
+) {
+  const game = await fetchGame(env, context);
+  if (!game) {
+    await context.say({ text: `No game exists! Type 'New Game'` });
+    return;
+  }
+
+  const messageText = cleanMessageText(payload.text);
+  const currentState = game.getGameState();
+
+  // Match exact phrases and validate game state
+  if (messageText.startsWith("lets take her to the flop")) {
+    if (currentState !== GameState.PreFlop) {
+      await context.say({ text: `We're not in pre-flop! Can't take her to the flop from here.` });
+      return;
+    }
+  } else if (messageText.startsWith("lets take her to the turn")) {
+    if (currentState !== GameState.Flop) {
+      await context.say({ text: `We're not on the flop! Can't take her to the turn from here.` });
+      return;
+    }
+  } else if (messageText.startsWith("lets take her to the river")) {
+    if (currentState !== GameState.Turn) {
+      await context.say({ text: `We're not on the turn! Can't take her to the river from here.` });
+      return;
+    }
+  } else {
+    return;
+  }
+
+  game.callOrCheck(context.userId!);
+  await saveGame(env, context, game);
+  await sendGameEventMessages(env, context, game);
+}
+
 export async function fold(
   env: Env,
   context: SlackAppContextWithChannelId,
@@ -1129,10 +1171,10 @@ export async function newGame(
 }
 
 async function fetchGame(env: Env, context: SlackAppContextWithChannelId) {
-  const workspaceId = context.teamId;
+  const workspaceId = context.teamId!;
   const channelId = context.channelId;
   const stub = getDurableObject(env, context);
-  const game = await stub.fetchGame(workspaceId!, channelId);
+  const game = await stub.fetchGame(workspaceId, channelId);
 
   if (!game) {
     return null;
@@ -1198,16 +1240,16 @@ async function sendGameEventMessages(
 
       const stub = getDurableObject(env, context);
 
-      const workspaceId = context.teamId;
+      const workspaceId = context.teamId!;
       const channelId = context.channelId;
 
       const flopString = getFlopString(event.getCards());
 
-      const flop = await stub.getFlop(workspaceId!, channelId, flopString);
+      const flop = await stub.getFlop(workspaceId, channelId, flopString);
       if (!flop) {
         message = `*NEW* ` + message;
         const flopCount = await stub.addFlop(
-          workspaceId!,
+          workspaceId,
           channelId,
           flopString,
           Date.now()
