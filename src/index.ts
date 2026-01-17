@@ -1,15 +1,14 @@
 import { DurableObject } from "cloudflare:workers";
 import {
+  AnyMessageEvent,
   SlackApp,
-  SlackEdgeAppEnv,
+  SlackAppContextWithChannelId,
   isPostedMessageEvent,
 } from "slack-cloudflare-workers";
 import { GameState, TexasHoldem } from "./Game";
-import { GameEvent } from "./GameEvent";
-import { Player } from "./Player";
 import { Card } from "./Card";
-
-const { rankDescription, rankCards } = require("phe");
+// @ts-ignore phe is not typed
+import { rankDescription, rankCards } from "phe";
 
 /**
  * Welcome to Cloudflare Workers! This is your first Durable Objects application.
@@ -120,7 +119,10 @@ export class PokerDurableObject extends DurableObject<Env> {
 
     const flops = [];
     for (const row of result) {
-      flops.push(row);
+      flops.push({
+        createdAt: row.createdAt as number,
+        flop: row.flop as string,
+      });
     }
 
     return flops;
@@ -195,6 +197,12 @@ export class PokerDurableObject extends DurableObject<Env> {
     );
   }
 }
+
+type PostedMessage = typeof isPostedMessageEvent extends (
+  arg: any
+) => arg is infer R
+  ? R
+  : never;
 
 export default {
   async fetch(
@@ -327,7 +335,11 @@ function cleanMessageText(messageText: string) {
     .trim();
 }
 
-async function handleMessage(env: Env, context, payload) {
+async function handleMessage(
+  env: Env,
+  context: SlackAppContextWithChannelId,
+  payload: PostedMessage
+) {
   if (!isPostedMessageEvent(payload)) {
     return;
   }
@@ -347,7 +359,11 @@ async function handleMessage(env: Env, context, payload) {
   }
 }
 
-async function getGameState(env, context, payload) {
+async function getGameState(
+  env: Env,
+  context: SlackAppContextWithChannelId,
+  _payload: AnyMessageEvent
+) {
   const game = await fetchGame(env, context);
   if (!game) {
     await context.say({ text: `No game exists! Type 'New Game'` });
@@ -358,12 +374,16 @@ async function getGameState(env, context, payload) {
   await sendGameEventMessages(env, context, game);
 }
 
-async function context(env, context, payload) {
+async function context(
+  env: Env,
+  context: SlackAppContextWithChannelId,
+  _payload: PostedMessage
+) {
   const game = await fetchGame(env, context);
   if (!game) {
     await context.client.chat.postEphemeral({
       channel: context.channelId,
-      user: context.userId,
+      user: context.userId!,
       text: `No game exists! Type 'New Game'`,
     });
     return;
@@ -404,7 +424,7 @@ async function context(env, context, payload) {
   if (!activePlayer) {
     await context.client.chat.postEphemeral({
       channel: context.channelId,
-      user: context.userId,
+      user: context.userId!,
       text: `You are not in the game!`,
     });
     return;
@@ -413,7 +433,7 @@ async function context(env, context, payload) {
   if (inactivePlayer) {
     await context.client.chat.postEphemeral({
       channel: context.channelId,
-      user: context.userId,
+      user: context.userId!,
       text: `You are inactive. You are not at the table.`,
     });
     return;
@@ -425,7 +445,7 @@ async function context(env, context, payload) {
   const currentBetAmount = game.getCurrentBetAmount();
   const playerCurrentBet = player.getCurrentBet();
   const foldedPlayers = game.getFoldedPlayers();
-  const hasFolded = foldedPlayers.has(context.userId);
+  const hasFolded = foldedPlayers.has(context.userId!);
 
   let actionText = "";
   if (gameState === GameState.WaitingForPlayers) {
@@ -440,7 +460,7 @@ async function context(env, context, payload) {
   }
 
   // Get player's cards and community cards
-  const playerCards = game.getPlayerHand(context.userId);
+  const playerCards = game.getPlayerHand(context.userId!);
   const communityCards = game.getCommunityCards();
 
   // Get turn information
@@ -497,13 +517,17 @@ async function context(env, context, payload) {
 
   await context.client.chat.postEphemeral({
     channel: context.channelId,
-    user: context.userId,
+    user: context.userId!,
     text: message,
   });
 }
 
-async function searchFlops(env, context, payload) {
-  const workspaceId = context.teamId;
+async function searchFlops(
+  env: Env,
+  context: SlackAppContextWithChannelId,
+  payload: PostedMessage
+) {
+  const workspaceId = context.teamId!;
   const channelId = context.channelId;
   const stub = getDurableObject(env, context);
 
@@ -523,8 +547,12 @@ async function searchFlops(env, context, payload) {
   await context.say({ text: message });
 }
 
-async function showFlops(env, context, payload) {
-  const workspaceId = context.teamId;
+async function showFlops(
+  env: Env,
+  context: SlackAppContextWithChannelId,
+  _payload: PostedMessage
+) {
+  const workspaceId = context.teamId!;
   const channelId = context.channelId;
   const stub = getDurableObject(env, context);
 
@@ -559,17 +587,29 @@ async function showFlops(env, context, payload) {
   await context.say({ text: message });
 }
 
-async function ass(env, context, payload) {
+async function ass(
+  _env: Env,
+  context: SlackAppContextWithChannelId,
+  _payload: PostedMessage
+) {
   await context.say({ text: "ASS" });
 }
 
-async function drillGto(env, context, payload) {
+async function drillGto(
+  _env: Env,
+  context: SlackAppContextWithChannelId,
+  _payload: PostedMessage
+) {
   await context.say({
     text: `<@${context.userId}> is drilling GTO! :drill-gto:`,
   });
 }
 
-export async function nudgePlayer(env, context, payload) {
+export async function nudgePlayer(
+  env: Env,
+  context: SlackAppContextWithChannelId,
+  _payload: PostedMessage
+) {
   const game = await fetchGame(env, context);
   if (!game) {
     await context.say({ text: `No game exists! Type 'New Game'` });
@@ -596,17 +636,29 @@ export async function nudgePlayer(env, context, payload) {
   });
 }
 
-async function commitSeppuku(env, context, payload) {
+async function commitSeppuku(
+  _env: Env,
+  context: SlackAppContextWithChannelId,
+  _payload: PostedMessage
+) {
   await context.say({ text: `Hai` });
 }
 
-async function scoreDice(env, context, payload) {
+async function scoreDice(
+  _env: Env,
+  context: SlackAppContextWithChannelId,
+  payload: PostedMessage
+) {
   const messageText = payload.text.toLowerCase();
   const scored = messageText.replace("score", "").trim();
   await context.say({ text: `Scored: ${scored}` });
 }
 
-async function keepDice(env, context, payload) {
+async function keepDice(
+  env: Env,
+  context: SlackAppContextWithChannelId,
+  payload: PostedMessage
+) {
   const messageText = payload.text.toLowerCase();
   const numbersToKeep = Array.from(messageText.replace("keep", "").trim())
     .map(Number)
@@ -614,7 +666,12 @@ async function keepDice(env, context, payload) {
   await rollDice(env, context, payload, numbersToKeep);
 }
 
-async function rollDice(env, context, payload, keepDice: number[] = []) {
+async function rollDice(
+  _env: Env,
+  context: SlackAppContextWithChannelId,
+  _payload: PostedMessage,
+  keepDice: number[] = []
+) {
   const diceRolls = [
     ...keepDice,
     ...Array.from(
@@ -626,7 +683,11 @@ async function rollDice(env, context, payload, keepDice: number[] = []) {
   await context.say({ text: `Here are some dice: *${diceRolls.join(" ")}*` });
 }
 
-async function help(env, context, payload) {
+async function help(
+  _env: Env,
+  context: SlackAppContextWithChannelId,
+  _payload: PostedMessage
+) {
   const commands = Object.keys(MESSAGE_HANDLERS).join("\n");
   await context.say({
     text: `Available commands:\n${commands
@@ -636,7 +697,11 @@ async function help(env, context, payload) {
   });
 }
 
-export async function revealCards(env, context, payload) {
+export async function revealCards(
+  env: Env,
+  context: SlackAppContextWithChannelId,
+  _payload: PostedMessage
+) {
   const game = await fetchGame(env, context);
   if (!game) {
     await context.say({ text: `No game exists! Type 'New Game'` });
@@ -649,18 +714,22 @@ export async function revealCards(env, context, payload) {
     return;
   }
 
-  game.showCards(context.userId, true);
+  game.showCards(context.userId!, true);
   await sendGameEventMessages(env, context, game);
 }
 
-export async function showCards(env, context, payload) {
+export async function showCards(
+  env: Env,
+  context: SlackAppContextWithChannelId,
+  _payload: PostedMessage
+) {
   const game = await fetchGame(env, context);
   if (!game) {
     await context.say({ text: `No game exists! Type 'New Game'` });
     return;
   }
 
-  game.showCards(context.userId, false);
+  game.showCards(context.userId!, false);
   await sendGameEventMessages(env, context, game);
 }
 
@@ -677,79 +746,107 @@ export async function showCards(env, context, payload) {
 // 	await sendGameEventMessages(context, game);
 // }
 
-export async function preDeal(env, context, payload) {
+export async function preDeal(
+  env: Env,
+  context: SlackAppContextWithChannelId,
+  _payload: PostedMessage
+) {
   const game = await fetchGame(env, context);
   if (!game) {
     await context.say({ text: `No game exists! Type 'New Game'` });
     return;
   }
 
-  game.preDeal(context.userId);
+  game.preDeal(context.userId!);
   await saveGame(env, context, game);
   await sendGameEventMessages(env, context, game);
 }
 
-export async function preNH(env, context, payload) {
+export async function preNH(
+  env: Env,
+  context: SlackAppContextWithChannelId,
+  _payload: PostedMessage
+) {
   const game = await fetchGame(env, context);
   if (!game) {
     await context.say({ text: `No game exists! Type 'New Game'` });
     return;
   }
 
-  game.preNH(context.userId);
+  game.preNH(context.userId!);
   await saveGame(env, context, game);
   await sendGameEventMessages(env, context, game);
 }
 
-export async function preAH(env, context, payload) {
+export async function preAH(
+  env: Env,
+  context: SlackAppContextWithChannelId,
+  _payload: PostedMessage
+) {
   const game = await fetchGame(env, context);
   if (!game) {
     await context.say({ text: `No game exists! Type 'New Game'` });
     return;
   }
 
-  game.preAH(context.userId);
+  game.preAH(context.userId!);
   await saveGame(env, context, game);
   await sendGameEventMessages(env, context, game);
 }
 
-export async function preCheck(env, context, payload) {
+export async function preCheck(
+  env: Env,
+  context: SlackAppContextWithChannelId,
+  _payload: PostedMessage
+) {
   const game = await fetchGame(env, context);
   if (!game) {
     await context.say({ text: `No game exists! Type 'New Game'` });
     return;
   }
 
-  game.preCheck(context.userId);
+  game.preCheck(context.userId!);
   await saveGame(env, context, game);
   await sendGameEventMessages(env, context, game);
 }
 
-export async function preFold(env, context, payload) {
+export async function preFold(
+  env: Env,
+  context: SlackAppContextWithChannelId,
+  _payload: PostedMessage
+) {
   const game = await fetchGame(env, context);
   if (!game) {
     await context.say({ text: `No game exists! Type 'New Game'` });
     return;
   }
 
-  game.preFold(context.userId);
+  game.preFold(context.userId!);
   await saveGame(env, context, game);
   await sendGameEventMessages(env, context, game);
 }
 
-export async function preCall(env, context, payload) {
+export async function preCall(
+  env: Env,
+  context: SlackAppContextWithChannelId,
+  _payload: PostedMessage
+) {
   const game = await fetchGame(env, context);
   if (!game) {
     await context.say({ text: `No game exists! Type 'New Game'` });
     return;
   }
 
-  game.preCall(context.userId);
+  game.preCall(context.userId!);
   await saveGame(env, context, game);
   await sendGameEventMessages(env, context, game);
 }
 
-export async function preBet(env, context, payload) {
+export async function preBet(
+  env: Env,
+  context: SlackAppContextWithChannelId,
+  payload: PostedMessage
+) {
   const messageText = payload.text.toLowerCase();
   const betAmount = parseFloat(
     messageText
@@ -773,12 +870,16 @@ export async function preBet(env, context, payload) {
     return;
   }
 
-  game.preBet(context.userId, betAmount);
+  game.preBet(context.userId!, betAmount);
   await saveGame(env, context, game);
   await sendGameEventMessages(env, context, game);
 }
 
-export async function bet(env, context, payload) {
+export async function bet(
+  env: Env,
+  context: SlackAppContextWithChannelId,
+  payload: PostedMessage
+) {
   const messageText = cleanMessageText(payload.text);
   const betAmount = parseFloat(
     messageText
@@ -802,60 +903,80 @@ export async function bet(env, context, payload) {
     return;
   }
 
-  game.bet(context.userId, betAmount);
+  game.bet(context.userId!, betAmount);
   await saveGame(env, context, game);
   await sendGameEventMessages(env, context, game);
 }
 
-export async function call(env, context, payload) {
+export async function call(
+  env: Env,
+  context: SlackAppContextWithChannelId,
+  _payload: PostedMessage
+) {
   const game = await fetchGame(env, context);
   if (!game) {
     await context.say({ text: `No game exists! Type 'New Game'` });
     return;
   }
 
-  game.call(context.userId);
+  game.call(context.userId!);
   await saveGame(env, context, game);
   await sendGameEventMessages(env, context, game);
 }
 
-export async function check(env, context, payload) {
+async function check(
+  env: Env,
+  context: SlackAppContextWithChannelId,
+  _payload: PostedMessage
+) {
   const game = await fetchGame(env, context);
   if (!game) {
     await context.say({ text: `No game exists! Type 'New Game'` });
     return;
   }
 
-  game.check(context.userId);
+  game.check(context.userId!);
   await saveGame(env, context, game);
   await sendGameEventMessages(env, context, game);
 }
 
-export async function fold(env, context, payload) {
+export async function fold(
+  env: Env,
+  context: SlackAppContextWithChannelId,
+  _payload: PostedMessage
+) {
   const game = await fetchGame(env, context);
   if (!game) {
     await context.say({ text: `No game exists! Type 'New Game'` });
     return;
   }
 
-  game.fold(context.userId);
+  game.fold(context.userId!);
   await saveGame(env, context, game);
   await sendGameEventMessages(env, context, game);
 }
 
-export async function startRound(env, context, payload) {
+export async function startRound(
+  env: Env,
+  context: SlackAppContextWithChannelId,
+  _payload: PostedMessage
+) {
   const game = await fetchGame(env, context);
   if (!game) {
     await context.say({ text: `No game exists! Type 'New Game'` });
     return;
   }
 
-  game.startRound(context.userId);
+  game.startRound(context.userId!);
   await saveGame(env, context, game);
   await sendGameEventMessages(env, context, game);
 }
 
-export async function showChips(env, context, payload) {
+export async function showChips(
+  env: Env,
+  context: SlackAppContextWithChannelId,
+  _payload: PostedMessage
+) {
   const game = await fetchGame(env, context);
   if (!game) {
     await context.say({ text: `No game exists! Type 'New Game'` });
@@ -873,19 +994,27 @@ export async function showChips(env, context, payload) {
   await context.say({ text: message });
 }
 
-export async function cashOut(env, context, payload) {
+export async function cashOut(
+  env: Env,
+  context: SlackAppContextWithChannelId,
+  _payload: PostedMessage
+) {
   const game = await fetchGame(env, context);
   if (!game) {
     await context.say({ text: `No game exists! Type 'New Game'` });
     return;
   }
 
-  game.cashOut(context.userId);
+  game.cashOut(context.userId!);
   await saveGame(env, context, game);
   await sendGameEventMessages(env, context, game);
 }
 
-export async function buyIn(env, context, payload: { text: string }) {
+export async function buyIn(
+  env: Env,
+  context: SlackAppContextWithChannelId,
+  payload: PostedMessage
+) {
   const messageText = payload.text.toLowerCase();
   const buyInAmount = parseFloat(messageText.replace("buy in", "").trim());
 
@@ -902,36 +1031,48 @@ export async function buyIn(env, context, payload: { text: string }) {
     return;
   }
 
-  game.buyIn(context.userId, buyInAmount);
+  game.buyIn(context.userId!, buyInAmount);
   await saveGame(env, context, game);
   await sendGameEventMessages(env, context, game);
 }
 
-export async function leaveGame(env, context) {
+export async function leaveGame(
+  env: Env,
+  context: SlackAppContextWithChannelId,
+  _payload: PostedMessage
+) {
   const game = await fetchGame(env, context);
   if (!game) {
     await context.say({ text: `No game exists! Type 'New Game'` });
     return;
   }
 
-  game.removePlayer(context.userId);
+  game.removePlayer(context.userId!);
   await saveGame(env, context, game);
   await sendGameEventMessages(env, context, game);
 }
 
-export async function joinGame(env, context) {
+export async function joinGame(
+  env: Env,
+  context: SlackAppContextWithChannelId,
+  _payload: PostedMessage
+) {
   const game = await fetchGame(env, context);
   if (!game) {
     await context.say({ text: `No game exists! Type 'New Game'` });
     return;
   }
 
-  game.addPlayer(context.userId);
+  game.addPlayer(context.userId!);
   await saveGame(env, context, game);
   await sendGameEventMessages(env, context, game);
 }
 
-export async function newGame(env, context) {
+export async function newGame(
+  env: Env,
+  context: SlackAppContextWithChannelId,
+  _payload: PostedMessage
+) {
   const game = await fetchGame(env, context);
   if (game) {
     const allPlayers = [
@@ -949,18 +1090,18 @@ export async function newGame(env, context) {
   }
   const stub = getDurableObject(env, context);
   stub.createGame(
-    context.teamId,
+    context.teamId!,
     context.channelId,
     JSON.stringify(new TexasHoldem().toJson())
   );
   await context.say({ text: `New Poker Game created!` });
 }
 
-async function fetchGame(env, context) {
+async function fetchGame(env: Env, context: SlackAppContextWithChannelId) {
   const workspaceId = context.teamId;
   const channelId = context.channelId;
   const stub = getDurableObject(env, context);
-  const game = await stub.fetchGame(workspaceId, channelId);
+  const game = await stub.fetchGame(workspaceId!, channelId);
 
   if (!game) {
     return null;
@@ -969,16 +1110,20 @@ async function fetchGame(env, context) {
   return TexasHoldem.fromJson(game);
 }
 
-async function saveGame(env, context, game: TexasHoldem) {
-  const workspaceId = context.teamId;
+async function saveGame(
+  env: Env,
+  context: SlackAppContextWithChannelId,
+  game: TexasHoldem
+) {
+  const workspaceId = context.teamId!;
   const channelId = context.channelId;
   const stub = getDurableObject(env, context);
 
   await stub.saveGame(workspaceId, channelId, JSON.stringify(game.toJson()));
 }
 
-function getDurableObject(env, context) {
-  const workspaceId = context.teamId;
+function getDurableObject(env: Env, context: SlackAppContextWithChannelId) {
+  const workspaceId = context.teamId!;
   const channelId = context.channelId;
 
   const id: DurableObjectId = env.POKER_DURABLE_OBJECT.idFromName(
@@ -988,7 +1133,11 @@ function getDurableObject(env, context) {
   return env.POKER_DURABLE_OBJECT.get(id);
 }
 
-async function sendGameEventMessages(env, context, game: TexasHoldem) {
+async function sendGameEventMessages(
+  env: Env,
+  context: SlackAppContextWithChannelId,
+  game: TexasHoldem
+) {
   let events = game.getEvents();
   // Filter turn messages to keep only the last one
   let lastTurnMessageIndex = -1;
@@ -1023,11 +1172,11 @@ async function sendGameEventMessages(env, context, game: TexasHoldem) {
 
       const flopString = getFlopString(event.getCards());
 
-      const flop = await stub.getFlop(workspaceId, channelId, flopString);
+      const flop = await stub.getFlop(workspaceId!, channelId, flopString);
       if (!flop) {
         message = `*NEW* ` + message;
         const flopCount = await stub.addFlop(
-          workspaceId,
+          workspaceId!,
           channelId,
           flopString,
           Date.now()
@@ -1044,11 +1193,14 @@ async function sendGameEventMessages(env, context, game: TexasHoldem) {
             flopsDiscoveredPercentage
           )}%), ${numberFormatter.format(22100 - flopCount)} remain`;
       } else {
-        const human = new Date(flop.createdAt).toLocaleDateString("en-US", {
-          year: "numeric",
-          month: "2-digit",
-          day: "2-digit",
-        });
+        const human = new Date(flop.createdAt as number).toLocaleDateString(
+          "en-US",
+          {
+            year: "numeric",
+            month: "2-digit",
+            day: "2-digit",
+          }
+        );
         message = `Flop (First Seen ${human}):`;
         skipFlop = false;
       }
@@ -1101,13 +1253,13 @@ function getFlopString(cards: Card[]) {
     .join("");
 }
 
-function formatFlop(flop) {
+function formatFlop(flop: { createdAt: number; flop: string }) {
   const date = new Date(flop.createdAt).toLocaleDateString("en-US", {
     year: "numeric",
     month: "2-digit",
     day: "2-digit",
   });
-  return `${flop.flop.replace(/[dhsc]/g, (match: any) => {
+  return `${flop.flop.replace(/[dhsc]/g, (match: string) => {
     switch (match) {
       case "d":
         return ":diamonds:";
