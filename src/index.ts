@@ -713,7 +713,7 @@ async function preAH(env, context, payload) {
   await sendGameEventMessages(env, context, game);
 }
 
-async function preCheck(env, context, payload) {
+export async function preCheck(env, context, payload) {
   const game = await fetchGame(env, context);
   if (!game) {
     await context.say({ text: `No game exists! Type 'New Game'` });
@@ -725,7 +725,7 @@ async function preCheck(env, context, payload) {
   await sendGameEventMessages(env, context, game);
 }
 
-async function preFold(env, context, payload) {
+export async function preFold(env, context, payload) {
   const game = await fetchGame(env, context);
   if (!game) {
     await context.say({ text: `No game exists! Type 'New Game'` });
@@ -737,7 +737,7 @@ async function preFold(env, context, payload) {
   await sendGameEventMessages(env, context, game);
 }
 
-async function preCall(env, context, payload) {
+export async function preCall(env, context, payload) {
   const game = await fetchGame(env, context);
   if (!game) {
     await context.say({ text: `No game exists! Type 'New Game'` });
@@ -873,7 +873,7 @@ async function showChips(env, context, payload) {
   await context.say({ text: message });
 }
 
-async function cashOut(env, context, payload) {
+export async function cashOut(env, context, payload) {
   const game = await fetchGame(env, context);
   if (!game) {
     await context.say({ text: `No game exists! Type 'New Game'` });
@@ -907,7 +907,7 @@ export async function buyIn(env, context, payload: { text: string }) {
   await sendGameEventMessages(env, context, game);
 }
 
-async function leaveGame(env, context) {
+export async function leaveGame(env, context) {
   const game = await fetchGame(env, context);
   if (!game) {
     await context.say({ text: `No game exists! Type 'New Game'` });
