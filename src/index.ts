@@ -1555,62 +1555,6 @@ type HandlerMeta = {
 
 type GameEventJson = ReturnType<GameEvent["toJson"]>;
 
-function buildRoundStartAction(
-  game: TexasHoldem,
-  context: SlackAppContextWithChannelId,
-  payload: PostedMessage
-): RoundStartActionV1 {
-  const state = game.getState();
-  const playerOrder = state.activePlayers.map((p) => p.id);
-  const playerStacks: Record<string, number> = {};
-  const playerCards: Record<string, [string, string]> = {};
-
-  state.activePlayers.forEach((p) => {
-    playerStacks[p.id] = p.chips;
-    if (p.cards.length === 2) {
-      playerCards[p.id] = [p.cards[0].toString(), p.cards[1].toString()];
-    }
-  });
-
-  // Get community cards from deck (they're predetermined at shuffle)
-  const communityCards = state.communityCards.map((c) => c.toString());
-  // Pad to 5 cards if not all dealt yet - get from deck
-  const fullCommunityCards: [string, string, string, string, string] = [
-    communityCards[0] ?? "",
-    communityCards[1] ?? "",
-    communityCards[2] ?? "",
-    communityCards[3] ?? "",
-    communityCards[4] ?? "",
-  ];
-
-  // Determine small blind and big blind players
-  const numPlayers = playerOrder.length;
-  const dealerPos = state.dealerPosition;
-  const sbPos = numPlayers === 2 ? dealerPos : (dealerPos + 1) % numPlayers;
-  const bbPos =
-    numPlayers === 2
-      ? (dealerPos + 1) % numPlayers
-      : (dealerPos + 2) % numPlayers;
-
-  return {
-    schemaVersion: 1,
-    workspaceId: context.teamId!,
-    channelId: context.channelId,
-    timestamp: Date.now(),
-    actionType: "round_start",
-    messageText: payload.text ?? "",
-    dealerPosition: state.dealerPosition,
-    playerOrder,
-    playerStacks,
-    playerCards,
-    communityCards: fullCommunityCards,
-    smallBlindPlayerId: playerOrder[sbPos] ?? "",
-    smallBlindAmount: state.smallBlind,
-    bigBlindPlayerId: playerOrder[bbPos] ?? "",
-    bigBlindAmount: state.bigBlind,
-  };
-}
-
 async function handleMessage(
   env: Env,
   context: SlackAppContextWithChannelId,
@@ -2777,18 +2721,6 @@ async function fetchGame(env: Env, context: SlackAppContextWithChannelId) {
   }
 
   return TexasHoldem.fromJson(game);
-}
-
-async function saveGame(
-  env: Env,
-  context: SlackAppContextWithChannelId,
-  game: TexasHoldem
-) {
-  const workspaceId = context.teamId!;
-  const channelId = context.channelId;
-  const stub = getDurableObject(env, context);
-
-  await stub.saveGame(workspaceId, channelId, JSON.stringify(game.toJson()));
 }
 
 async function sendGameStateMessages(

@@ -1566,7 +1566,10 @@ export class TexasHoldem {
       foldedPlayers: Array.from(this.foldedPlayers),
       currentBetAmount: this.currentBetAmount,
       lastRaiseAmount: this.lastRaiseAmount,
-      playerPositions: Array.from(this.playerPositions.entries()),
+      playerPositions: Array.from(this.playerPositions.entries()) as (
+        | string
+        | number
+      )[][],
       preDealId: this.preDealId,
     } as const;
   }
