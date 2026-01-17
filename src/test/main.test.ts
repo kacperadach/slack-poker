@@ -22,8 +22,10 @@ import {
   showCards,
   revealCards,
   showChips,
+  showStacks,
   nudgePlayer,
 } from "..";
+import { MARCUS_USER_ID, CAMDEN_USER_ID, YUVI_USER_ID } from "../users";
 import {
   GenericMessageEvent,
   SlackAppContextWithChannelId,
@@ -3062,6 +3064,104 @@ describe("Poker Durable Object", () => {
       }
     );
     expect(flopCountRound3).toBeGreaterThanOrEqual(1);
+  });
+
+  it("shows stacks for active and inactive players without tagging", async () => {
+    const workspaceId = "stacks-test-workspace";
+    const channelId = "stacks-test-channel";
+    const sayFn = vi.fn();
+    const postEphemeralFn = vi.fn();
+
+    // Create contexts for real users (Marcus, Camden, Yuvi)
+    const contextMarcus = createContext({
+      userId: MARCUS_USER_ID,
+      sayFn,
+      postEphemeralFn,
+      workspaceId,
+      channelId,
+    });
+    const contextCamden = createContext({
+      userId: CAMDEN_USER_ID,
+      sayFn,
+      postEphemeralFn,
+      workspaceId,
+      channelId,
+    });
+    const contextYuvi = createContext({
+      userId: YUVI_USER_ID,
+      sayFn,
+      postEphemeralFn,
+      workspaceId,
+      channelId,
+    });
+
+    const payloadMarcus = createGenericMessageEvent(MARCUS_USER_ID);
+    const payloadCamden = createGenericMessageEvent(CAMDEN_USER_ID);
+    const payloadYuvi = createGenericMessageEvent(YUVI_USER_ID);
+
+    // Start new game
+    await newGame(env, contextMarcus, payloadMarcus);
+    sayFn.mockClear();
+
+    // All three players join and buy in
+    await joinGame(env, contextMarcus, payloadMarcus);
+    await buyIn(
+      env,
+      contextMarcus,
+      createGenericMessageEvent(MARCUS_USER_ID, "buy in 500")
+    );
+    sayFn.mockClear();
+
+    await joinGame(env, contextCamden, payloadCamden);
+    await buyIn(
+      env,
+      contextCamden,
+      createGenericMessageEvent(CAMDEN_USER_ID, "buy in 300")
+    );
+    sayFn.mockClear();
+
+    await joinGame(env, contextYuvi, payloadYuvi);
+    await buyIn(
+      env,
+      contextYuvi,
+      createGenericMessageEvent(YUVI_USER_ID, "buy in 400")
+    );
+    sayFn.mockClear();
+
+    // Camden leaves the table (becomes inactive)
+    await leaveGame(env, contextCamden, payloadCamden);
+    sayFn.mockClear();
+
+    // Call stacks command
+    await showStacks(env, contextMarcus, payloadMarcus);
+
+    // Verify the output shows names (not @mentions) and both active/inactive players
+    expect(sayFn).toHaveBeenCalledTimes(1);
+    const stacksMessage = sayFn.mock.calls[0][0].text;
+
+    // Should contain player names, NOT @mentions
+    expect(stacksMessage).toContain("Marcus");
+    expect(stacksMessage).toContain("Camden");
+    expect(stacksMessage).toContain("Yuvi");
+
+    // Should NOT contain @mentions (user IDs with < and >)
+    expect(stacksMessage).not.toContain(`<@${MARCUS_USER_ID}>`);
+    expect(stacksMessage).not.toContain(`<@${CAMDEN_USER_ID}>`);
+    expect(stacksMessage).not.toContain(`<@${YUVI_USER_ID}>`);
+
+    // Should show chip counts
+    expect(stacksMessage).toContain("500");
+    expect(stacksMessage).toContain("300");
+    expect(stacksMessage).toContain("400");
+
+    // Should show active/inactive status
+    expect(stacksMessage).toContain("(Active)");
+    expect(stacksMessage).toContain("(Inactive)");
+
+    // Verify Marcus and Yuvi are active, Camden is inactive
+    expect(stacksMessage).toMatch(/Marcus: 500 \(Active\)/);
+    expect(stacksMessage).toMatch(/Yuvi: 400 \(Active\)/);
+    expect(stacksMessage).toMatch(/Camden: 300 \(Inactive\)/);
   });
 });
 

@@ -9,6 +9,7 @@ import { GameState, TexasHoldem } from "./Game";
 import { Card } from "./Card";
 // @ts-ignore phe is not typed
 import { rankDescription, rankCards } from "phe";
+import { userIdToName } from "./users";
 
 /**
  * Welcome to Cloudflare Workers! This is your first Durable Objects application.
@@ -323,6 +324,7 @@ const MESSAGE_HANDLERS = {
   flops: showFlops,
   fsearch: searchFlops,
   context: context,
+  stacks: showStacks,
 };
 
 function cleanMessageText(messageText: string) {
@@ -991,6 +993,35 @@ export async function showChips(
   // game.getInactivePlayers().forEach((player) => {
   // 	message += `<@${player.getId()}>: ${player.getChips()} (Inactive)\n`;
   // });
+  await context.say({ text: message });
+}
+
+export async function showStacks(
+  env: Env,
+  context: SlackAppContextWithChannelId,
+  _payload: PostedMessage
+) {
+  const game = await fetchGame(env, context);
+  if (!game) {
+    await context.say({ text: `No game exists! Type 'New Game'` });
+    return;
+  }
+
+  let message = "*Stacks*\n";
+  game.getActivePlayers().forEach((player) => {
+    const name =
+      userIdToName[player.getId() as keyof typeof userIdToName] ||
+      player.getId();
+    message += `${name}: ${player.getChips()} (Active)\n`;
+  });
+
+  game.getInactivePlayers().forEach((player) => {
+    const name =
+      userIdToName[player.getId() as keyof typeof userIdToName] ||
+      player.getId();
+    message += `${name}: ${player.getChips()} (Inactive)\n`;
+  });
+
   await context.say({ text: message });
 }
 
