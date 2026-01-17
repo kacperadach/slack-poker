@@ -279,7 +279,7 @@ export class PokerDurableObject extends DurableObject<Env> {
     slackMessageTs: string;
     timestamp: number;
   }): Promise<
-    | { ok: true; events: ReturnType<GameEvent["toJson"]>[] }
+    | { ok: true; game: ReturnType<TexasHoldem["getState"]> }
     | { ok: false; reason: "no_game" }
   > {
     const existing = await this.fetchGame(data.workspaceId, data.channelId);
@@ -289,7 +289,6 @@ export class PokerDurableObject extends DurableObject<Env> {
 
     const game = TexasHoldem.fromJson(existing);
     game.addPlayer(data.playerId);
-    const events = game.getEvents().map((event) => event.toJson());
 
     const messageReceivedAction: MessageReceivedActionV1 = {
       schemaVersion: 1,
@@ -322,7 +321,7 @@ export class PokerDurableObject extends DurableObject<Env> {
       joinAction
     );
 
-    return { ok: true, events };
+    return { ok: true, game: game.getState() };
   }
 
   async buyInWithAction(data: {
@@ -336,7 +335,7 @@ export class PokerDurableObject extends DurableObject<Env> {
     timestamp: number;
     amount: number;
   }): Promise<
-    | { ok: true; events: ReturnType<GameEvent["toJson"]>[] }
+    | { ok: true; game: ReturnType<TexasHoldem["getState"]> }
     | { ok: false; reason: "no_game" }
   > {
     const existing = await this.fetchGame(data.workspaceId, data.channelId);
@@ -346,7 +345,6 @@ export class PokerDurableObject extends DurableObject<Env> {
 
     const game = TexasHoldem.fromJson(existing);
     game.buyIn(data.playerId, data.amount);
-    const events = game.getEvents().map((event) => event.toJson());
 
     const messageReceivedAction: MessageReceivedActionV1 = {
       schemaVersion: 1,
@@ -380,7 +378,899 @@ export class PokerDurableObject extends DurableObject<Env> {
       buyInAction
     );
 
-    return { ok: true, events };
+    return { ok: true, game: game.getState() };
+  }
+
+  async foldWithAction(data: {
+    workspaceId: string;
+    channelId: string;
+    playerId: string;
+    messageText: string;
+    normalizedText: string;
+    handlerKey: string;
+    slackMessageTs: string;
+    timestamp: number;
+  }): Promise<
+    | { ok: true; game: ReturnType<TexasHoldem["getState"]> }
+    | { ok: false; reason: "no_game" }
+  > {
+    const existing = await this.fetchGame(data.workspaceId, data.channelId);
+    if (!existing) {
+      return { ok: false, reason: "no_game" };
+    }
+
+    const game = TexasHoldem.fromJson(existing);
+    game.fold(data.playerId);
+
+    const messageReceivedAction: MessageReceivedActionV1 = {
+      schemaVersion: 1,
+      workspaceId: data.workspaceId,
+      channelId: data.channelId,
+      timestamp: data.timestamp,
+      actionType: "message_received",
+      messageText: data.messageText,
+      playerId: data.playerId,
+      slackMessageTs: data.slackMessageTs,
+      normalizedText: data.normalizedText,
+      handlerKey: data.handlerKey,
+    };
+    this.logAction(messageReceivedAction);
+
+    const foldAction: ActionLogEntry = {
+      schemaVersion: 1,
+      workspaceId: data.workspaceId,
+      channelId: data.channelId,
+      timestamp: Date.now(),
+      actionType: "fold",
+      messageText: data.messageText,
+      playerId: data.playerId,
+    };
+
+    this.saveGameWithAction(
+      data.workspaceId,
+      data.channelId,
+      JSON.stringify(game.toJson()),
+      foldAction
+    );
+
+    return { ok: true, game: game.getState() };
+  }
+
+  async checkWithAction(data: {
+    workspaceId: string;
+    channelId: string;
+    playerId: string;
+    messageText: string;
+    normalizedText: string;
+    handlerKey: string;
+    slackMessageTs: string;
+    timestamp: number;
+  }): Promise<
+    | { ok: true; game: ReturnType<TexasHoldem["getState"]> }
+    | { ok: false; reason: "no_game" }
+  > {
+    const existing = await this.fetchGame(data.workspaceId, data.channelId);
+    if (!existing) {
+      return { ok: false, reason: "no_game" };
+    }
+
+    const game = TexasHoldem.fromJson(existing);
+    game.check(data.playerId);
+
+    const messageReceivedAction: MessageReceivedActionV1 = {
+      schemaVersion: 1,
+      workspaceId: data.workspaceId,
+      channelId: data.channelId,
+      timestamp: data.timestamp,
+      actionType: "message_received",
+      messageText: data.messageText,
+      playerId: data.playerId,
+      slackMessageTs: data.slackMessageTs,
+      normalizedText: data.normalizedText,
+      handlerKey: data.handlerKey,
+    };
+    this.logAction(messageReceivedAction);
+
+    const checkAction: ActionLogEntry = {
+      schemaVersion: 1,
+      workspaceId: data.workspaceId,
+      channelId: data.channelId,
+      timestamp: Date.now(),
+      actionType: "check",
+      messageText: data.messageText,
+      playerId: data.playerId,
+    };
+
+    this.saveGameWithAction(
+      data.workspaceId,
+      data.channelId,
+      JSON.stringify(game.toJson()),
+      checkAction
+    );
+
+    return { ok: true, game: game.getState() };
+  }
+
+  async callWithAction(data: {
+    workspaceId: string;
+    channelId: string;
+    playerId: string;
+    messageText: string;
+    normalizedText: string;
+    handlerKey: string;
+    slackMessageTs: string;
+    timestamp: number;
+  }): Promise<
+    | { ok: true; game: ReturnType<TexasHoldem["getState"]> }
+    | { ok: false; reason: "no_game" }
+  > {
+    const existing = await this.fetchGame(data.workspaceId, data.channelId);
+    if (!existing) {
+      return { ok: false, reason: "no_game" };
+    }
+
+    const game = TexasHoldem.fromJson(existing);
+    const callAmount =
+      game.getCurrentBetAmount() -
+      (game.getCurrentPlayer()?.getCurrentBet() ?? 0);
+    game.call(data.playerId);
+
+    const messageReceivedAction: MessageReceivedActionV1 = {
+      schemaVersion: 1,
+      workspaceId: data.workspaceId,
+      channelId: data.channelId,
+      timestamp: data.timestamp,
+      actionType: "message_received",
+      messageText: data.messageText,
+      playerId: data.playerId,
+      slackMessageTs: data.slackMessageTs,
+      normalizedText: data.normalizedText,
+      handlerKey: data.handlerKey,
+    };
+    this.logAction(messageReceivedAction);
+
+    const callAction: ActionLogEntry = {
+      schemaVersion: 1,
+      workspaceId: data.workspaceId,
+      channelId: data.channelId,
+      timestamp: Date.now(),
+      actionType: "call",
+      messageText: data.messageText,
+      playerId: data.playerId,
+      amount: callAmount,
+    };
+
+    this.saveGameWithAction(
+      data.workspaceId,
+      data.channelId,
+      JSON.stringify(game.toJson()),
+      callAction
+    );
+
+    return { ok: true, game: game.getState() };
+  }
+
+  async betWithAction(data: {
+    workspaceId: string;
+    channelId: string;
+    playerId: string;
+    messageText: string;
+    normalizedText: string;
+    handlerKey: string;
+    slackMessageTs: string;
+    timestamp: number;
+    amount: number;
+  }): Promise<
+    | { ok: true; game: ReturnType<TexasHoldem["getState"]> }
+    | { ok: false; reason: "no_game" }
+  > {
+    const existing = await this.fetchGame(data.workspaceId, data.channelId);
+    if (!existing) {
+      return { ok: false, reason: "no_game" };
+    }
+
+    const game = TexasHoldem.fromJson(existing);
+    game.bet(data.playerId, data.amount);
+
+    const messageReceivedAction: MessageReceivedActionV1 = {
+      schemaVersion: 1,
+      workspaceId: data.workspaceId,
+      channelId: data.channelId,
+      timestamp: data.timestamp,
+      actionType: "message_received",
+      messageText: data.messageText,
+      playerId: data.playerId,
+      slackMessageTs: data.slackMessageTs,
+      normalizedText: data.normalizedText,
+      handlerKey: data.handlerKey,
+    };
+    this.logAction(messageReceivedAction);
+
+    const betAction: ActionLogEntry = {
+      schemaVersion: 1,
+      workspaceId: data.workspaceId,
+      channelId: data.channelId,
+      timestamp: Date.now(),
+      actionType: "bet",
+      messageText: data.messageText,
+      playerId: data.playerId,
+      amount: data.amount,
+    };
+
+    this.saveGameWithAction(
+      data.workspaceId,
+      data.channelId,
+      JSON.stringify(game.toJson()),
+      betAction
+    );
+
+    return { ok: true, game: game.getState() };
+  }
+
+  async startRoundWithAction(data: {
+    workspaceId: string;
+    channelId: string;
+    playerId: string;
+    messageText: string;
+    normalizedText: string;
+    handlerKey: string;
+    slackMessageTs: string;
+    timestamp: number;
+  }): Promise<
+    | { ok: true; game: ReturnType<TexasHoldem["getState"]> }
+    | { ok: false; reason: "no_game" }
+  > {
+    const existing = await this.fetchGame(data.workspaceId, data.channelId);
+    if (!existing) {
+      return { ok: false, reason: "no_game" };
+    }
+
+    const game = TexasHoldem.fromJson(existing);
+    game.startRound(data.playerId);
+
+    const messageReceivedAction: MessageReceivedActionV1 = {
+      schemaVersion: 1,
+      workspaceId: data.workspaceId,
+      channelId: data.channelId,
+      timestamp: data.timestamp,
+      actionType: "message_received",
+      messageText: data.messageText,
+      playerId: data.playerId,
+      slackMessageTs: data.slackMessageTs,
+      normalizedText: data.normalizedText,
+      handlerKey: data.handlerKey,
+    };
+    this.logAction(messageReceivedAction);
+
+    // Build round_start action
+    const state = game.getState();
+    const playerOrder = state.activePlayers.map((p) => p.id);
+    const playerStacks: Record<string, number> = {};
+    const playerCards: Record<string, [string, string]> = {};
+
+    state.activePlayers.forEach((p) => {
+      playerStacks[p.id] = p.chips;
+      if (p.cards.length === 2) {
+        playerCards[p.id] = [p.cards[0].toString(), p.cards[1].toString()];
+      }
+    });
+
+    const communityCards = state.communityCards.map((c) => c.toString());
+    const fullCommunityCards: [string, string, string, string, string] = [
+      communityCards[0] ?? "",
+      communityCards[1] ?? "",
+      communityCards[2] ?? "",
+      communityCards[3] ?? "",
+      communityCards[4] ?? "",
+    ];
+
+    const numPlayers = playerOrder.length;
+    const dealerPos = state.dealerPosition;
+    const sbPos = numPlayers === 2 ? dealerPos : (dealerPos + 1) % numPlayers;
+    const bbPos =
+      numPlayers === 2
+        ? (dealerPos + 1) % numPlayers
+        : (dealerPos + 2) % numPlayers;
+
+    const roundStartAction: RoundStartActionV1 = {
+      schemaVersion: 1,
+      workspaceId: data.workspaceId,
+      channelId: data.channelId,
+      timestamp: Date.now(),
+      actionType: "round_start",
+      messageText: data.messageText,
+      dealerPosition: state.dealerPosition,
+      playerOrder,
+      playerStacks,
+      playerCards,
+      communityCards: fullCommunityCards,
+      smallBlindPlayerId: playerOrder[sbPos] ?? "",
+      smallBlindAmount: state.smallBlind,
+      bigBlindPlayerId: playerOrder[bbPos] ?? "",
+      bigBlindAmount: state.bigBlind,
+    };
+
+    this.saveGameWithAction(
+      data.workspaceId,
+      data.channelId,
+      JSON.stringify(game.toJson()),
+      roundStartAction
+    );
+
+    return { ok: true, game: game.getState() };
+  }
+
+  async takeHerToTheWithAction(data: {
+    workspaceId: string;
+    channelId: string;
+    playerId: string;
+    messageText: string;
+    normalizedText: string;
+    handlerKey: string;
+    slackMessageTs: string;
+    timestamp: number;
+    targetPhase: "flop" | "turn" | "river";
+  }): Promise<
+    | { ok: true; game: ReturnType<TexasHoldem["getState"]> }
+    | { ok: false; reason: "no_game" | "invalid_state" }
+  > {
+    const existing = await this.fetchGame(data.workspaceId, data.channelId);
+    if (!existing) {
+      return { ok: false, reason: "no_game" };
+    }
+
+    const game = TexasHoldem.fromJson(existing);
+    const currentState = game.getGameState();
+
+    // Validate game state matches requested phase transition
+    if (data.targetPhase === "flop" && currentState !== GameState.PreFlop) {
+      return { ok: false, reason: "invalid_state" };
+    } else if (data.targetPhase === "turn" && currentState !== GameState.Flop) {
+      return { ok: false, reason: "invalid_state" };
+    } else if (
+      data.targetPhase === "river" &&
+      currentState !== GameState.Turn
+    ) {
+      return { ok: false, reason: "invalid_state" };
+    }
+
+    // Determine if this is a call or check
+    const currentBet = game.getCurrentBetAmount();
+    const playerBet = game.getCurrentPlayer()?.getCurrentBet() ?? 0;
+    const isCall = currentBet > playerBet;
+    const callAmount = currentBet - playerBet;
+
+    game.callOrCheck(data.playerId);
+
+    const messageReceivedAction: MessageReceivedActionV1 = {
+      schemaVersion: 1,
+      workspaceId: data.workspaceId,
+      channelId: data.channelId,
+      timestamp: data.timestamp,
+      actionType: "message_received",
+      messageText: data.messageText,
+      playerId: data.playerId,
+      slackMessageTs: data.slackMessageTs,
+      normalizedText: data.normalizedText,
+      handlerKey: data.handlerKey,
+    };
+    this.logAction(messageReceivedAction);
+
+    if (isCall) {
+      const callAction: CallActionV1 = {
+        schemaVersion: 1,
+        workspaceId: data.workspaceId,
+        channelId: data.channelId,
+        timestamp: Date.now(),
+        actionType: "call",
+        messageText: data.messageText,
+        playerId: data.playerId,
+        amount: callAmount,
+      };
+      this.saveGameWithAction(
+        data.workspaceId,
+        data.channelId,
+        JSON.stringify(game.toJson()),
+        callAction
+      );
+    } else {
+      const checkAction: CheckActionV1 = {
+        schemaVersion: 1,
+        workspaceId: data.workspaceId,
+        channelId: data.channelId,
+        timestamp: Date.now(),
+        actionType: "check",
+        messageText: data.messageText,
+        playerId: data.playerId,
+      };
+      this.saveGameWithAction(
+        data.workspaceId,
+        data.channelId,
+        JSON.stringify(game.toJson()),
+        checkAction
+      );
+    }
+
+    return { ok: true, game: game.getState() };
+  }
+
+  async preDealWithAction(data: {
+    workspaceId: string;
+    channelId: string;
+    playerId: string;
+    messageText: string;
+    normalizedText: string;
+    handlerKey: string;
+    slackMessageTs: string;
+    timestamp: number;
+  }): Promise<
+    | { ok: true; game: ReturnType<TexasHoldem["getState"]> }
+    | { ok: false; reason: "no_game" }
+  > {
+    const existing = await this.fetchGame(data.workspaceId, data.channelId);
+    if (!existing) {
+      return { ok: false, reason: "no_game" };
+    }
+
+    const game = TexasHoldem.fromJson(existing);
+    const wasWaiting = game.getGameState() === GameState.WaitingForPlayers;
+
+    game.preDeal(data.playerId);
+
+    const messageReceivedAction: MessageReceivedActionV1 = {
+      schemaVersion: 1,
+      workspaceId: data.workspaceId,
+      channelId: data.channelId,
+      timestamp: data.timestamp,
+      actionType: "message_received",
+      messageText: data.messageText,
+      playerId: data.playerId,
+      slackMessageTs: data.slackMessageTs,
+      normalizedText: data.normalizedText,
+      handlerKey: data.handlerKey,
+    };
+    this.logAction(messageReceivedAction);
+
+    // If state transitioned from WaitingForPlayers, log round_start
+    if (wasWaiting && game.getGameState() !== GameState.WaitingForPlayers) {
+      const state = game.getState();
+      const playerOrder = state.activePlayers.map((p) => p.id);
+      const playerStacks: Record<string, number> = {};
+      const playerCards: Record<string, [string, string]> = {};
+
+      state.activePlayers.forEach((p) => {
+        playerStacks[p.id] = p.chips;
+        if (p.cards.length === 2) {
+          playerCards[p.id] = [p.cards[0].toString(), p.cards[1].toString()];
+        }
+      });
+
+      const communityCards = state.communityCards.map((c) => c.toString());
+      const fullCommunityCards: [string, string, string, string, string] = [
+        communityCards[0] ?? "",
+        communityCards[1] ?? "",
+        communityCards[2] ?? "",
+        communityCards[3] ?? "",
+        communityCards[4] ?? "",
+      ];
+
+      const numPlayers = playerOrder.length;
+      const dealerPos = state.dealerPosition;
+      const sbPos = numPlayers === 2 ? dealerPos : (dealerPos + 1) % numPlayers;
+      const bbPos =
+        numPlayers === 2
+          ? (dealerPos + 1) % numPlayers
+          : (dealerPos + 2) % numPlayers;
+
+      const roundStartAction: RoundStartActionV1 = {
+        schemaVersion: 1,
+        workspaceId: data.workspaceId,
+        channelId: data.channelId,
+        timestamp: Date.now(),
+        actionType: "round_start",
+        messageText: data.messageText,
+        dealerPosition: state.dealerPosition,
+        playerOrder,
+        playerStacks,
+        playerCards,
+        communityCards: fullCommunityCards,
+        smallBlindPlayerId: playerOrder[sbPos] ?? "",
+        smallBlindAmount: state.smallBlind,
+        bigBlindPlayerId: playerOrder[bbPos] ?? "",
+        bigBlindAmount: state.bigBlind,
+      };
+
+      this.saveGameWithAction(
+        data.workspaceId,
+        data.channelId,
+        JSON.stringify(game.toJson()),
+        roundStartAction
+      );
+    } else {
+      this.saveGame(
+        data.workspaceId,
+        data.channelId,
+        JSON.stringify(game.toJson())
+      );
+    }
+
+    return { ok: true, game: game.getState() };
+  }
+
+  async preNHWithAction(data: {
+    workspaceId: string;
+    channelId: string;
+    playerId: string;
+    messageText: string;
+    normalizedText: string;
+    handlerKey: string;
+    slackMessageTs: string;
+    timestamp: number;
+  }): Promise<
+    | { ok: true; game: ReturnType<TexasHoldem["getState"]> }
+    | { ok: false; reason: "no_game" }
+  > {
+    const existing = await this.fetchGame(data.workspaceId, data.channelId);
+    if (!existing) {
+      return { ok: false, reason: "no_game" };
+    }
+
+    const game = TexasHoldem.fromJson(existing);
+    game.preNH(data.playerId);
+
+    const messageReceivedAction: MessageReceivedActionV1 = {
+      schemaVersion: 1,
+      workspaceId: data.workspaceId,
+      channelId: data.channelId,
+      timestamp: data.timestamp,
+      actionType: "message_received",
+      messageText: data.messageText,
+      playerId: data.playerId,
+      slackMessageTs: data.slackMessageTs,
+      normalizedText: data.normalizedText,
+      handlerKey: data.handlerKey,
+    };
+    this.logAction(messageReceivedAction);
+    this.saveGame(
+      data.workspaceId,
+      data.channelId,
+      JSON.stringify(game.toJson())
+    );
+
+    return { ok: true, game: game.getState() };
+  }
+
+  async preAHWithAction(data: {
+    workspaceId: string;
+    channelId: string;
+    playerId: string;
+    messageText: string;
+    normalizedText: string;
+    handlerKey: string;
+    slackMessageTs: string;
+    timestamp: number;
+  }): Promise<
+    | { ok: true; game: ReturnType<TexasHoldem["getState"]> }
+    | { ok: false; reason: "no_game" }
+  > {
+    const existing = await this.fetchGame(data.workspaceId, data.channelId);
+    if (!existing) {
+      return { ok: false, reason: "no_game" };
+    }
+
+    const game = TexasHoldem.fromJson(existing);
+    game.preAH(data.playerId);
+
+    const messageReceivedAction: MessageReceivedActionV1 = {
+      schemaVersion: 1,
+      workspaceId: data.workspaceId,
+      channelId: data.channelId,
+      timestamp: data.timestamp,
+      actionType: "message_received",
+      messageText: data.messageText,
+      playerId: data.playerId,
+      slackMessageTs: data.slackMessageTs,
+      normalizedText: data.normalizedText,
+      handlerKey: data.handlerKey,
+    };
+    this.logAction(messageReceivedAction);
+    this.saveGame(
+      data.workspaceId,
+      data.channelId,
+      JSON.stringify(game.toJson())
+    );
+
+    return { ok: true, game: game.getState() };
+  }
+
+  async preCheckWithAction(data: {
+    workspaceId: string;
+    channelId: string;
+    playerId: string;
+    messageText: string;
+    normalizedText: string;
+    handlerKey: string;
+    slackMessageTs: string;
+    timestamp: number;
+  }): Promise<
+    | { ok: true; game: ReturnType<TexasHoldem["getState"]> }
+    | { ok: false; reason: "no_game" }
+  > {
+    const existing = await this.fetchGame(data.workspaceId, data.channelId);
+    if (!existing) {
+      return { ok: false, reason: "no_game" };
+    }
+
+    const game = TexasHoldem.fromJson(existing);
+    game.preCheck(data.playerId);
+
+    const messageReceivedAction: MessageReceivedActionV1 = {
+      schemaVersion: 1,
+      workspaceId: data.workspaceId,
+      channelId: data.channelId,
+      timestamp: data.timestamp,
+      actionType: "message_received",
+      messageText: data.messageText,
+      playerId: data.playerId,
+      slackMessageTs: data.slackMessageTs,
+      normalizedText: data.normalizedText,
+      handlerKey: data.handlerKey,
+    };
+    this.logAction(messageReceivedAction);
+    this.saveGame(
+      data.workspaceId,
+      data.channelId,
+      JSON.stringify(game.toJson())
+    );
+
+    return { ok: true, game: game.getState() };
+  }
+
+  async preFoldWithAction(data: {
+    workspaceId: string;
+    channelId: string;
+    playerId: string;
+    messageText: string;
+    normalizedText: string;
+    handlerKey: string;
+    slackMessageTs: string;
+    timestamp: number;
+  }): Promise<
+    | { ok: true; game: ReturnType<TexasHoldem["getState"]> }
+    | { ok: false; reason: "no_game" }
+  > {
+    const existing = await this.fetchGame(data.workspaceId, data.channelId);
+    if (!existing) {
+      return { ok: false, reason: "no_game" };
+    }
+
+    const game = TexasHoldem.fromJson(existing);
+    game.preFold(data.playerId);
+
+    const messageReceivedAction: MessageReceivedActionV1 = {
+      schemaVersion: 1,
+      workspaceId: data.workspaceId,
+      channelId: data.channelId,
+      timestamp: data.timestamp,
+      actionType: "message_received",
+      messageText: data.messageText,
+      playerId: data.playerId,
+      slackMessageTs: data.slackMessageTs,
+      normalizedText: data.normalizedText,
+      handlerKey: data.handlerKey,
+    };
+    this.logAction(messageReceivedAction);
+    this.saveGame(
+      data.workspaceId,
+      data.channelId,
+      JSON.stringify(game.toJson())
+    );
+
+    return { ok: true, game: game.getState() };
+  }
+
+  async preCallWithAction(data: {
+    workspaceId: string;
+    channelId: string;
+    playerId: string;
+    messageText: string;
+    normalizedText: string;
+    handlerKey: string;
+    slackMessageTs: string;
+    timestamp: number;
+  }): Promise<
+    | { ok: true; game: ReturnType<TexasHoldem["getState"]> }
+    | { ok: false; reason: "no_game" }
+  > {
+    const existing = await this.fetchGame(data.workspaceId, data.channelId);
+    if (!existing) {
+      return { ok: false, reason: "no_game" };
+    }
+
+    const game = TexasHoldem.fromJson(existing);
+    game.preCall(data.playerId);
+
+    const messageReceivedAction: MessageReceivedActionV1 = {
+      schemaVersion: 1,
+      workspaceId: data.workspaceId,
+      channelId: data.channelId,
+      timestamp: data.timestamp,
+      actionType: "message_received",
+      messageText: data.messageText,
+      playerId: data.playerId,
+      slackMessageTs: data.slackMessageTs,
+      normalizedText: data.normalizedText,
+      handlerKey: data.handlerKey,
+    };
+    this.logAction(messageReceivedAction);
+    this.saveGame(
+      data.workspaceId,
+      data.channelId,
+      JSON.stringify(game.toJson())
+    );
+
+    return { ok: true, game: game.getState() };
+  }
+
+  async preBetWithAction(data: {
+    workspaceId: string;
+    channelId: string;
+    playerId: string;
+    messageText: string;
+    normalizedText: string;
+    handlerKey: string;
+    slackMessageTs: string;
+    timestamp: number;
+    amount: number;
+  }): Promise<
+    | { ok: true; game: ReturnType<TexasHoldem["getState"]> }
+    | { ok: false; reason: "no_game" }
+  > {
+    const existing = await this.fetchGame(data.workspaceId, data.channelId);
+    if (!existing) {
+      return { ok: false, reason: "no_game" };
+    }
+
+    const game = TexasHoldem.fromJson(existing);
+    game.preBet(data.playerId, data.amount);
+
+    const messageReceivedAction: MessageReceivedActionV1 = {
+      schemaVersion: 1,
+      workspaceId: data.workspaceId,
+      channelId: data.channelId,
+      timestamp: data.timestamp,
+      actionType: "message_received",
+      messageText: data.messageText,
+      playerId: data.playerId,
+      slackMessageTs: data.slackMessageTs,
+      normalizedText: data.normalizedText,
+      handlerKey: data.handlerKey,
+    };
+    this.logAction(messageReceivedAction);
+    this.saveGame(
+      data.workspaceId,
+      data.channelId,
+      JSON.stringify(game.toJson())
+    );
+
+    return { ok: true, game: game.getState() };
+  }
+
+  async cashOutWithAction(data: {
+    workspaceId: string;
+    channelId: string;
+    playerId: string;
+    messageText: string;
+    normalizedText: string;
+    handlerKey: string;
+    slackMessageTs: string;
+    timestamp: number;
+  }): Promise<
+    | { ok: true; game: ReturnType<TexasHoldem["getState"]> }
+    | { ok: false; reason: "no_game" }
+  > {
+    const existing = await this.fetchGame(data.workspaceId, data.channelId);
+    if (!existing) {
+      return { ok: false, reason: "no_game" };
+    }
+
+    const game = TexasHoldem.fromJson(existing);
+    const allPlayers = [
+      ...game.getActivePlayers(),
+      ...game.getInactivePlayers(),
+    ];
+    const player = allPlayers.find((p) => p.getId() === data.playerId);
+    const cashOutAmount = player?.getChips() ?? 0;
+    game.cashOut(data.playerId);
+
+    const messageReceivedAction: MessageReceivedActionV1 = {
+      schemaVersion: 1,
+      workspaceId: data.workspaceId,
+      channelId: data.channelId,
+      timestamp: data.timestamp,
+      actionType: "message_received",
+      messageText: data.messageText,
+      playerId: data.playerId,
+      slackMessageTs: data.slackMessageTs,
+      normalizedText: data.normalizedText,
+      handlerKey: data.handlerKey,
+    };
+    this.logAction(messageReceivedAction);
+
+    const cashOutAction: ActionLogEntry = {
+      schemaVersion: 1,
+      workspaceId: data.workspaceId,
+      channelId: data.channelId,
+      timestamp: Date.now(),
+      actionType: "cash_out",
+      messageText: data.messageText,
+      playerId: data.playerId,
+      amount: cashOutAmount,
+    };
+
+    this.saveGameWithAction(
+      data.workspaceId,
+      data.channelId,
+      JSON.stringify(game.toJson()),
+      cashOutAction
+    );
+
+    return { ok: true, game: game.getState() };
+  }
+
+  async leaveGameWithAction(data: {
+    workspaceId: string;
+    channelId: string;
+    playerId: string;
+    messageText: string;
+    normalizedText: string;
+    handlerKey: string;
+    slackMessageTs: string;
+    timestamp: number;
+  }): Promise<
+    | { ok: true; game: ReturnType<TexasHoldem["getState"]> }
+    | { ok: false; reason: "no_game" }
+  > {
+    const existing = await this.fetchGame(data.workspaceId, data.channelId);
+    if (!existing) {
+      return { ok: false, reason: "no_game" };
+    }
+
+    const game = TexasHoldem.fromJson(existing);
+    game.removePlayer(data.playerId);
+
+    const messageReceivedAction: MessageReceivedActionV1 = {
+      schemaVersion: 1,
+      workspaceId: data.workspaceId,
+      channelId: data.channelId,
+      timestamp: data.timestamp,
+      actionType: "message_received",
+      messageText: data.messageText,
+      playerId: data.playerId,
+      slackMessageTs: data.slackMessageTs,
+      normalizedText: data.normalizedText,
+      handlerKey: data.handlerKey,
+    };
+    this.logAction(messageReceivedAction);
+
+    const leaveAction: ActionLogEntry = {
+      schemaVersion: 1,
+      workspaceId: data.workspaceId,
+      channelId: data.channelId,
+      timestamp: Date.now(),
+      actionType: "leave",
+      messageText: data.messageText,
+      playerId: data.playerId,
+    };
+
+    this.saveGameWithAction(
+      data.workspaceId,
+      data.channelId,
+      JSON.stringify(game.toJson()),
+      leaveAction
+    );
+
+    return { ok: true, game: game.getState() };
   }
 
   saveGame(workspaceId: string, channelId: string, game: any): void {
@@ -1156,111 +2046,209 @@ export async function showCards(
 export async function preDeal(
   env: Env,
   context: SlackAppContextWithChannelId,
-  payload: PostedMessage
+  payload: PostedMessage,
+  meta?: HandlerMeta
 ) {
-  const game = await fetchGame(env, context);
-  if (!game) {
+  const stub = getDurableObject(env, context);
+  const rawMessageText = meta?.messageText ?? payload.text ?? "";
+  const normalizedText =
+    meta?.normalizedText ?? cleanMessageText(rawMessageText);
+  const handlerKey = meta?.handlerKey ?? "preDeal";
+  const slackMessageTs = meta?.slackMessageTs ?? payload.ts ?? "";
+  const timestamp = meta?.timestamp ?? Date.now();
+
+  const result = await stub.preDealWithAction({
+    workspaceId: context.teamId!,
+    channelId: context.channelId,
+    playerId: context.userId!,
+    messageText: rawMessageText,
+    normalizedText,
+    handlerKey,
+    slackMessageTs,
+    timestamp,
+  });
+
+  if (!result.ok) {
     await context.say({ text: `No game exists! Type 'New Game'` });
     return;
   }
 
-  const wasWaiting = game.getGameState() === GameState.WaitingForPlayers;
-  game.preDeal(context.userId!);
-  if (wasWaiting && game.getGameState() !== GameState.WaitingForPlayers) {
-    const roundStartAction = buildRoundStartAction(game, context, payload);
-    await saveGameWithAction(env, context, game, roundStartAction);
-  } else {
-    await saveGame(env, context, game);
-  }
-  await sendGameEventMessages(env, context, game);
+  await sendGameStateMessages(env, context, result.game);
 }
 
 export async function preNH(
   env: Env,
   context: SlackAppContextWithChannelId,
-  payload: PostedMessage
+  payload: PostedMessage,
+  meta?: HandlerMeta
 ) {
-  const game = await fetchGame(env, context);
-  if (!game) {
+  const stub = getDurableObject(env, context);
+  const rawMessageText = meta?.messageText ?? payload.text ?? "";
+  const normalizedText =
+    meta?.normalizedText ?? cleanMessageText(rawMessageText);
+  const handlerKey = meta?.handlerKey ?? "preNH";
+  const slackMessageTs = meta?.slackMessageTs ?? payload.ts ?? "";
+  const timestamp = meta?.timestamp ?? Date.now();
+
+  const result = await stub.preNHWithAction({
+    workspaceId: context.teamId!,
+    channelId: context.channelId,
+    playerId: context.userId!,
+    messageText: rawMessageText,
+    normalizedText,
+    handlerKey,
+    slackMessageTs,
+    timestamp,
+  });
+
+  if (!result.ok) {
     await context.say({ text: `No game exists! Type 'New Game'` });
     return;
   }
 
-  game.preNH(context.userId!);
-  await saveGame(env, context, game);
-  await sendGameEventMessages(env, context, game);
+  await sendGameStateMessages(env, context, result.game);
 }
 
 export async function preAH(
   env: Env,
   context: SlackAppContextWithChannelId,
-  payload: PostedMessage
+  payload: PostedMessage,
+  meta?: HandlerMeta
 ) {
-  const game = await fetchGame(env, context);
-  if (!game) {
+  const stub = getDurableObject(env, context);
+  const rawMessageText = meta?.messageText ?? payload.text ?? "";
+  const normalizedText =
+    meta?.normalizedText ?? cleanMessageText(rawMessageText);
+  const handlerKey = meta?.handlerKey ?? "preAH";
+  const slackMessageTs = meta?.slackMessageTs ?? payload.ts ?? "";
+  const timestamp = meta?.timestamp ?? Date.now();
+
+  const result = await stub.preAHWithAction({
+    workspaceId: context.teamId!,
+    channelId: context.channelId,
+    playerId: context.userId!,
+    messageText: rawMessageText,
+    normalizedText,
+    handlerKey,
+    slackMessageTs,
+    timestamp,
+  });
+
+  if (!result.ok) {
     await context.say({ text: `No game exists! Type 'New Game'` });
     return;
   }
 
-  game.preAH(context.userId!);
-  await saveGame(env, context, game);
-  await sendGameEventMessages(env, context, game);
+  await sendGameStateMessages(env, context, result.game);
 }
 
 export async function preCheck(
   env: Env,
   context: SlackAppContextWithChannelId,
-  payload: PostedMessage
+  payload: PostedMessage,
+  meta?: HandlerMeta
 ) {
-  const game = await fetchGame(env, context);
-  if (!game) {
+  const stub = getDurableObject(env, context);
+  const rawMessageText = meta?.messageText ?? payload.text ?? "";
+  const normalizedText =
+    meta?.normalizedText ?? cleanMessageText(rawMessageText);
+  const handlerKey = meta?.handlerKey ?? "preCheck";
+  const slackMessageTs = meta?.slackMessageTs ?? payload.ts ?? "";
+  const timestamp = meta?.timestamp ?? Date.now();
+
+  const result = await stub.preCheckWithAction({
+    workspaceId: context.teamId!,
+    channelId: context.channelId,
+    playerId: context.userId!,
+    messageText: rawMessageText,
+    normalizedText,
+    handlerKey,
+    slackMessageTs,
+    timestamp,
+  });
+
+  if (!result.ok) {
     await context.say({ text: `No game exists! Type 'New Game'` });
     return;
   }
 
-  game.preCheck(context.userId!);
-  await saveGame(env, context, game);
-  await sendGameEventMessages(env, context, game);
+  await sendGameStateMessages(env, context, result.game);
 }
 
 export async function preFold(
   env: Env,
   context: SlackAppContextWithChannelId,
-  payload: PostedMessage
+  payload: PostedMessage,
+  meta?: HandlerMeta
 ) {
-  const game = await fetchGame(env, context);
-  if (!game) {
+  const stub = getDurableObject(env, context);
+  const rawMessageText = meta?.messageText ?? payload.text ?? "";
+  const normalizedText =
+    meta?.normalizedText ?? cleanMessageText(rawMessageText);
+  const handlerKey = meta?.handlerKey ?? "preFold";
+  const slackMessageTs = meta?.slackMessageTs ?? payload.ts ?? "";
+  const timestamp = meta?.timestamp ?? Date.now();
+
+  const result = await stub.preFoldWithAction({
+    workspaceId: context.teamId!,
+    channelId: context.channelId,
+    playerId: context.userId!,
+    messageText: rawMessageText,
+    normalizedText,
+    handlerKey,
+    slackMessageTs,
+    timestamp,
+  });
+
+  if (!result.ok) {
     await context.say({ text: `No game exists! Type 'New Game'` });
     return;
   }
 
-  game.preFold(context.userId!);
-  await saveGame(env, context, game);
-  await sendGameEventMessages(env, context, game);
+  await sendGameStateMessages(env, context, result.game);
 }
 
 export async function preCall(
   env: Env,
   context: SlackAppContextWithChannelId,
-  payload: PostedMessage
+  payload: PostedMessage,
+  meta?: HandlerMeta
 ) {
-  const game = await fetchGame(env, context);
-  if (!game) {
+  const stub = getDurableObject(env, context);
+  const rawMessageText = meta?.messageText ?? payload.text ?? "";
+  const normalizedText =
+    meta?.normalizedText ?? cleanMessageText(rawMessageText);
+  const handlerKey = meta?.handlerKey ?? "preCall";
+  const slackMessageTs = meta?.slackMessageTs ?? payload.ts ?? "";
+  const timestamp = meta?.timestamp ?? Date.now();
+
+  const result = await stub.preCallWithAction({
+    workspaceId: context.teamId!,
+    channelId: context.channelId,
+    playerId: context.userId!,
+    messageText: rawMessageText,
+    normalizedText,
+    handlerKey,
+    slackMessageTs,
+    timestamp,
+  });
+
+  if (!result.ok) {
     await context.say({ text: `No game exists! Type 'New Game'` });
     return;
   }
 
-  game.preCall(context.userId!);
-  await saveGame(env, context, game);
-  await sendGameEventMessages(env, context, game);
+  await sendGameStateMessages(env, context, result.game);
 }
 
 export async function preBet(
   env: Env,
   context: SlackAppContextWithChannelId,
-  payload: PostedMessage
+  payload: PostedMessage,
+  meta?: HandlerMeta
 ) {
-  const messageText = payload.text.toLowerCase();
+  const rawMessageText = meta?.messageText ?? payload.text ?? "";
+  const messageText = rawMessageText.toLowerCase();
   const betAmount = parseFloat(
     messageText
       .replace("i choose to", "")
@@ -1277,21 +2265,38 @@ export async function preBet(
     return;
   }
 
-  const game = await fetchGame(env, context);
-  if (!game) {
+  const stub = getDurableObject(env, context);
+  const normalizedText =
+    meta?.normalizedText ?? cleanMessageText(rawMessageText);
+  const handlerKey = meta?.handlerKey ?? "preBet";
+  const slackMessageTs = meta?.slackMessageTs ?? payload.ts ?? "";
+  const timestamp = meta?.timestamp ?? Date.now();
+
+  const result = await stub.preBetWithAction({
+    workspaceId: context.teamId!,
+    channelId: context.channelId,
+    playerId: context.userId!,
+    messageText: rawMessageText,
+    normalizedText,
+    handlerKey,
+    slackMessageTs,
+    timestamp,
+    amount: betAmount,
+  });
+
+  if (!result.ok) {
     await context.say({ text: `No game exists! Type 'New Game'` });
     return;
   }
 
-  game.preBet(context.userId!, betAmount);
-  await saveGame(env, context, game);
-  await sendGameEventMessages(env, context, game);
+  await sendGameStateMessages(env, context, result.game);
 }
 
 export async function bet(
   env: Env,
   context: SlackAppContextWithChannelId,
-  payload: PostedMessage
+  payload: PostedMessage,
+  meta?: HandlerMeta
 ) {
   const messageText = cleanMessageText(payload.text);
   const betAmount = parseFloat(
@@ -1310,189 +2315,226 @@ export async function bet(
     return;
   }
 
-  const game = await fetchGame(env, context);
-  if (!game) {
+  const stub = getDurableObject(env, context);
+  const rawMessageText = meta?.messageText ?? payload.text ?? "";
+  const normalizedText =
+    meta?.normalizedText ?? cleanMessageText(rawMessageText);
+  const handlerKey = meta?.handlerKey ?? "bet";
+  const slackMessageTs = meta?.slackMessageTs ?? payload.ts ?? "";
+  const timestamp = meta?.timestamp ?? Date.now();
+
+  const result = await stub.betWithAction({
+    workspaceId: context.teamId!,
+    channelId: context.channelId,
+    playerId: context.userId!,
+    messageText: rawMessageText,
+    normalizedText,
+    handlerKey,
+    slackMessageTs,
+    timestamp,
+    amount: betAmount,
+  });
+
+  if (!result.ok) {
     await context.say({ text: `No game exists! Type 'New Game'` });
     return;
   }
 
-  game.bet(context.userId!, betAmount);
-  await saveGameWithAction(env, context, game, {
-    schemaVersion: 1,
-    workspaceId: context.teamId!,
-    channelId: context.channelId,
-    timestamp: Date.now(),
-    actionType: "bet",
-    messageText: payload.text ?? "",
-    playerId: context.userId!,
-    amount: betAmount,
-  });
-  await sendGameEventMessages(env, context, game);
+  await sendGameStateMessages(env, context, result.game);
 }
 
 export async function call(
   env: Env,
   context: SlackAppContextWithChannelId,
-  payload: PostedMessage
+  payload: PostedMessage,
+  meta?: HandlerMeta
 ) {
-  const game = await fetchGame(env, context);
-  if (!game) {
+  const stub = getDurableObject(env, context);
+  const rawMessageText = meta?.messageText ?? payload.text ?? "";
+  const normalizedText =
+    meta?.normalizedText ?? cleanMessageText(rawMessageText);
+  const handlerKey = meta?.handlerKey ?? "call";
+  const slackMessageTs = meta?.slackMessageTs ?? payload.ts ?? "";
+  const timestamp = meta?.timestamp ?? Date.now();
+
+  const result = await stub.callWithAction({
+    workspaceId: context.teamId!,
+    channelId: context.channelId,
+    playerId: context.userId!,
+    messageText: rawMessageText,
+    normalizedText,
+    handlerKey,
+    slackMessageTs,
+    timestamp,
+  });
+
+  if (!result.ok) {
     await context.say({ text: `No game exists! Type 'New Game'` });
     return;
   }
 
-  const callAmount =
-    game.getCurrentBetAmount() -
-    (game.getCurrentPlayer()?.getCurrentBet() ?? 0);
-  game.call(context.userId!);
-  await saveGameWithAction(env, context, game, {
-    schemaVersion: 1,
-    workspaceId: context.teamId!,
-    channelId: context.channelId,
-    timestamp: Date.now(),
-    actionType: "call",
-    messageText: payload.text ?? "",
-    playerId: context.userId!,
-    amount: callAmount,
-  });
-  await sendGameEventMessages(env, context, game);
+  await sendGameStateMessages(env, context, result.game);
 }
 
 export async function check(
   env: Env,
   context: SlackAppContextWithChannelId,
-  payload: PostedMessage
+  payload: PostedMessage,
+  meta?: HandlerMeta
 ) {
-  const game = await fetchGame(env, context);
-  if (!game) {
+  const stub = getDurableObject(env, context);
+  const rawMessageText = meta?.messageText ?? payload.text ?? "";
+  const normalizedText =
+    meta?.normalizedText ?? cleanMessageText(rawMessageText);
+  const handlerKey = meta?.handlerKey ?? "check";
+  const slackMessageTs = meta?.slackMessageTs ?? payload.ts ?? "";
+  const timestamp = meta?.timestamp ?? Date.now();
+
+  const result = await stub.checkWithAction({
+    workspaceId: context.teamId!,
+    channelId: context.channelId,
+    playerId: context.userId!,
+    messageText: rawMessageText,
+    normalizedText,
+    handlerKey,
+    slackMessageTs,
+    timestamp,
+  });
+
+  if (!result.ok) {
     await context.say({ text: `No game exists! Type 'New Game'` });
     return;
   }
 
-  game.check(context.userId!);
-  await saveGameWithAction(env, context, game, {
-    schemaVersion: 1,
-    workspaceId: context.teamId!,
-    channelId: context.channelId,
-    timestamp: Date.now(),
-    actionType: "check",
-    messageText: payload.text ?? "",
-    playerId: context.userId!,
-  });
-  await sendGameEventMessages(env, context, game);
+  await sendGameStateMessages(env, context, result.game);
 }
 
 export async function takeHerToThe(
   env: Env,
   context: SlackAppContextWithChannelId,
-  payload: PostedMessage
+  payload: PostedMessage,
+  meta?: HandlerMeta
 ) {
-  const game = await fetchGame(env, context);
-  if (!game) {
-    await context.say({ text: `No game exists! Type 'New Game'` });
-    return;
-  }
+  const stub = getDurableObject(env, context);
+  const rawMessageText = meta?.messageText ?? payload.text ?? "";
+  const normalizedText =
+    meta?.normalizedText ?? cleanMessageText(rawMessageText);
+  const handlerKey = meta?.handlerKey ?? "takeHerToThe";
+  const slackMessageTs = meta?.slackMessageTs ?? payload.ts ?? "";
+  const timestamp = meta?.timestamp ?? Date.now();
 
-  const messageText = cleanMessageText(payload.text);
-  const currentState = game.getGameState();
-
-  // Match exact phrases and validate game state
-  if (messageText.startsWith("lets take her to the flop")) {
-    if (currentState !== GameState.PreFlop) {
-      await context.say({
-        text: `We're not in pre-flop! Can't take her to the flop from here.`,
-      });
-      return;
-    }
-  } else if (messageText.startsWith("lets take her to the turn")) {
-    if (currentState !== GameState.Flop) {
-      await context.say({
-        text: `We're not on the flop! Can't take her to the turn from here.`,
-      });
-      return;
-    }
-  } else if (messageText.startsWith("lets take her to the river")) {
-    if (currentState !== GameState.Turn) {
-      await context.say({
-        text: `We're not on the turn! Can't take her to the river from here.`,
-      });
-      return;
-    }
+  // Determine target phase from message
+  let targetPhase: "flop" | "turn" | "river";
+  if (normalizedText.startsWith("lets take her to the flop")) {
+    targetPhase = "flop";
+  } else if (normalizedText.startsWith("lets take her to the turn")) {
+    targetPhase = "turn";
+  } else if (normalizedText.startsWith("lets take her to the river")) {
+    targetPhase = "river";
   } else {
     return;
   }
 
-  // Determine if this is a call or check
-  const currentBet = game.getCurrentBetAmount();
-  const playerBet = game.getCurrentPlayer()?.getCurrentBet() ?? 0;
-  const isCall = currentBet > playerBet;
+  const result = await stub.takeHerToTheWithAction({
+    workspaceId: context.teamId!,
+    channelId: context.channelId,
+    playerId: context.userId!,
+    messageText: rawMessageText,
+    normalizedText,
+    handlerKey,
+    slackMessageTs,
+    timestamp,
+    targetPhase,
+  });
 
-  game.callOrCheck(context.userId!);
-
-  if (isCall) {
-    await saveGameWithAction(env, context, game, {
-      schemaVersion: 1,
-      workspaceId: context.teamId!,
-      channelId: context.channelId,
-      timestamp: Date.now(),
-      actionType: "call",
-      messageText: payload.text ?? "",
-      playerId: context.userId!,
-      amount: currentBet - playerBet,
-    });
-  } else {
-    await saveGameWithAction(env, context, game, {
-      schemaVersion: 1,
-      workspaceId: context.teamId!,
-      channelId: context.channelId,
-      timestamp: Date.now(),
-      actionType: "check",
-      messageText: payload.text ?? "",
-      playerId: context.userId!,
-    });
+  if (!result.ok) {
+    if (result.reason === "no_game") {
+      await context.say({ text: `No game exists! Type 'New Game'` });
+    } else if (result.reason === "invalid_state") {
+      if (targetPhase === "flop") {
+        await context.say({
+          text: `We're not in pre-flop! Can't take her to the flop from here.`,
+        });
+      } else if (targetPhase === "turn") {
+        await context.say({
+          text: `We're not on the flop! Can't take her to the turn from here.`,
+        });
+      } else {
+        await context.say({
+          text: `We're not on the turn! Can't take her to the river from here.`,
+        });
+      }
+    }
+    return;
   }
-  await sendGameEventMessages(env, context, game);
+
+  await sendGameStateMessages(env, context, result.game);
 }
 
 export async function fold(
   env: Env,
   context: SlackAppContextWithChannelId,
-  payload: PostedMessage
+  payload: PostedMessage,
+  meta?: HandlerMeta
 ) {
-  const game = await fetchGame(env, context);
-  if (!game) {
+  const stub = getDurableObject(env, context);
+  const rawMessageText = meta?.messageText ?? payload.text ?? "";
+  const normalizedText =
+    meta?.normalizedText ?? cleanMessageText(rawMessageText);
+  const handlerKey = meta?.handlerKey ?? "fold";
+  const slackMessageTs = meta?.slackMessageTs ?? payload.ts ?? "";
+  const timestamp = meta?.timestamp ?? Date.now();
+
+  const result = await stub.foldWithAction({
+    workspaceId: context.teamId!,
+    channelId: context.channelId,
+    playerId: context.userId!,
+    messageText: rawMessageText,
+    normalizedText,
+    handlerKey,
+    slackMessageTs,
+    timestamp,
+  });
+
+  if (!result.ok) {
     await context.say({ text: `No game exists! Type 'New Game'` });
     return;
   }
 
-  game.fold(context.userId!);
-  await saveGameWithAction(env, context, game, {
-    schemaVersion: 1,
-    workspaceId: context.teamId!,
-    channelId: context.channelId,
-    timestamp: Date.now(),
-    actionType: "fold",
-    messageText: payload.text ?? "",
-    playerId: context.userId!,
-  });
-  await sendGameEventMessages(env, context, game);
+  await sendGameStateMessages(env, context, result.game);
 }
 
 export async function startRound(
   env: Env,
   context: SlackAppContextWithChannelId,
-  payload: PostedMessage
+  payload: PostedMessage,
+  meta?: HandlerMeta
 ) {
-  const game = await fetchGame(env, context);
-  if (!game) {
+  const stub = getDurableObject(env, context);
+  const rawMessageText = meta?.messageText ?? payload.text ?? "";
+  const normalizedText =
+    meta?.normalizedText ?? cleanMessageText(rawMessageText);
+  const handlerKey = meta?.handlerKey ?? "startRound";
+  const slackMessageTs = meta?.slackMessageTs ?? payload.ts ?? "";
+  const timestamp = meta?.timestamp ?? Date.now();
+
+  const result = await stub.startRoundWithAction({
+    workspaceId: context.teamId!,
+    channelId: context.channelId,
+    playerId: context.userId!,
+    messageText: rawMessageText,
+    normalizedText,
+    handlerKey,
+    slackMessageTs,
+    timestamp,
+  });
+
+  if (!result.ok) {
     await context.say({ text: `No game exists! Type 'New Game'` });
     return;
   }
 
-  game.startRound(context.userId!);
-  const roundStartAction = buildRoundStartAction(game, context, payload);
-  await saveGameWithAction(env, context, game, roundStartAction);
-  await sendGameEventMessages(env, context, game);
+  await sendGameStateMessages(env, context, result.game);
 }
 
 export async function showChips(
@@ -1549,29 +2591,34 @@ export async function showStacks(
 export async function cashOut(
   env: Env,
   context: SlackAppContextWithChannelId,
-  payload: PostedMessage
+  payload: PostedMessage,
+  meta?: HandlerMeta
 ) {
-  const game = await fetchGame(env, context);
-  if (!game) {
+  const stub = getDurableObject(env, context);
+  const rawMessageText = meta?.messageText ?? payload.text ?? "";
+  const normalizedText =
+    meta?.normalizedText ?? cleanMessageText(rawMessageText);
+  const handlerKey = meta?.handlerKey ?? "cash out";
+  const slackMessageTs = meta?.slackMessageTs ?? payload.ts ?? "";
+  const timestamp = meta?.timestamp ?? Date.now();
+
+  const result = await stub.cashOutWithAction({
+    workspaceId: context.teamId!,
+    channelId: context.channelId,
+    playerId: context.userId!,
+    messageText: rawMessageText,
+    normalizedText,
+    handlerKey,
+    slackMessageTs,
+    timestamp,
+  });
+
+  if (!result.ok) {
     await context.say({ text: `No game exists! Type 'New Game'` });
     return;
   }
 
-  const allPlayers = [...game.getActivePlayers(), ...game.getInactivePlayers()];
-  const player = allPlayers.find((p) => p.getId() === context.userId);
-  const cashOutAmount = player?.getChips() ?? 0;
-  game.cashOut(context.userId!);
-  await saveGameWithAction(env, context, game, {
-    schemaVersion: 1,
-    workspaceId: context.teamId!,
-    channelId: context.channelId,
-    timestamp: Date.now(),
-    actionType: "cash_out",
-    messageText: payload.text ?? "",
-    playerId: context.userId!,
-    amount: cashOutAmount,
-  });
-  await sendGameEventMessages(env, context, game);
+  await sendGameStateMessages(env, context, result.game);
 }
 
 export async function buyIn(
@@ -1615,34 +2662,40 @@ export async function buyIn(
     return;
   }
 
-  const game = await fetchGame(env, context);
-  if (game) {
-    await sendEventJsonMessages(env, context, game, result.events);
-  }
+  await sendGameStateMessages(env, context, result.game);
 }
 
 export async function leaveGame(
   env: Env,
   context: SlackAppContextWithChannelId,
-  payload: PostedMessage
+  payload: PostedMessage,
+  meta?: HandlerMeta
 ) {
-  const game = await fetchGame(env, context);
-  if (!game) {
+  const stub = getDurableObject(env, context);
+  const rawMessageText = meta?.messageText ?? payload.text ?? "";
+  const normalizedText =
+    meta?.normalizedText ?? cleanMessageText(rawMessageText);
+  const handlerKey = meta?.handlerKey ?? "leave table";
+  const slackMessageTs = meta?.slackMessageTs ?? payload.ts ?? "";
+  const timestamp = meta?.timestamp ?? Date.now();
+
+  const result = await stub.leaveGameWithAction({
+    workspaceId: context.teamId!,
+    channelId: context.channelId,
+    playerId: context.userId!,
+    messageText: rawMessageText,
+    normalizedText,
+    handlerKey,
+    slackMessageTs,
+    timestamp,
+  });
+
+  if (!result.ok) {
     await context.say({ text: `No game exists! Type 'New Game'` });
     return;
   }
 
-  game.removePlayer(context.userId!);
-  await saveGameWithAction(env, context, game, {
-    schemaVersion: 1,
-    workspaceId: context.teamId!,
-    channelId: context.channelId,
-    timestamp: Date.now(),
-    actionType: "leave",
-    messageText: payload.text ?? "",
-    playerId: context.userId!,
-  });
-  await sendGameEventMessages(env, context, game);
+  await sendGameStateMessages(env, context, result.game);
 }
 
 export async function joinGame(
@@ -1674,10 +2727,7 @@ export async function joinGame(
     return;
   }
 
-  const game = await fetchGame(env, context);
-  if (game) {
-    await sendEventJsonMessages(env, context, game, result.events);
-  }
+  await sendGameStateMessages(env, context, result.game);
 }
 
 export async function newGame(
@@ -1757,11 +2807,38 @@ async function saveGameWithAction(
   );
 }
 
+async function sendGameStateMessages(
+  env: Env,
+  context: SlackAppContextWithChannelId,
+  gameState: ReturnType<TexasHoldem["getState"]>
+) {
+  const events = gameState.events;
+  const playerIds = [
+    ...gameState.activePlayers.map((p) => p.id),
+    ...gameState.inactivePlayers.map((p) => p.id),
+  ];
+  await sendEventsWithPlayerIds(env, context, events, playerIds);
+}
+
 async function sendEventJsonMessages(
   env: Env,
   context: SlackAppContextWithChannelId,
   game: TexasHoldem,
   events: GameEventJson[]
+) {
+  const playerIds = game.getActivePlayers().map((player) => player.getId());
+  const inactivePlayerIds = game
+    .getInactivePlayers()
+    .map((player) => player.getId());
+  playerIds.push(...inactivePlayerIds);
+  await sendEventsWithPlayerIds(env, context, events, playerIds);
+}
+
+async function sendEventsWithPlayerIds(
+  env: Env,
+  context: SlackAppContextWithChannelId,
+  events: GameEventJson[],
+  playerIds: string[]
 ) {
   // Filter turn messages to keep only the last one
   let lastTurnMessageIndex = -1;
@@ -1774,17 +2851,62 @@ async function sendEventJsonMessages(
     (event, index) => !event.isTurnMessage || index === lastTurnMessageIndex
   );
 
-  const playerIds = game.getActivePlayers().map((player) => player.getId());
-  const inactivePlayerIds = game
-    .getInactivePlayers()
-    .map((player) => player.getId());
-  playerIds.push(...inactivePlayerIds);
-
   let publicMessages: string[] = [];
 
   for (const event of filteredEvents) {
     let message = event.description;
-    if (event.cards && event.cards.length > 0) {
+
+    let skipFlop = false;
+    if (message.startsWith("Flop:") && event.cards && event.cards.length == 3) {
+      skipFlop = Math.random() < 0.01;
+
+      const stub = getDurableObject(env, context);
+
+      const workspaceId = context.teamId!;
+      const channelId = context.channelId;
+
+      const cards = event.cards.map((card) => Card.fromJson(card));
+      const flopString = getFlopString(cards);
+
+      const flop = await stub.getFlop(workspaceId, channelId, flopString);
+      if (!flop) {
+        message = `*NEW* ` + message;
+        const flopCount = await stub.addFlop(
+          workspaceId,
+          channelId,
+          flopString,
+          Date.now()
+        );
+        const flopsDiscoveredPercentage = (flopCount / 22100) * 100;
+        const numberFormatter = new Intl.NumberFormat("en-US");
+        const percentFormatter = new Intl.NumberFormat("en-US", {
+          minimumFractionDigits: 2,
+          maximumFractionDigits: 2,
+        });
+        message =
+          message +
+          `\n${numberFormatter.format(flopCount)} flops discovered (${percentFormatter.format(
+            flopsDiscoveredPercentage
+          )}%), ${numberFormatter.format(22100 - flopCount)} remain`;
+      } else {
+        const human = new Date(flop.createdAt as number).toLocaleDateString(
+          "en-US",
+          {
+            year: "numeric",
+            month: "2-digit",
+            day: "2-digit",
+          }
+        );
+        message = `Flop (First Seen ${human}):`;
+        skipFlop = false;
+      }
+
+      if (skipFlop) {
+        message = ":no-bump-this-time: No flop this time";
+      }
+    }
+
+    if (event.cards && event.cards.length > 0 && !skipFlop) {
       const cardStrings = event.cards.map((card) =>
         Card.fromJson(card).toSlackString()
       );

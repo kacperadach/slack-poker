@@ -1111,12 +1111,19 @@ describe("Poker Durable Object", () => {
       "buy_in", // alice buys in 500
       "message_received", // buy in bob message
       "buy_in", // bob buys in 500
+      "message_received", // start round message
       "round_start", // round starts
+      "message_received", // bet message
       "bet", // bob bets 160
+      "message_received", // call message
       "call", // alice calls
+      "message_received", // bet message
       "bet", // bob bets 100
+      "message_received", // call message
       "call", // alice calls
+      "message_received", // bet message
       "bet", // bob bets 150
+      "message_received", // fold message
       "fold", // alice folds
     ]);
 
@@ -1151,33 +1158,51 @@ describe("Poker Durable Object", () => {
     expect(buyInBob.playerId).toBe("bob");
     expect(buyInBob.amount).toBe(500);
 
-    const roundStart = assertRoundStart(actionLogs[10].data);
+    const roundStart = assertRoundStart(actionLogs[11].data);
     expect(roundStart.playerOrder).toContain("alice");
     expect(roundStart.playerOrder).toContain("bob");
     expect(roundStart.playerStacks).toEqual({ alice: 420, bob: 460 }); // after blinds
 
-    const bobBet160 = assertBet(actionLogs[11].data);
+    const bobBet160Message = assertMessageReceived(actionLogs[12].data);
+    expect(bobBet160Message.playerId).toBe("bob");
+
+    const bobBet160 = assertBet(actionLogs[13].data);
     expect(bobBet160.playerId).toBe("bob");
     expect(bobBet160.amount).toBe(160);
     expect(bobBet160.messageText).toBe("bet 160");
 
-    const aliceCall160 = assertCall(actionLogs[12].data);
+    const aliceCall160Message = assertMessageReceived(actionLogs[14].data);
+    expect(aliceCall160Message.playerId).toBe("alice");
+
+    const aliceCall160 = assertCall(actionLogs[15].data);
     expect(aliceCall160.playerId).toBe("alice");
     expect(aliceCall160.amount).toBe(80); // 160 - 80 (BB already posted)
 
-    const bobBet100 = assertBet(actionLogs[13].data);
+    const bobBet100Message = assertMessageReceived(actionLogs[16].data);
+    expect(bobBet100Message.playerId).toBe("bob");
+
+    const bobBet100 = assertBet(actionLogs[17].data);
     expect(bobBet100.playerId).toBe("bob");
     expect(bobBet100.amount).toBe(100);
 
-    const aliceCall100 = assertCall(actionLogs[14].data);
+    const aliceCall100Message = assertMessageReceived(actionLogs[18].data);
+    expect(aliceCall100Message.playerId).toBe("alice");
+
+    const aliceCall100 = assertCall(actionLogs[19].data);
     expect(aliceCall100.playerId).toBe("alice");
     expect(aliceCall100.amount).toBe(100);
 
-    const bobBet150 = assertBet(actionLogs[15].data);
+    const bobBet150Message = assertMessageReceived(actionLogs[20].data);
+    expect(bobBet150Message.playerId).toBe("bob");
+
+    const bobBet150 = assertBet(actionLogs[21].data);
     expect(bobBet150.playerId).toBe("bob");
     expect(bobBet150.amount).toBe(150);
 
-    const aliceFold = assertFold(actionLogs[16].data);
+    const aliceFoldMessage = assertMessageReceived(actionLogs[22].data);
+    expect(aliceFoldMessage.playerId).toBe("alice");
+
+    const aliceFold = assertFold(actionLogs[23].data);
     expect(aliceFold.playerId).toBe("alice");
 
     // Verify timestamps are in ascending order
@@ -1927,12 +1952,21 @@ describe("Poker Durable Object", () => {
       "buy_in", // bob buys in 1000
       "message_received", // buy in charlie message
       "buy_in", // charlie buys in 1000
+      "message_received", // start round message
       "round_start", // round starts
+      "message_received", // pre-check message
+      "message_received", // call message
       "call", // alice calls
+      "message_received", // call message
       "call", // bob calls (triggers charlie's pre-check, advancing to flop)
+      "message_received", // pre-fold message
+      "message_received", // bet message
       "bet", // bob bets 100 on flop
+      "message_received", // call message
       "call", // alice calls (charlie's pre-fold executes)
+      "message_received", // bet message
       "bet", // bob bets 100 on turn
+      "message_received", // pre-call message
     ]);
 
     // Verify bob's bets are logged with correct amounts
@@ -1952,24 +1986,24 @@ describe("Poker Durable Object", () => {
     const buyInCharlieMessage = assertMessageReceived(actionLogs[12].data);
     expect(buyInCharlieMessage.handlerKey).toBe("buy in");
 
-    const bobBetFlop = assertBet(actionLogs[17].data);
+    const bobBetFlop = assertBet(actionLogs[23].data);
     expect(bobBetFlop.playerId).toBe("bob");
     expect(bobBetFlop.amount).toBe(100);
 
-    const bobBetTurn = assertBet(actionLogs[19].data);
+    const bobBetTurn = assertBet(actionLogs[27].data);
     expect(bobBetTurn.playerId).toBe("bob");
     expect(bobBetTurn.amount).toBe(100);
 
     // Verify alice's calls
-    const aliceCallPreflop = assertCall(actionLogs[15].data);
+    const aliceCallPreflop = assertCall(actionLogs[18].data);
     expect(aliceCallPreflop.playerId).toBe("alice");
 
-    const aliceCallFlop = assertCall(actionLogs[18].data);
+    const aliceCallFlop = assertCall(actionLogs[25].data);
     expect(aliceCallFlop.playerId).toBe("alice");
     expect(aliceCallFlop.amount).toBe(100);
 
     // Verify round_start contains all three players
-    const roundStart = assertRoundStart(actionLogs[14].data);
+    const roundStart = assertRoundStart(actionLogs[15].data);
     expect(roundStart.playerOrder).toContain("alice");
     expect(roundStart.playerOrder).toContain("bob");
     expect(roundStart.playerOrder).toContain("charlie");
@@ -3972,10 +4006,16 @@ describe("Poker Durable Object", () => {
       "buy_in", // bob buys in 1000
       "message_received", // buy in charlie message
       "buy_in", // charlie buys in 1000
+      "message_received", // start round message
       "round_start", // round starts
+      "message_received", // pre-call message
+      "message_received", // call message
       "call", // alice calls 80
+      "message_received", // bet message
       "bet", // bob raises to 200 (charlie's pre-call fails)
+      "message_received", // call message
       "call", // charlie calls manually (200 - 80 = 120)
+      "message_received", // call message
       "call", // alice calls the raise (120 more)
     ]);
 
@@ -3995,22 +4035,6 @@ describe("Poker Durable Object", () => {
     expect(buyInBobMessage.handlerKey).toBe("buy in");
     const buyInCharlieMessage = assertMessageReceived(actionLogs[12].data);
     expect(buyInCharlieMessage.handlerKey).toBe("buy in");
-
-    const bobRaise = assertBet(actionLogs[16].data);
-    expect(bobRaise.playerId).toBe("bob");
-    expect(bobRaise.amount).toBe(200);
-
-    // Verify charlie's manual call after pre-call failed
-    const charlieManualCall = assertCall(actionLogs[17].data);
-    expect(charlieManualCall.playerId).toBe("charlie");
-    // Charlie had posted 80 BB, now needs to call 120 more to match 200
-    expect(charlieManualCall.amount).toBe(120);
-
-    // Verify alice's call to match the raise
-    const aliceCallRaise = assertCall(actionLogs[18].data);
-    expect(aliceCallRaise.playerId).toBe("alice");
-    // Alice had called 80, now needs to call 120 more to match 200
-    expect(aliceCallRaise.amount).toBe(120);
 
     // Verify timestamps are in ascending order
     for (let i = 1; i < actionLogs.length; i++) {

@@ -29,3 +29,35 @@ For each handler, follow the same shape:
 1. Worker builds payload → one DO call.
 2. DO validates + mutates + logs.
 3. Worker sends Slack messages based on DO result.
+
+## Handler Inventory
+
+### Already Refactored ✓
+- newGame
+- joinGame
+- buyIn
+- fold
+- check
+- call
+- bet
+- startRound
+- takeHerToThe
+- cashOut
+- leaveGame
+- preDeal
+- preNH
+- preAH
+- preCheck
+- preFold
+- preCall
+- preBet
+
+### Need Refactoring (0)
+
+All handlers requiring refactoring have been completed!
+
+### No Refactoring Needed
+
+**Read-only (9):** getGameState, context, showChips, showStacks, showFlops, searchFlops, nudgePlayer, showCards, revealCards
+
+**Utility (7):** drillGto, ass, help, commitSeppuku, scoreDice, keepDice, rollDice
