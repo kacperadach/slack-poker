@@ -1060,6 +1060,116 @@ describe("Poker Durable Object", () => {
     expect(getPlayerById(finalGameState, "alice")?.chips).toBe(240);
     expect(getPlayerById(finalGameState, "bob")?.chips).toBe(760);
     expect(finalGameState.dealerPosition).toBe(1); // dealer moved
+
+    // === VERIFY ACTION LOG ===
+    const actionLogs = await stub.getActionLogs(workspaceId, channelId);
+
+    // Verify the sequence of actions
+    const actionTypes = actionLogs.map((log) => log.data.actionType);
+    expect(actionTypes).toEqual([
+      "new_game", // newGame
+      "join", // alice joins
+      "join", // bob joins
+      "buy_in", // alice buys in 500
+      "buy_in", // bob buys in 500
+      "round_start", // round starts
+      "bet", // bob bets 160
+      "call", // alice calls
+      "bet", // bob bets 100
+      "call", // alice calls
+      "bet", // bob bets 150
+      "fold", // alice folds
+    ]);
+
+    // Verify specific action details using type guards
+    const newGameAction = actionLogs[0].data;
+    expect(newGameAction.actionType).toBe("new_game");
+    expect(newGameAction.workspaceId).toBe(workspaceId);
+    expect(newGameAction.channelId).toBe(channelId);
+    expect(newGameAction.schemaVersion).toBe(1);
+
+    const joinAlice = actionLogs[1].data;
+    expect(joinAlice.actionType).toBe("join");
+    if (joinAlice.actionType === "join") {
+      expect(joinAlice.playerId).toBe("alice");
+    }
+
+    const joinBob = actionLogs[2].data;
+    expect(joinBob.actionType).toBe("join");
+    if (joinBob.actionType === "join") {
+      expect(joinBob.playerId).toBe("bob");
+    }
+
+    const buyInAlice = actionLogs[3].data;
+    expect(buyInAlice.actionType).toBe("buy_in");
+    if (buyInAlice.actionType === "buy_in") {
+      expect(buyInAlice.playerId).toBe("alice");
+      expect(buyInAlice.amount).toBe(500);
+    }
+
+    const buyInBob = actionLogs[4].data;
+    expect(buyInBob.actionType).toBe("buy_in");
+    if (buyInBob.actionType === "buy_in") {
+      expect(buyInBob.playerId).toBe("bob");
+      expect(buyInBob.amount).toBe(500);
+    }
+
+    const roundStart = actionLogs[5].data;
+    expect(roundStart.actionType).toBe("round_start");
+    if (roundStart.actionType === "round_start") {
+      expect(roundStart.playerOrder).toContain("alice");
+      expect(roundStart.playerOrder).toContain("bob");
+      expect(roundStart.playerStacks).toEqual({ alice: 420, bob: 460 }); // after blinds
+    }
+
+    const bobBet160 = actionLogs[6].data;
+    expect(bobBet160.actionType).toBe("bet");
+    if (bobBet160.actionType === "bet") {
+      expect(bobBet160.playerId).toBe("bob");
+      expect(bobBet160.amount).toBe(160);
+      expect(bobBet160.messageText).toBe("bet 160");
+    }
+
+    const aliceCall160 = actionLogs[7].data;
+    expect(aliceCall160.actionType).toBe("call");
+    if (aliceCall160.actionType === "call") {
+      expect(aliceCall160.playerId).toBe("alice");
+      expect(aliceCall160.amount).toBe(80); // 160 - 80 (BB already posted)
+    }
+
+    const bobBet100 = actionLogs[8].data;
+    expect(bobBet100.actionType).toBe("bet");
+    if (bobBet100.actionType === "bet") {
+      expect(bobBet100.playerId).toBe("bob");
+      expect(bobBet100.amount).toBe(100);
+    }
+
+    const aliceCall100 = actionLogs[9].data;
+    expect(aliceCall100.actionType).toBe("call");
+    if (aliceCall100.actionType === "call") {
+      expect(aliceCall100.playerId).toBe("alice");
+      expect(aliceCall100.amount).toBe(100);
+    }
+
+    const bobBet150 = actionLogs[10].data;
+    expect(bobBet150.actionType).toBe("bet");
+    if (bobBet150.actionType === "bet") {
+      expect(bobBet150.playerId).toBe("bob");
+      expect(bobBet150.amount).toBe(150);
+    }
+
+    const aliceFold = actionLogs[11].data;
+    expect(aliceFold.actionType).toBe("fold");
+    if (aliceFold.actionType === "fold") {
+      expect(aliceFold.playerId).toBe("alice");
+    }
+
+    // Verify timestamps are in ascending order
+    for (let i = 1; i < actionLogs.length; i++) {
+      expect(actionLogs[i].data.timestamp).toBeGreaterThanOrEqual(
+        actionLogs[i - 1].data.timestamp
+      );
+    }
   });
 
   /**
