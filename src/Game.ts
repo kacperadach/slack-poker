@@ -1531,10 +1531,6 @@ export class TexasHoldem {
     return smallBlind;
   }
 
-  getDeck() {
-    return this.deck;
-  }
-
   public getState() {
     return {
       gameState: this.gameState,
