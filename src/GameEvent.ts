@@ -76,4 +76,14 @@ export class GameEvent {
   public setIsTurnMessage(isTurnMessage: boolean): void {
     this.isTurnMessage = isTurnMessage;
   }
+
+  public toJson() {
+    return {
+      description: this.description,
+      cards: this.cards.map((card) => card.toJson()),
+      ephemeral: this.ephemeral,
+      playerId: this.playerId,
+      isTurnMessage: this.isTurnMessage,
+    } as const;
+  }
 }

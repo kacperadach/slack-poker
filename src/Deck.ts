@@ -70,10 +70,10 @@ export class Deck {
     }
   }
 
-  public toJson(): any {
+  public toJson() {
     return {
       cards: this.cards.map((card) => card.toJson()),
-    };
+    } as const;
   }
 
   public static fromJson(data: any): Deck {

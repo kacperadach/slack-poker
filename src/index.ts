@@ -9,6 +9,7 @@ import { GameState, TexasHoldem } from "./Game";
 import { Card } from "./Card";
 // @ts-ignore phe is not typed
 import { rankDescription, rankCards } from "phe";
+import { userIdToName } from "./users";
 
 /**
  * Welcome to Cloudflare Workers! This is your first Durable Objects application.
@@ -323,6 +324,7 @@ const MESSAGE_HANDLERS = {
   flops: showFlops,
   fsearch: searchFlops,
   context: context,
+  stacks: showStacks,
 };
 
 function cleanMessageText(messageText: string) {
@@ -605,7 +607,7 @@ async function drillGto(
   });
 }
 
-async function nudgePlayer(
+export async function nudgePlayer(
   env: Env,
   context: SlackAppContextWithChannelId,
   _payload: PostedMessage
@@ -697,7 +699,7 @@ async function help(
   });
 }
 
-async function revealCards(
+export async function revealCards(
   env: Env,
   context: SlackAppContextWithChannelId,
   _payload: PostedMessage
@@ -718,7 +720,7 @@ async function revealCards(
   await sendGameEventMessages(env, context, game);
 }
 
-async function showCards(
+export async function showCards(
   env: Env,
   context: SlackAppContextWithChannelId,
   _payload: PostedMessage
@@ -746,7 +748,7 @@ async function showCards(
 // 	await sendGameEventMessages(context, game);
 // }
 
-async function preDeal(
+export async function preDeal(
   env: Env,
   context: SlackAppContextWithChannelId,
   _payload: PostedMessage
@@ -762,7 +764,7 @@ async function preDeal(
   await sendGameEventMessages(env, context, game);
 }
 
-async function preNH(
+export async function preNH(
   env: Env,
   context: SlackAppContextWithChannelId,
   _payload: PostedMessage
@@ -778,7 +780,7 @@ async function preNH(
   await sendGameEventMessages(env, context, game);
 }
 
-async function preAH(
+export async function preAH(
   env: Env,
   context: SlackAppContextWithChannelId,
   _payload: PostedMessage
@@ -794,7 +796,7 @@ async function preAH(
   await sendGameEventMessages(env, context, game);
 }
 
-async function preCheck(
+export async function preCheck(
   env: Env,
   context: SlackAppContextWithChannelId,
   _payload: PostedMessage
@@ -810,7 +812,7 @@ async function preCheck(
   await sendGameEventMessages(env, context, game);
 }
 
-async function preFold(
+export async function preFold(
   env: Env,
   context: SlackAppContextWithChannelId,
   _payload: PostedMessage
@@ -826,7 +828,7 @@ async function preFold(
   await sendGameEventMessages(env, context, game);
 }
 
-async function preCall(
+export async function preCall(
   env: Env,
   context: SlackAppContextWithChannelId,
   _payload: PostedMessage
@@ -842,7 +844,7 @@ async function preCall(
   await sendGameEventMessages(env, context, game);
 }
 
-async function preBet(
+export async function preBet(
   env: Env,
   context: SlackAppContextWithChannelId,
   payload: PostedMessage
@@ -875,7 +877,7 @@ async function preBet(
   await sendGameEventMessages(env, context, game);
 }
 
-async function bet(
+export async function bet(
   env: Env,
   context: SlackAppContextWithChannelId,
   payload: PostedMessage
@@ -908,7 +910,7 @@ async function bet(
   await sendGameEventMessages(env, context, game);
 }
 
-async function call(
+export async function call(
   env: Env,
   context: SlackAppContextWithChannelId,
   _payload: PostedMessage
@@ -924,7 +926,7 @@ async function call(
   await sendGameEventMessages(env, context, game);
 }
 
-async function check(
+export async function check(
   env: Env,
   context: SlackAppContextWithChannelId,
   _payload: PostedMessage
@@ -940,7 +942,7 @@ async function check(
   await sendGameEventMessages(env, context, game);
 }
 
-async function fold(
+export async function fold(
   env: Env,
   context: SlackAppContextWithChannelId,
   _payload: PostedMessage
@@ -956,7 +958,7 @@ async function fold(
   await sendGameEventMessages(env, context, game);
 }
 
-async function startRound(
+export async function startRound(
   env: Env,
   context: SlackAppContextWithChannelId,
   _payload: PostedMessage
@@ -972,7 +974,7 @@ async function startRound(
   await sendGameEventMessages(env, context, game);
 }
 
-async function showChips(
+export async function showChips(
   env: Env,
   context: SlackAppContextWithChannelId,
   _payload: PostedMessage
@@ -994,7 +996,36 @@ async function showChips(
   await context.say({ text: message });
 }
 
-async function cashOut(
+export async function showStacks(
+  env: Env,
+  context: SlackAppContextWithChannelId,
+  _payload: PostedMessage
+) {
+  const game = await fetchGame(env, context);
+  if (!game) {
+    await context.say({ text: `No game exists! Type 'New Game'` });
+    return;
+  }
+
+  let message = "*Stacks*\n";
+  game.getActivePlayers().forEach((player) => {
+    const name =
+      userIdToName[player.getId() as keyof typeof userIdToName] ||
+      player.getId();
+    message += `${name}: ${player.getChips()} (Active)\n`;
+  });
+
+  game.getInactivePlayers().forEach((player) => {
+    const name =
+      userIdToName[player.getId() as keyof typeof userIdToName] ||
+      player.getId();
+    message += `${name}: ${player.getChips()} (Inactive)\n`;
+  });
+
+  await context.say({ text: message });
+}
+
+export async function cashOut(
   env: Env,
   context: SlackAppContextWithChannelId,
   _payload: PostedMessage
@@ -1010,7 +1041,7 @@ async function cashOut(
   await sendGameEventMessages(env, context, game);
 }
 
-async function buyIn(
+export async function buyIn(
   env: Env,
   context: SlackAppContextWithChannelId,
   payload: PostedMessage
@@ -1036,7 +1067,7 @@ async function buyIn(
   await sendGameEventMessages(env, context, game);
 }
 
-async function leaveGame(
+export async function leaveGame(
   env: Env,
   context: SlackAppContextWithChannelId,
   _payload: PostedMessage
@@ -1052,7 +1083,7 @@ async function leaveGame(
   await sendGameEventMessages(env, context, game);
 }
 
-async function joinGame(
+export async function joinGame(
   env: Env,
   context: SlackAppContextWithChannelId,
   _payload: PostedMessage
@@ -1068,7 +1099,7 @@ async function joinGame(
   await sendGameEventMessages(env, context, game);
 }
 
-async function newGame(
+export async function newGame(
   env: Env,
   context: SlackAppContextWithChannelId,
   _payload: PostedMessage
@@ -1088,8 +1119,6 @@ async function newGame(
       }
     }
   }
-
-  console.log(JSON.stringify(new TexasHoldem().toJson()));
   const stub = getDurableObject(env, context);
   stub.createGame(
     context.teamId!,
@@ -1225,6 +1254,7 @@ async function sendGameEventMessages(
       .map((player) => player.getId());
     playerIds.push(...inactivePlayerIds);
     // Replace all player IDs in message with @mentions
+    // TODO: maybe do it without replacement
     playerIds.forEach((playerId) => {
       message = message.replace(new RegExp(playerId, "g"), `<@${playerId}>`);
     });
