@@ -82,11 +82,11 @@ export class Card {
     return this.suit === other.suit && this.rank === other.rank;
   }
 
-  public toJson(): any {
+  public toJson() {
     return {
       suit: this.suit,
       rank: this.rank,
-    };
+    } as const;
   }
 
   public static fromJson(data: any): Card {

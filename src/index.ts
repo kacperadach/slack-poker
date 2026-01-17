@@ -209,7 +209,6 @@ export default {
           return;
         }
         await handleMessage(env, context, payload);
-        // context.say;
       }
     );
     return await app.run(request, ctx);
@@ -678,7 +677,7 @@ async function showCards(env, context, payload) {
 // 	await sendGameEventMessages(context, game);
 // }
 
-async function preDeal(env, context, payload) {
+export async function preDeal(env, context, payload) {
   const game = await fetchGame(env, context);
   if (!game) {
     await context.say({ text: `No game exists! Type 'New Game'` });
@@ -690,7 +689,7 @@ async function preDeal(env, context, payload) {
   await sendGameEventMessages(env, context, game);
 }
 
-async function preNH(env, context, payload) {
+export async function preNH(env, context, payload) {
   const game = await fetchGame(env, context);
   if (!game) {
     await context.say({ text: `No game exists! Type 'New Game'` });
@@ -844,7 +843,7 @@ async function fold(env, context, payload) {
   await sendGameEventMessages(env, context, game);
 }
 
-async function startRound(env, context, payload) {
+export async function startRound(env, context, payload) {
   const game = await fetchGame(env, context);
   if (!game) {
     await context.say({ text: `No game exists! Type 'New Game'` });
@@ -886,7 +885,7 @@ async function cashOut(env, context, payload) {
   await sendGameEventMessages(env, context, game);
 }
 
-async function buyIn(env, context, payload) {
+export async function buyIn(env, context, payload: { text: string }) {
   const messageText = payload.text.toLowerCase();
   const buyInAmount = parseFloat(messageText.replace("buy in", "").trim());
 
@@ -920,7 +919,7 @@ async function leaveGame(env, context) {
   await sendGameEventMessages(env, context, game);
 }
 
-async function joinGame(env, context) {
+export async function joinGame(env, context) {
   const game = await fetchGame(env, context);
   if (!game) {
     await context.say({ text: `No game exists! Type 'New Game'` });
@@ -932,7 +931,7 @@ async function joinGame(env, context) {
   await sendGameEventMessages(env, context, game);
 }
 
-async function newGame(env, context, payload) {
+export async function newGame(env, context) {
   const game = await fetchGame(env, context);
   if (game) {
     const allPlayers = [
@@ -948,8 +947,6 @@ async function newGame(env, context, payload) {
       }
     }
   }
-
-  console.log(JSON.stringify(new TexasHoldem().toJson()));
   const stub = getDurableObject(env, context);
   stub.createGame(
     context.teamId,
@@ -1074,6 +1071,7 @@ async function sendGameEventMessages(env, context, game: TexasHoldem) {
       .map((player) => player.getId());
     playerIds.push(...inactivePlayerIds);
     // Replace all player IDs in message with @mentions
+    // TODO: this is kinda ass
     playerIds.forEach((playerId) => {
       message = message.replace(new RegExp(playerId, "g"), `<@${playerId}>`);
     });
