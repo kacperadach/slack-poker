@@ -778,7 +778,7 @@ async function preBet(env, context, payload) {
   await sendGameEventMessages(env, context, game);
 }
 
-async function bet(env, context, payload) {
+export async function bet(env, context, payload) {
   const messageText = cleanMessageText(payload.text);
   const betAmount = parseFloat(
     messageText
@@ -807,7 +807,7 @@ async function bet(env, context, payload) {
   await sendGameEventMessages(env, context, game);
 }
 
-async function call(env, context, payload) {
+export async function call(env, context, payload) {
   const game = await fetchGame(env, context);
   if (!game) {
     await context.say({ text: `No game exists! Type 'New Game'` });
@@ -819,7 +819,7 @@ async function call(env, context, payload) {
   await sendGameEventMessages(env, context, game);
 }
 
-async function check(env, context, payload) {
+export async function check(env, context, payload) {
   const game = await fetchGame(env, context);
   if (!game) {
     await context.say({ text: `No game exists! Type 'New Game'` });
@@ -831,7 +831,7 @@ async function check(env, context, payload) {
   await sendGameEventMessages(env, context, game);
 }
 
-async function fold(env, context, payload) {
+export async function fold(env, context, payload) {
   const game = await fetchGame(env, context);
   if (!game) {
     await context.say({ text: `No game exists! Type 'New Game'` });

@@ -1442,7 +1442,6 @@ export class TexasHoldem {
   public toJson() {
     return {
       gameState: this.gameState,
-      events: this.events.map((event) => event.toJson()),
       deck: this.deck.toJson(),
       communityCards: this.communityCards.map((card) => card.toJson()),
       activePlayers: this.activePlayers.map((player) => player.toJson()),
@@ -1534,5 +1533,26 @@ export class TexasHoldem {
 
   getDeck() {
     return this.deck;
+  }
+
+  public getState() {
+    return {
+      gameState: this.gameState,
+      deck: this.deck.toJson(),
+      events: this.events.map((event) => event.toJson()),
+      communityCards: this.communityCards.map((card) => card.toJson()),
+      activePlayers: this.activePlayers.map((player) => player.toJson()),
+      inactivePlayers: this.inactivePlayers.map((player) => player.toJson()),
+      currentPot: this.currentPot,
+      dealerPosition: this.dealerPosition,
+      smallBlind: this.smallBlind,
+      bigBlind: this.bigBlind,
+      currentPlayerIndex: this.currentPlayerIndex,
+      foldedPlayers: Array.from(this.foldedPlayers),
+      currentBetAmount: this.currentBetAmount,
+      lastRaiseAmount: this.lastRaiseAmount,
+      playerPositions: Array.from(this.playerPositions.entries()),
+      preDealId: this.preDealId,
+    } as const;
   }
 }
