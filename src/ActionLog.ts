@@ -92,8 +92,6 @@ export interface CashOutActionV1 extends ActionLogBase {
 export interface RoundStartActionV1 extends ActionLogBase {
   actionType: "round_start";
   schemaVersion: 1;
-  /** Round number (1-indexed) */
-  roundNumber: number;
   /** Dealer position (index in playerOrder) */
   dealerPosition: number;
   /** Active players in seat order */

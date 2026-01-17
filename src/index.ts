@@ -1314,16 +1314,15 @@ export async function startRound(
     timestamp: Date.now(),
     actionType: "round_start",
     messageText: payload.text ?? "",
-    roundNumber: state.dealerPosition, // Use as proxy for round number for now
     dealerPosition: state.dealerPosition,
     playerOrder,
     playerStacks,
     playerCards,
     communityCards: fullCommunityCards,
     smallBlindPlayerId: playerOrder[sbPos] ?? "",
-    smallBlindAmount: state.smallBlind * 4, // Game uses 4x multiplier
+    smallBlindAmount: state.smallBlind,
     bigBlindPlayerId: playerOrder[bbPos] ?? "",
-    bigBlindAmount: state.bigBlind * 4,
+    bigBlindAmount: state.bigBlind,
   });
   await sendGameEventMessages(env, context, game);
 }
