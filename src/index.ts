@@ -1100,10 +1100,10 @@ async function newGame(
 }
 
 async function fetchGame(env: Env, context: SlackAppContextWithChannelId) {
-  const workspaceId = context.teamId;
+  const workspaceId = context.teamId!;
   const channelId = context.channelId;
   const stub = getDurableObject(env, context);
-  const game = await stub.fetchGame(workspaceId!, channelId);
+  const game = await stub.fetchGame(workspaceId, channelId);
 
   if (!game) {
     return null;
@@ -1169,16 +1169,16 @@ async function sendGameEventMessages(
 
       const stub = getDurableObject(env, context);
 
-      const workspaceId = context.teamId;
+      const workspaceId = context.teamId!;
       const channelId = context.channelId;
 
       const flopString = getFlopString(event.getCards());
 
-      const flop = await stub.getFlop(workspaceId!, channelId, flopString);
+      const flop = await stub.getFlop(workspaceId, channelId, flopString);
       if (!flop) {
         message = `*NEW* ` + message;
         const flopCount = await stub.addFlop(
-          workspaceId!,
+          workspaceId,
           channelId,
           flopString,
           Date.now()
