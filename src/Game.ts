@@ -1439,7 +1439,7 @@ export class TexasHoldem {
     this.events.push(new GameEvent(message, this.getCommunityCards()));
   }
 
-  public toJson(): any {
+  public toJson() {
     return {
       gameState: this.gameState,
       deck: this.deck.toJson(),
@@ -1456,7 +1456,7 @@ export class TexasHoldem {
       lastRaiseAmount: this.lastRaiseAmount,
       playerPositions: Array.from(this.playerPositions.entries()),
       preDealId: this.preDealId,
-    };
+    } as const;
   }
 
   public static fromJson(data: any): TexasHoldem {
@@ -1529,5 +1529,26 @@ export class TexasHoldem {
     }
 
     return smallBlind;
+  }
+
+  public getState() {
+    return {
+      gameState: this.gameState,
+      deck: this.deck.toJson(),
+      events: this.events.map((event) => event.toJson()),
+      communityCards: this.communityCards.map((card) => card.toJson()),
+      activePlayers: this.activePlayers.map((player) => player.toJson()),
+      inactivePlayers: this.inactivePlayers.map((player) => player.toJson()),
+      currentPot: this.currentPot,
+      dealerPosition: this.dealerPosition,
+      smallBlind: this.smallBlind,
+      bigBlind: this.bigBlind,
+      currentPlayerIndex: this.currentPlayerIndex,
+      foldedPlayers: Array.from(this.foldedPlayers),
+      currentBetAmount: this.currentBetAmount,
+      lastRaiseAmount: this.lastRaiseAmount,
+      playerPositions: Array.from(this.playerPositions.entries()),
+      preDealId: this.preDealId,
+    } as const;
   }
 }

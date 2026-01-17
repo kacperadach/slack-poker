@@ -205,7 +205,7 @@ export class Player {
     this.preAH = preAH;
   }
 
-  public toJson(): any {
+  public toJson() {
     return {
       id: this.id,
       chips: this.chips,
@@ -221,7 +221,7 @@ export class Player {
       preMove: this.preMove,
       preNH: this.preNH,
       preAH: this.preAH,
-    };
+    } as const;
   }
 
   public static fromJson(data: any): Player {
