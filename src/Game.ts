@@ -127,11 +127,12 @@ export class TexasHoldem {
         this.events.push(
           new GameEvent(`${currentPlayer.getId()} is pre-moving!`)
         );
-        if (preMove?.move.toLowerCase() === "check") {
+        const move = preMove?.move.toLowerCase();
+        if (move === "check") {
           this.check(currentPlayer.getId());
-        } else if (preMove?.move.toLowerCase() === "fold") {
+        } else if (move === "fold") {
           this.fold(currentPlayer.getId());
-        } else if (preMove?.move.toLowerCase() === "call") {
+        } else if (move === "call") {
           const callAmount = preMove?.amount;
           if (!callAmount) {
             this.events.push(
@@ -151,7 +152,7 @@ export class TexasHoldem {
           }
 
           this.call(currentPlayer.getId());
-        } else if (preMove?.move.toLowerCase() === "bet") {
+        } else if (move === "bet") {
           const betAmount = preMove?.amount;
           if (!betAmount) {
             this.events.push(
@@ -1153,7 +1154,10 @@ export class TexasHoldem {
     }
 
     // If no bets or player has already matched, check. Otherwise call.
-    if (this.currentBetAmount === 0 || player.getCurrentBet() >= this.currentBetAmount) {
+    if (
+      this.currentBetAmount === 0 ||
+      player.getCurrentBet() >= this.currentBetAmount
+    ) {
       return this.check(playerId);
     } else {
       return this.call(playerId);
@@ -1514,7 +1518,6 @@ export class TexasHoldem {
       timeZone: "America/New_York",
     };
     const dayOfWeek = new Intl.DateTimeFormat("en-US", options).format(now);
-    console.log("dayOfWeek", dayOfWeek);
 
     let smallBlind = 10;
 
@@ -1563,7 +1566,10 @@ export class TexasHoldem {
       foldedPlayers: Array.from(this.foldedPlayers),
       currentBetAmount: this.currentBetAmount,
       lastRaiseAmount: this.lastRaiseAmount,
-      playerPositions: Array.from(this.playerPositions.entries()),
+      playerPositions: Array.from(this.playerPositions.entries()) as (
+        | string
+        | number
+      )[][],
       preDealId: this.preDealId,
     } as const;
   }
