@@ -449,7 +449,7 @@ async function context(env, context, payload) {
   if (gameState === GameState.WaitingForPlayers) {
     turnText = "No active round";
   } else if (currentPlayer && currentPlayer.getId() === context.userId) {
-    turnText = "It's your turn";
+    turnText = ":rotating_light: It's your turn :rotating_light:";
   } else if (currentPlayer) {
     turnText = `It's <@${currentPlayer.getId()}>'s turn`;
   } else {
