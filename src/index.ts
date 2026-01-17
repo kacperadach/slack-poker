@@ -1071,7 +1071,7 @@ async function sendGameEventMessages(env, context, game: TexasHoldem) {
       .map((player) => player.getId());
     playerIds.push(...inactivePlayerIds);
     // Replace all player IDs in message with @mentions
-    // TODO: this is kinda ass
+    // TODO: maybe do it without replacement
     playerIds.forEach((playerId) => {
       message = message.replace(new RegExp(playerId, "g"), `<@${playerId}>`);
     });
