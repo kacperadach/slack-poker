@@ -325,6 +325,64 @@ export class PokerDurableObject extends DurableObject<Env> {
     return { ok: true, events };
   }
 
+  async buyInWithAction(data: {
+    workspaceId: string;
+    channelId: string;
+    playerId: string;
+    messageText: string;
+    normalizedText: string;
+    handlerKey: string;
+    slackMessageTs: string;
+    timestamp: number;
+    amount: number;
+  }): Promise<
+    | { ok: true; events: ReturnType<GameEvent["toJson"]>[] }
+    | { ok: false; reason: "no_game" }
+  > {
+    const existing = await this.fetchGame(data.workspaceId, data.channelId);
+    if (!existing) {
+      return { ok: false, reason: "no_game" };
+    }
+
+    const game = TexasHoldem.fromJson(existing);
+    game.buyIn(data.playerId, data.amount);
+    const events = game.getEvents().map((event) => event.toJson());
+
+    const messageReceivedAction: MessageReceivedActionV1 = {
+      schemaVersion: 1,
+      workspaceId: data.workspaceId,
+      channelId: data.channelId,
+      timestamp: data.timestamp,
+      actionType: "message_received",
+      messageText: data.messageText,
+      playerId: data.playerId,
+      slackMessageTs: data.slackMessageTs,
+      normalizedText: data.normalizedText,
+      handlerKey: data.handlerKey,
+    };
+    this.logAction(messageReceivedAction);
+
+    const buyInAction: ActionLogEntry = {
+      schemaVersion: 1,
+      workspaceId: data.workspaceId,
+      channelId: data.channelId,
+      timestamp: Date.now(),
+      actionType: "buy_in",
+      messageText: data.messageText,
+      playerId: data.playerId,
+      amount: data.amount,
+    };
+
+    this.saveGameWithAction(
+      data.workspaceId,
+      data.channelId,
+      JSON.stringify(game.toJson()),
+      buyInAction
+    );
+
+    return { ok: true, events };
+  }
+
   saveGame(workspaceId: string, channelId: string, game: any): void {
     this.sql.exec(
       `
@@ -686,7 +744,7 @@ async function handleMessage(
         messageText: payload.text ?? "",
         timestamp: Date.now(),
       };
-      if (handler !== newGame && handler !== joinGame) {
+      if (handler !== newGame && handler !== joinGame && handler !== buyIn) {
         const stub = getDurableObject(env, context);
         const messageAction: MessageReceivedActionV1 = {
           schemaVersion: 1,
@@ -1519,7 +1577,8 @@ export async function cashOut(
 export async function buyIn(
   env: Env,
   context: SlackAppContextWithChannelId,
-  payload: PostedMessage
+  payload: PostedMessage,
+  meta?: HandlerMeta
 ) {
   const messageText = payload.text.toLowerCase();
   const buyInAmount = parseFloat(messageText.replace("buy in", "").trim());
@@ -1531,24 +1590,35 @@ export async function buyIn(
     return;
   }
 
-  const game = await fetchGame(env, context);
-  if (!game) {
+  const stub = getDurableObject(env, context);
+  const rawMessageText = meta?.messageText ?? payload.text ?? "";
+  const normalizedText =
+    meta?.normalizedText ?? cleanMessageText(rawMessageText);
+  const handlerKey = meta?.handlerKey ?? "buy in";
+  const slackMessageTs = meta?.slackMessageTs ?? payload.ts ?? "";
+  const timestamp = meta?.timestamp ?? Date.now();
+
+  const result = await stub.buyInWithAction({
+    workspaceId: context.teamId!,
+    channelId: context.channelId,
+    playerId: context.userId!,
+    messageText: rawMessageText,
+    normalizedText,
+    handlerKey,
+    slackMessageTs,
+    timestamp,
+    amount: buyInAmount,
+  });
+
+  if (!result.ok) {
     await context.say({ text: `No game exists! Type 'New Game'` });
     return;
   }
 
-  game.buyIn(context.userId!, buyInAmount);
-  await saveGameWithAction(env, context, game, {
-    schemaVersion: 1,
-    workspaceId: context.teamId!,
-    channelId: context.channelId,
-    timestamp: Date.now(),
-    actionType: "buy_in",
-    messageText: payload.text ?? "",
-    playerId: context.userId!,
-    amount: buyInAmount,
-  });
-  await sendGameEventMessages(env, context, game);
+  const game = await fetchGame(env, context);
+  if (game) {
+    await sendEventJsonMessages(env, context, game, result.events);
+  }
 }
 
 export async function leaveGame(
