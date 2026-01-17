@@ -13,6 +13,8 @@ import { rankDescription, rankCards } from "phe";
 import { userIdToName } from "./users";
 import type {
   ActionLogEntry,
+  CallActionV1,
+  CheckActionV1,
   MessageReceivedActionV1,
   NewGameActionV1,
   RoundStartActionV1,
@@ -2789,24 +2791,6 @@ async function saveGame(
   await stub.saveGame(workspaceId, channelId, JSON.stringify(game.toJson()));
 }
 
-async function saveGameWithAction(
-  env: Env,
-  context: SlackAppContextWithChannelId,
-  game: TexasHoldem,
-  action: ActionLogEntry
-) {
-  const workspaceId = context.teamId!;
-  const channelId = context.channelId;
-  const stub = getDurableObject(env, context);
-
-  await stub.saveGameWithAction(
-    workspaceId,
-    channelId,
-    JSON.stringify(game.toJson()),
-    action
-  );
-}
-
 async function sendGameStateMessages(
   env: Env,
   context: SlackAppContextWithChannelId,
@@ -2817,20 +2801,6 @@ async function sendGameStateMessages(
     ...gameState.activePlayers.map((p) => p.id),
     ...gameState.inactivePlayers.map((p) => p.id),
   ];
-  await sendEventsWithPlayerIds(env, context, events, playerIds);
-}
-
-async function sendEventJsonMessages(
-  env: Env,
-  context: SlackAppContextWithChannelId,
-  game: TexasHoldem,
-  events: GameEventJson[]
-) {
-  const playerIds = game.getActivePlayers().map((player) => player.getId());
-  const inactivePlayerIds = game
-    .getInactivePlayers()
-    .map((player) => player.getId());
-  playerIds.push(...inactivePlayerIds);
   await sendEventsWithPlayerIds(env, context, events, playerIds);
 }
 
