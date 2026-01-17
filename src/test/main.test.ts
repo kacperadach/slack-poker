@@ -1,5 +1,5 @@
 import { env, runInDurableObject } from "cloudflare:test";
-import { describe, it, expect, vi } from "vitest";
+import { describe, it, expect, vi, beforeAll, afterAll } from "vitest";
 import { GameState, TexasHoldem } from "../Game";
 import {
   buyIn,
@@ -24,6 +24,19 @@ import {
   showChips,
   nudgePlayer,
 } from "..";
+import {
+  GenericMessageEvent,
+  SlackAppContextWithChannelId,
+} from "slack-cloudflare-workers";
+
+beforeAll(() => {
+  vi.useFakeTimers();
+  vi.setSystemTime(new Date("2026-01-16T12:00:00Z"));
+});
+
+afterAll(() => {
+  vi.useRealTimers();
+});
 
 describe("Poker Durable Object", () => {
   it("creates tables", async () => {
@@ -43,21 +56,21 @@ describe("Poker Durable Object", () => {
   it("starts new game", async () => {
     const workspaceId = "test-workspace";
     const channelId = "test-channel";
-    const context = {
-      teamId: workspaceId,
-      channelId: channelId,
-      say: vi.fn(),
-    };
-    const id = env.POKER_DURABLE_OBJECT.idFromName(
-      `${workspaceId}-${channelId}`
-    );
-    const stub = env.POKER_DURABLE_OBJECT.get(id);
-    await newGame(env, context);
+    const sayFn = vi.fn();
+    const context = createContext({
+      userId: "test",
+      sayFn,
+      workspaceId,
+      channelId,
+    });
+    const payload = createGenericMessageEvent("test");
+    const stub = getStub({ workspaceId, channelId });
+    await newGame(env, context, payload);
     const gameState = await getGameState(stub, workspaceId, channelId);
     expect(gameState.deck.cards.length).toBe(52);
     expect(gameState.smallBlind).toBe(10);
     expect(gameState.bigBlind).toBe(20);
-    expect(context.say).toHaveBeenCalledWith({
+    expect(sayFn).toHaveBeenCalledWith({
       text: "New Poker Game created!",
     });
   });
@@ -65,14 +78,16 @@ describe("Poker Durable Object", () => {
   it("won't pre-deal if no game exists", async () => {
     const workspaceId = "test-workspace";
     const channelId = "test-channel";
-    const context = {
-      teamId: workspaceId,
-      channelId: channelId,
+    const sayFn = vi.fn();
+    const context = createContext({
       userId: "1",
-      say: vi.fn(),
-    };
-    await preDeal(env, context, null);
-    expect(context.say).toHaveBeenCalledWith({
+      sayFn,
+      workspaceId,
+      channelId,
+    });
+    const payload = createGenericMessageEvent("1");
+    await preDeal(env, context, payload);
+    expect(sayFn).toHaveBeenCalledWith({
       text: "No game exists! Type 'New Game'",
     });
   });
@@ -80,31 +95,33 @@ describe("Poker Durable Object", () => {
   it("won't pre-nh if no game exists", async () => {
     const workspaceId = "test-workspace";
     const channelId = "test-channel";
-    const context = {
-      teamId: workspaceId,
-      channelId: channelId,
+    const sayFn = vi.fn();
+    const context = createContext({
       userId: "1",
-      say: vi.fn(),
-    };
-    await preNH(env, context, null);
-    expect(context.say).toHaveBeenCalledWith({
+      sayFn,
+      workspaceId,
+      channelId,
+    });
+    const payload = createGenericMessageEvent("1");
+    await preNH(env, context, payload);
+    expect(sayFn).toHaveBeenCalledWith({
       text: "No game exists! Type 'New Game'",
     });
   });
 
-  it("starts new game", async () => {
+  it("starts new game with player checks", async () => {
     const workspaceId = "test-workspace";
     const channelId = "test-channel";
-    const context = {
-      teamId: workspaceId,
-      channelId: channelId,
-      say: vi.fn(),
-    };
-    const id = env.POKER_DURABLE_OBJECT.idFromName(
-      `${workspaceId}-${channelId}`
-    );
-    const stub = env.POKER_DURABLE_OBJECT.get(id);
-    await newGame(env, context);
+    const sayFn = vi.fn();
+    const context = createContext({
+      userId: "test",
+      sayFn,
+      workspaceId,
+      channelId,
+    });
+    const payload = createGenericMessageEvent("test");
+    const stub = getStub({ workspaceId, channelId });
+    await newGame(env, context, payload);
     const gameState = await getGameState(stub, workspaceId, channelId);
     expect(gameState.deck.cards.length).toBe(52);
     expect(gameState.smallBlind).toBe(10);
@@ -112,7 +129,7 @@ describe("Poker Durable Object", () => {
     expect(gameState.activePlayers.length).toBe(0);
     expect(gameState.inactivePlayers.length).toBe(0);
 
-    expect(context.say).toHaveBeenCalledWith({
+    expect(sayFn).toHaveBeenCalledWith({
       text: "New Poker Game created!",
     });
   });
@@ -120,18 +137,17 @@ describe("Poker Durable Object", () => {
   it("allows players to join game", async () => {
     const workspaceId = "test-workspace";
     const channelId = "test-channel";
-    const context = {
-      teamId: workspaceId,
-      channelId: channelId,
+    const sayFn = vi.fn();
+    const context = createContext({
       userId: "1",
-      say: vi.fn(),
-    };
-    const id = env.POKER_DURABLE_OBJECT.idFromName(
-      `${workspaceId}-${channelId}`
-    );
-    const stub = env.POKER_DURABLE_OBJECT.get(id);
-    await newGame(env, context);
-    await joinGame(env, context);
+      sayFn,
+      workspaceId,
+      channelId,
+    });
+    const payload = createGenericMessageEvent("1");
+    const stub = getStub({ workspaceId, channelId });
+    await newGame(env, context, payload);
+    await joinGame(env, context, payload);
 
     const gameState = await getGameState(stub, workspaceId, channelId);
     expect(gameState.activePlayers.length).toBe(1);
@@ -145,30 +161,24 @@ describe("Poker Durable Object", () => {
     const channelId = "test-channel";
     const sayFn = vi.fn();
     const postEphemeralFn = vi.fn();
-    const contextUser1 = {
-      teamId: workspaceId,
-      channelId: channelId,
+    const contextUser1 = createContext({
       userId: "user1",
-      say: sayFn,
-      client: {
-        chat: {
-          postEphemeral: postEphemeralFn,
-        },
-      },
-    };
-    const contextUser2 = {
-      teamId: workspaceId,
-      channelId: channelId,
+      sayFn,
+      postEphemeralFn,
+      workspaceId,
+      channelId,
+    });
+    const contextUser2 = createContext({
       userId: "user2",
-      say: sayFn,
-      client: {
-        chat: {
-          postEphemeral: postEphemeralFn,
-        },
-      },
-    };
+      sayFn,
+      postEphemeralFn,
+      workspaceId,
+      channelId,
+    });
+    const payloadUser1 = createGenericMessageEvent("user1");
+    const payloadUser2 = createGenericMessageEvent("user2");
     const stub = getStub({ workspaceId, channelId });
-    await newGame(env, contextUser1);
+    await newGame(env, contextUser1, payloadUser1);
     expect(sayFn.mock.calls).toMatchInlineSnapshot(`
       [
         [
@@ -181,7 +191,7 @@ describe("Poker Durable Object", () => {
     sayFn.mockClear();
 
     // user1 joins game
-    await joinGame(env, contextUser1);
+    await joinGame(env, contextUser1, payloadUser1);
 
     // pre-deal
     const gameState1 = await getGameState(stub, workspaceId, channelId);
@@ -201,7 +211,7 @@ describe("Poker Durable Object", () => {
 
     // deal attempt
     // TODO: if invalid deal, don't remove player
-    await startRound(env, contextUser1, null);
+    await startRound(env, contextUser1, payloadUser1);
     const gameState2 = await getGameState(stub, workspaceId, channelId);
     expect(gameState2.activePlayers.length).toBe(0);
     expect(gameState2.inactivePlayers.length).toBe(1);
@@ -220,7 +230,7 @@ describe("Poker Durable Object", () => {
     sayFn.mockClear();
 
     // user2 joins game
-    await joinGame(env, contextUser2);
+    await joinGame(env, contextUser2, payloadUser2);
     const gameState3 = await getGameState(stub, workspaceId, channelId);
     expect(gameState3.activePlayers.length).toBe(1);
     expect(gameState3.inactivePlayers.length).toBe(1);
@@ -237,7 +247,11 @@ describe("Poker Durable Object", () => {
     sayFn.mockClear();
 
     // user1 buy-in
-    await buyIn(env, contextUser1, { text: "buy in 1000" });
+    await buyIn(
+      env,
+      contextUser1,
+      createGenericMessageEvent("user1", "buy in 1000")
+    );
     const gameState4 = await getGameState(stub, workspaceId, channelId);
     expect(getPlayerById(gameState4, "user1")?.chips).toBe(1000);
     expect(getPlayerById(gameState4, "user2")?.chips).toBe(0);
@@ -254,7 +268,11 @@ describe("Poker Durable Object", () => {
     sayFn.mockClear();
 
     // user2 buy-in
-    await buyIn(env, contextUser2, { text: "buy in 1000" });
+    await buyIn(
+      env,
+      contextUser2,
+      createGenericMessageEvent("user2", "buy in 1000")
+    );
     const gameState5 = await getGameState(stub, workspaceId, channelId);
 
     expect(getPlayerById(gameState5, "user2")?.chips).toBe(1000);
@@ -272,7 +290,7 @@ describe("Poker Durable Object", () => {
     sayFn.mockClear();
 
     // user2 re-join
-    await joinGame(env, contextUser1);
+    await joinGame(env, contextUser1, payloadUser1);
     const gameState6 = await getGameState(stub, workspaceId, channelId);
     expect(gameState6.gameState).toBe(GameState.WaitingForPlayers);
     expect(sayFn.mock.calls).toMatchInlineSnapshot(`
@@ -287,7 +305,7 @@ describe("Poker Durable Object", () => {
     sayFn.mockClear();
 
     // valid deal
-    await startRound(env, contextUser1, null);
+    await startRound(env, contextUser1, payloadUser1);
     const gameState7 = await getGameState(stub, workspaceId, channelId);
     expect(gameState7.gameState).toBe(GameState.PreFlop);
     expect(gameState7.activePlayers.length).toBe(2);
@@ -332,7 +350,7 @@ describe("Poker Durable Object", () => {
     postEphemeralFn.mockClear();
 
     // user1 calls (matches big blind)
-    await call(env, contextUser1, null);
+    await call(env, contextUser1, payloadUser1);
     const gameState8 = await getGameState(stub, workspaceId, channelId);
     expect(gameState8.gameState).toBe(GameState.PreFlop);
     expect(getPlayerById(gameState8, "user1")?.chips).toBe(920); // 1000 - 80
@@ -351,7 +369,7 @@ describe("Poker Durable Object", () => {
     postEphemeralFn.mockClear();
 
     // user2 checks (big blind option)
-    await check(env, contextUser2, null);
+    await check(env, contextUser2, payloadUser2);
     const gameState9 = await getGameState(stub, workspaceId, channelId);
     expect(gameState9.gameState).toBe(GameState.Flop);
     expect(gameState9.communityCards.length).toBe(3);
@@ -374,7 +392,7 @@ describe("Poker Durable Object", () => {
     postEphemeralFn.mockClear();
 
     // user1 checks on flop (user1 acts first post-flop as dealer acts last)
-    await check(env, contextUser1, null);
+    await check(env, contextUser1, payloadUser1);
     const gameState10 = await getGameState(stub, workspaceId, channelId);
     expect(gameState10.gameState).toBe(GameState.Flop);
     expect(sayFn.mock.calls).toMatchInlineSnapshot(`
@@ -391,7 +409,7 @@ describe("Poker Durable Object", () => {
     postEphemeralFn.mockClear();
 
     // user2 checks on flop - advances to turn
-    await check(env, contextUser2, null);
+    await check(env, contextUser2, payloadUser2);
     const gameState11 = await getGameState(stub, workspaceId, channelId);
     expect(gameState11.gameState).toBe(GameState.Turn);
     expect(gameState11.communityCards.length).toBe(4);
@@ -411,7 +429,7 @@ describe("Poker Durable Object", () => {
     postEphemeralFn.mockClear();
 
     // user1 checks on turn
-    await check(env, contextUser1, null);
+    await check(env, contextUser1, payloadUser1);
     const gameState12 = await getGameState(stub, workspaceId, channelId);
     expect(gameState12.gameState).toBe(GameState.Turn);
     expect(sayFn.mock.calls).toMatchInlineSnapshot(`
@@ -428,7 +446,7 @@ describe("Poker Durable Object", () => {
     postEphemeralFn.mockClear();
 
     // user2 checks on turn - advances to river
-    await check(env, contextUser2, null);
+    await check(env, contextUser2, payloadUser2);
     const gameState13 = await getGameState(stub, workspaceId, channelId);
     expect(gameState13.gameState).toBe(GameState.River);
     expect(gameState13.communityCards.length).toBe(5);
@@ -448,7 +466,7 @@ describe("Poker Durable Object", () => {
     postEphemeralFn.mockClear();
 
     // user1 checks on river
-    await check(env, contextUser1, null);
+    await check(env, contextUser1, payloadUser1);
     const gameState14 = await getGameState(stub, workspaceId, channelId);
     expect(gameState14.gameState).toBe(GameState.River);
     expect(sayFn.mock.calls).toMatchInlineSnapshot(`
@@ -465,7 +483,7 @@ describe("Poker Durable Object", () => {
     postEphemeralFn.mockClear();
 
     // user2 checks on river - triggers showdown
-    await check(env, contextUser2, null);
+    await check(env, contextUser2, payloadUser2);
     const gameState15 = await getGameState(stub, workspaceId, channelId);
     expect(gameState15.gameState).toBe(GameState.WaitingForPlayers);
     expect(sayFn.mock.calls).toMatchInlineSnapshot(`
@@ -493,7 +511,7 @@ describe("Poker Durable Object", () => {
     expect(gameState16.dealerPosition).toBe(1); // dealer button moved
 
     // Start a new round to verify game continues properly
-    await startRound(env, contextUser1, null);
+    await startRound(env, contextUser1, payloadUser1);
     const gameState17 = await getGameState(stub, workspaceId, channelId);
     expect(gameState17.gameState).toBe(GameState.PreFlop);
     expect(sayFn.mock.calls).toMatchInlineSnapshot(`
@@ -516,7 +534,7 @@ describe("Poker Durable Object", () => {
     postEphemeralFn.mockClear();
 
     // user2 folds immediately
-    await fold(env, contextUser2, null);
+    await fold(env, contextUser2, payloadUser2);
     const gameState18 = await getGameState(stub, workspaceId, channelId);
     expect(gameState18.gameState).toBe(GameState.WaitingForPlayers);
     expect(sayFn.mock.calls).toMatchInlineSnapshot(`
@@ -560,44 +578,41 @@ describe("Poker Durable Object", () => {
     const sayFn = vi.fn();
     const postEphemeralFn = vi.fn();
 
-    const contextUser1 = {
-      teamId: workspaceId,
-      channelId: channelId,
+    const contextUser1 = createContext({
       userId: "alice",
-      say: sayFn,
-      client: {
-        chat: {
-          postEphemeral: postEphemeralFn,
-        },
-      },
-    };
-
-    const contextUser2 = {
-      teamId: workspaceId,
-      channelId: channelId,
+      sayFn,
+      postEphemeralFn,
+      workspaceId,
+      channelId,
+    });
+    const contextUser2 = createContext({
       userId: "bob",
-      say: sayFn,
-      client: {
-        chat: {
-          postEphemeral: postEphemeralFn,
-        },
-      },
-    };
+      sayFn,
+      postEphemeralFn,
+      workspaceId,
+      channelId,
+    });
+    const payloadAlice = createGenericMessageEvent("alice");
+    const payloadBob = createGenericMessageEvent("bob");
 
     const stub = getStub({ workspaceId, channelId });
 
     // === GAME SETUP ===
-    await newGame(env, contextUser1);
+    await newGame(env, contextUser1, payloadAlice);
     sayFn.mockClear();
 
     // Both players join
-    await joinGame(env, contextUser1);
+    await joinGame(env, contextUser1, payloadAlice);
     sayFn.mockClear();
-    await joinGame(env, contextUser2);
+    await joinGame(env, contextUser2, payloadBob);
     sayFn.mockClear();
 
     // Both players buy in
-    await buyIn(env, contextUser1, { text: "buy in 500" });
+    await buyIn(
+      env,
+      contextUser1,
+      createGenericMessageEvent("user1", "buy in 500")
+    );
     const gameStateAfterBuyIn1 = await getGameState(
       stub,
       workspaceId,
@@ -606,7 +621,11 @@ describe("Poker Durable Object", () => {
     expect(getPlayerById(gameStateAfterBuyIn1, "alice")?.chips).toBe(500);
     sayFn.mockClear();
 
-    await buyIn(env, contextUser2, { text: "buy in 500" });
+    await buyIn(
+      env,
+      contextUser2,
+      createGenericMessageEvent("user2", "buy in 500")
+    );
     const gameStateAfterBuyIn2 = await getGameState(
       stub,
       workspaceId,
@@ -616,7 +635,7 @@ describe("Poker Durable Object", () => {
     sayFn.mockClear();
 
     // === ROUND 1: PREFLOP ===
-    await startRound(env, contextUser1, null);
+    await startRound(env, contextUser1, payloadAlice);
     const gameStatePreflop = await getGameState(stub, workspaceId, channelId);
     expect(gameStatePreflop.gameState).toBe(GameState.PreFlop);
     expect(gameStatePreflop.currentPot).toBe(120); // 40 SB + 80 BB
@@ -640,7 +659,7 @@ describe("Poker Durable Object", () => {
     postEphemeralFn.mockClear();
 
     // bob (SB) raises to 160 instead of just calling
-    await bet(env, contextUser2, { text: "bet 160" });
+    await bet(env, contextUser2, createGenericMessageEvent("user2", "bet 160"));
     const gameStateAfterRaise = await getGameState(
       stub,
       workspaceId,
@@ -663,7 +682,7 @@ describe("Poker Durable Object", () => {
     postEphemeralFn.mockClear();
 
     // alice (BB) calls the raise
-    await call(env, contextUser1, null);
+    await call(env, contextUser1, payloadAlice);
     const gameStateAfterCall = await getGameState(stub, workspaceId, channelId);
     expect(gameStateAfterCall.gameState).toBe(GameState.Flop);
     expect(gameStateAfterCall.currentPot).toBe(320); // 160 + 160
@@ -687,7 +706,7 @@ describe("Poker Durable Object", () => {
 
     // === ROUND 1: FLOP ===
     // bob bets 100 on the flop
-    await bet(env, contextUser2, { text: "bet 100" });
+    await bet(env, contextUser2, createGenericMessageEvent("user2", "bet 100"));
     const gameStateAfterFlopBet = await getGameState(
       stub,
       workspaceId,
@@ -710,7 +729,7 @@ describe("Poker Durable Object", () => {
     postEphemeralFn.mockClear();
 
     // alice calls the 100 bet
-    await call(env, contextUser1, null);
+    await call(env, contextUser1, payloadAlice);
     const gameStateAfterFlopCall = await getGameState(
       stub,
       workspaceId,
@@ -737,7 +756,7 @@ describe("Poker Durable Object", () => {
 
     // === ROUND 1: TURN ===
     // bob bets 150 on the turn
-    await bet(env, contextUser2, { text: "bet 150" });
+    await bet(env, contextUser2, createGenericMessageEvent("user2", "bet 150"));
     const gameStateAfterTurnBet = await getGameState(
       stub,
       workspaceId,
@@ -760,7 +779,7 @@ describe("Poker Durable Object", () => {
     postEphemeralFn.mockClear();
 
     // alice folds to the turn bet - bob wins without showdown
-    await fold(env, contextUser1, null);
+    await fold(env, contextUser1, payloadAlice);
     const gameStateAfterFold = await getGameState(stub, workspaceId, channelId);
     expect(gameStateAfterFold.gameState).toBe(GameState.WaitingForPlayers);
     expect(sayFn.mock.calls).toMatchInlineSnapshot(`
@@ -805,39 +824,48 @@ describe("Poker Durable Object", () => {
     const sayFn = vi.fn();
     const postEphemeralFn = vi.fn();
 
-    const contextUser1 = {
-      teamId: workspaceId,
-      channelId: channelId,
+    const contextUser1 = createContext({
       userId: "player1",
-      say: sayFn,
-      client: { chat: { postEphemeral: postEphemeralFn } },
-    };
-
-    const contextUser2 = {
-      teamId: workspaceId,
-      channelId: channelId,
+      sayFn,
+      postEphemeralFn,
+      workspaceId,
+      channelId,
+    });
+    const contextUser2 = createContext({
       userId: "player2",
-      say: sayFn,
-      client: { chat: { postEphemeral: postEphemeralFn } },
-    };
+      sayFn,
+      postEphemeralFn,
+      workspaceId,
+      channelId,
+    });
+    const payloadPlayer1 = createGenericMessageEvent("player1");
+    const payloadPlayer2 = createGenericMessageEvent("player2");
 
     const stub = getStub({ workspaceId, channelId });
 
     // === SETUP ===
-    await newGame(env, contextUser1);
+    await newGame(env, contextUser1, payloadPlayer1);
     sayFn.mockClear();
 
-    await joinGame(env, contextUser1);
-    await joinGame(env, contextUser2);
+    await joinGame(env, contextUser1, payloadPlayer1);
+    await joinGame(env, contextUser2, payloadPlayer2);
     sayFn.mockClear();
 
     // Different stack sizes to test all-in dynamics
-    await buyIn(env, contextUser1, { text: "buy in 300" });
-    await buyIn(env, contextUser2, { text: "buy in 300" });
+    await buyIn(
+      env,
+      contextUser1,
+      createGenericMessageEvent("user1", "buy in 300")
+    );
+    await buyIn(
+      env,
+      contextUser2,
+      createGenericMessageEvent("user2", "buy in 300")
+    );
     sayFn.mockClear();
 
     // === START ROUND ===
-    await startRound(env, contextUser1, null);
+    await startRound(env, contextUser1, payloadPlayer1);
     const gameStateStart = await getGameState(stub, workspaceId, channelId);
     expect(gameStateStart.gameState).toBe(GameState.PreFlop);
     expect(sayFn.mock.calls).toMatchInlineSnapshot(`
@@ -860,7 +888,7 @@ describe("Poker Durable Object", () => {
     postEphemeralFn.mockClear();
 
     // player2 (SB) goes ALL-IN
-    await bet(env, contextUser2, { text: "bet 300" });
+    await bet(env, contextUser2, createGenericMessageEvent("user2", "bet 300"));
     const gameStateAfterAllIn = await getGameState(
       stub,
       workspaceId,
@@ -882,7 +910,7 @@ describe("Poker Durable Object", () => {
     postEphemeralFn.mockClear();
 
     // player1 (BB) calls the all-in - this should trigger automatic showdown
-    await call(env, contextUser1, null);
+    await call(env, contextUser1, payloadPlayer1);
     const gameStateAfterCall = await getGameState(stub, workspaceId, channelId);
 
     // Game should be back to WaitingForPlayers after showdown
@@ -936,48 +964,61 @@ describe("Poker Durable Object", () => {
     const sayFn = vi.fn();
     const postEphemeralFn = vi.fn();
 
-    const contextAlice = {
-      teamId: workspaceId,
-      channelId: channelId,
+    const contextAlice = createContext({
       userId: "alice",
-      say: sayFn,
-      client: { chat: { postEphemeral: postEphemeralFn } },
-    };
-
-    const contextBob = {
-      teamId: workspaceId,
-      channelId: channelId,
+      sayFn,
+      postEphemeralFn,
+      workspaceId,
+      channelId,
+    });
+    const contextBob = createContext({
       userId: "bob",
-      say: sayFn,
-      client: { chat: { postEphemeral: postEphemeralFn } },
-    };
-
-    const contextCharlie = {
-      teamId: workspaceId,
-      channelId: channelId,
+      sayFn,
+      postEphemeralFn,
+      workspaceId,
+      channelId,
+    });
+    const contextCharlie = createContext({
       userId: "charlie",
-      say: sayFn,
-      client: { chat: { postEphemeral: postEphemeralFn } },
-    };
+      sayFn,
+      postEphemeralFn,
+      workspaceId,
+      channelId,
+    });
+    const payloadAlice = createGenericMessageEvent("alice");
+    const payloadBob = createGenericMessageEvent("bob");
+    const payloadCharlie = createGenericMessageEvent("charlie");
 
     const stub = getStub({ workspaceId, channelId });
 
     // === SETUP ===
-    await newGame(env, contextAlice);
+    await newGame(env, contextAlice, payloadAlice);
     sayFn.mockClear();
 
-    await joinGame(env, contextAlice);
-    await joinGame(env, contextBob);
-    await joinGame(env, contextCharlie);
+    await joinGame(env, contextAlice, payloadAlice);
+    await joinGame(env, contextBob, payloadBob);
+    await joinGame(env, contextCharlie, payloadCharlie);
     sayFn.mockClear();
 
-    await buyIn(env, contextAlice, { text: "buy in 1000" });
-    await buyIn(env, contextBob, { text: "buy in 1000" });
-    await buyIn(env, contextCharlie, { text: "buy in 1000" });
+    await buyIn(
+      env,
+      contextAlice,
+      createGenericMessageEvent("alice", "buy in 1000")
+    );
+    await buyIn(
+      env,
+      contextBob,
+      createGenericMessageEvent("bob", "buy in 1000")
+    );
+    await buyIn(
+      env,
+      contextCharlie,
+      createGenericMessageEvent("charlie", "buy in 1000")
+    );
     sayFn.mockClear();
 
     // === START ROUND ===
-    await startRound(env, contextAlice, null);
+    await startRound(env, contextAlice, payloadAlice);
     const gameStateStart = await getGameState(stub, workspaceId, channelId);
     expect(gameStateStart.gameState).toBe(GameState.PreFlop);
     expect(gameStateStart.activePlayers.length).toBe(3);
@@ -1005,7 +1046,7 @@ describe("Poker Durable Object", () => {
     postEphemeralFn.mockClear();
 
     // alice (dealer/UTG) calls
-    await call(env, contextAlice, null);
+    await call(env, contextAlice, payloadAlice);
     expect(sayFn.mock.calls).toMatchInlineSnapshot(`
       [
         [
@@ -1019,7 +1060,7 @@ describe("Poker Durable Object", () => {
     sayFn.mockClear();
 
     // bob (SB) folds
-    await fold(env, contextBob, null);
+    await fold(env, contextBob, payloadBob);
     expect(sayFn.mock.calls).toMatchInlineSnapshot(`
       [
         [
@@ -1033,7 +1074,7 @@ describe("Poker Durable Object", () => {
     sayFn.mockClear();
 
     // charlie (BB) checks - advances to flop
-    await check(env, contextCharlie, null);
+    await check(env, contextCharlie, payloadCharlie);
     const gameStateFlop = await getGameState(stub, workspaceId, channelId);
     expect(gameStateFlop.gameState).toBe(GameState.Flop);
     expect(gameStateFlop.communityCards.length).toBe(3);
@@ -1058,7 +1099,11 @@ describe("Poker Durable Object", () => {
     // But bob was skipped since he folded - charlie is first active after dealer
 
     // charlie bets 100
-    await bet(env, contextCharlie, { text: "bet 100" });
+    await bet(
+      env,
+      contextCharlie,
+      createGenericMessageEvent("charlie", "bet 100")
+    );
     expect(sayFn.mock.calls).toMatchInlineSnapshot(`
       [
         [
@@ -1072,7 +1117,7 @@ describe("Poker Durable Object", () => {
     sayFn.mockClear();
 
     // alice calls
-    await call(env, contextAlice, null);
+    await call(env, contextAlice, payloadAlice);
     const gameStateTurn = await getGameState(stub, workspaceId, channelId);
     expect(gameStateTurn.gameState).toBe(GameState.Turn);
     expect(sayFn.mock.calls).toMatchInlineSnapshot(`
@@ -1091,20 +1136,20 @@ describe("Poker Durable Object", () => {
     postEphemeralFn.mockClear();
 
     // Both check through turn and river
-    await check(env, contextCharlie, null);
+    await check(env, contextCharlie, payloadCharlie);
     sayFn.mockClear();
 
-    await check(env, contextAlice, null);
+    await check(env, contextAlice, payloadAlice);
     const gameStateRiver = await getGameState(stub, workspaceId, channelId);
     expect(gameStateRiver.gameState).toBe(GameState.River);
     sayFn.mockClear();
     postEphemeralFn.mockClear();
 
-    await check(env, contextCharlie, null);
+    await check(env, contextCharlie, payloadCharlie);
     sayFn.mockClear();
 
     // alice checks - triggers showdown
-    await check(env, contextAlice, null);
+    await check(env, contextAlice, payloadAlice);
     const gameStateFinal = await getGameState(stub, workspaceId, channelId);
     expect(gameStateFinal.gameState).toBe(GameState.WaitingForPlayers);
 
@@ -1153,42 +1198,49 @@ describe("Poker Durable Object", () => {
     const sayFn = vi.fn();
     const postEphemeralFn = vi.fn();
 
-    const contextUser1 = {
-      teamId: workspaceId,
-      channelId: channelId,
+    const contextUser1 = createContext({
       userId: "trapper",
-      say: sayFn,
-      client: { chat: { postEphemeral: postEphemeralFn } },
-    };
-
-    const contextUser2 = {
-      teamId: workspaceId,
-      channelId: channelId,
+      sayFn,
+      postEphemeralFn,
+      workspaceId,
+      channelId,
+    });
+    const contextUser2 = createContext({
       userId: "victim",
-      say: sayFn,
-      client: { chat: { postEphemeral: postEphemeralFn } },
-    };
+      sayFn,
+      postEphemeralFn,
+      workspaceId,
+      channelId,
+    });
 
     const stub = getStub({ workspaceId, channelId });
 
     // === SETUP ===
-    await newGame(env, contextUser1);
-    await joinGame(env, contextUser1);
-    await joinGame(env, contextUser2);
-    await buyIn(env, contextUser1, { text: "buy in 1000" });
-    await buyIn(env, contextUser2, { text: "buy in 1000" });
+    await newGame(env, contextUser1, createGenericMessageEvent("trapper"));
+    await joinGame(env, contextUser1, createGenericMessageEvent("trapper"));
+    await joinGame(env, contextUser2, createGenericMessageEvent("victim"));
+    await buyIn(
+      env,
+      contextUser1,
+      createGenericMessageEvent("trapper", "buy in 1000")
+    );
+    await buyIn(
+      env,
+      contextUser2,
+      createGenericMessageEvent("victim", "buy in 1000")
+    );
     sayFn.mockClear();
 
     // === START ROUND ===
-    await startRound(env, contextUser1, null);
+    await startRound(env, contextUser1, createGenericMessageEvent("trapper"));
     sayFn.mockClear();
     postEphemeralFn.mockClear();
 
     // Get through preflop with calls
     // trapper is BB, victim is SB/dealer
-    await call(env, contextUser2, null); // victim calls
+    await call(env, contextUser2, createGenericMessageEvent("victim")); // victim calls
     sayFn.mockClear();
-    await check(env, contextUser1, null); // trapper checks
+    await check(env, contextUser1, createGenericMessageEvent("trapper")); // trapper checks
 
     const gameStateFlop = await getGameState(stub, workspaceId, channelId);
     expect(gameStateFlop.gameState).toBe(GameState.Flop);
@@ -1197,7 +1249,7 @@ describe("Poker Durable Object", () => {
 
     // === FLOP: THE CHECK-RAISE ===
     // trapper checks (setting the trap)
-    await check(env, contextUser1, null);
+    await check(env, contextUser1, createGenericMessageEvent("trapper"));
     expect(sayFn.mock.calls).toMatchInlineSnapshot(`
       [
         [
@@ -1210,7 +1262,11 @@ describe("Poker Durable Object", () => {
     sayFn.mockClear();
 
     // victim bets 100 (falling into the trap)
-    await bet(env, contextUser2, { text: "bet 100" });
+    await bet(
+      env,
+      contextUser2,
+      createGenericMessageEvent("victim", "bet 100")
+    );
     const gameStateAfterBet = await getGameState(stub, workspaceId, channelId);
     expect(gameStateAfterBet.currentPot).toBe(260); // 160 + 100
     expect(sayFn.mock.calls).toMatchInlineSnapshot(`
@@ -1226,7 +1282,11 @@ describe("Poker Durable Object", () => {
     sayFn.mockClear();
 
     // trapper RAISES to 300 (the check-raise!)
-    await bet(env, contextUser1, { text: "bet 300" });
+    await bet(
+      env,
+      contextUser1,
+      createGenericMessageEvent("trapper", "bet 300")
+    );
     const gameStateAfterRaise = await getGameState(
       stub,
       workspaceId,
@@ -1247,7 +1307,7 @@ describe("Poker Durable Object", () => {
     sayFn.mockClear();
 
     // victim folds to the check-raise
-    await fold(env, contextUser2, null);
+    await fold(env, contextUser2, createGenericMessageEvent("victim"));
     const gameStateFinal = await getGameState(stub, workspaceId, channelId);
     expect(gameStateFinal.gameState).toBe(GameState.WaitingForPlayers);
     expect(sayFn.mock.calls).toMatchInlineSnapshot(`
@@ -1288,44 +1348,54 @@ describe("Poker Durable Object", () => {
     const sayFn = vi.fn();
     const postEphemeralFn = vi.fn();
 
-    const contextAlice = {
-      teamId: workspaceId,
-      channelId: channelId,
+    const contextAlice = createContext({
       userId: "alice",
-      say: sayFn,
-      client: { chat: { postEphemeral: postEphemeralFn } },
-    };
-
-    const contextBob = {
-      teamId: workspaceId,
-      channelId: channelId,
+      sayFn,
+      postEphemeralFn,
+      workspaceId,
+      channelId,
+    });
+    const contextBob = createContext({
       userId: "bob",
-      say: sayFn,
-      client: { chat: { postEphemeral: postEphemeralFn } },
-    };
-
-    const contextCharlie = {
-      teamId: workspaceId,
-      channelId: channelId,
+      sayFn,
+      postEphemeralFn,
+      workspaceId,
+      channelId,
+    });
+    const contextCharlie = createContext({
       userId: "charlie",
-      say: sayFn,
-      client: { chat: { postEphemeral: postEphemeralFn } },
-    };
+      sayFn,
+      postEphemeralFn,
+      workspaceId,
+      channelId,
+    });
 
     const stub = getStub({ workspaceId, channelId });
 
     // === SETUP ===
-    await newGame(env, contextAlice);
-    await joinGame(env, contextAlice);
-    await joinGame(env, contextBob);
-    await joinGame(env, contextCharlie);
-    await buyIn(env, contextAlice, { text: "buy in 1000" });
-    await buyIn(env, contextBob, { text: "buy in 1000" });
-    await buyIn(env, contextCharlie, { text: "buy in 1000" });
+    await newGame(env, contextAlice, createGenericMessageEvent("alice"));
+    await joinGame(env, contextAlice, createGenericMessageEvent("alice"));
+    await joinGame(env, contextBob, createGenericMessageEvent("bob"));
+    await joinGame(env, contextCharlie, createGenericMessageEvent("charlie"));
+    await buyIn(
+      env,
+      contextAlice,
+      createGenericMessageEvent("alice", "buy in 1000")
+    );
+    await buyIn(
+      env,
+      contextBob,
+      createGenericMessageEvent("bob", "buy in 1000")
+    );
+    await buyIn(
+      env,
+      contextCharlie,
+      createGenericMessageEvent("charlie", "buy in 1000")
+    );
     sayFn.mockClear();
 
     // === START ROUND ===
-    await startRound(env, contextAlice, null);
+    await startRound(env, contextAlice, createGenericMessageEvent("alice"));
     sayFn.mockClear();
     postEphemeralFn.mockClear();
 
@@ -1333,7 +1403,7 @@ describe("Poker Durable Object", () => {
     // bob and charlie can queue pre-moves
 
     // charlie (BB) queues a pre-check
-    await preCheck(env, contextCharlie, null);
+    await preCheck(env, contextCharlie, createGenericMessageEvent("charlie"));
     expect(sayFn.mock.calls).toMatchInlineSnapshot(`
       [
         [
@@ -1346,7 +1416,7 @@ describe("Poker Durable Object", () => {
     sayFn.mockClear();
 
     // alice calls
-    await call(env, contextAlice, null);
+    await call(env, contextAlice, createGenericMessageEvent("alice"));
     expect(sayFn.mock.calls).toMatchInlineSnapshot(`
       [
         [
@@ -1360,7 +1430,7 @@ describe("Poker Durable Object", () => {
     sayFn.mockClear();
 
     // bob (SB) calls - this should trigger charlie's pre-check
-    await call(env, contextBob, null);
+    await call(env, contextBob, createGenericMessageEvent("bob"));
     const gameStateAfterPreCheck = await getGameState(
       stub,
       workspaceId,
@@ -1387,7 +1457,7 @@ describe("Poker Durable Object", () => {
 
     // Now test pre-fold
     // charlie queues a pre-fold for the next betting round
-    await preFold(env, contextCharlie, null);
+    await preFold(env, contextCharlie, createGenericMessageEvent("charlie"));
     expect(sayFn.mock.calls).toMatchInlineSnapshot(`
       [
         [
@@ -1400,10 +1470,10 @@ describe("Poker Durable Object", () => {
     sayFn.mockClear();
 
     // bob bets, alice calls
-    await bet(env, contextBob, { text: "bet 100" });
+    await bet(env, contextBob, createGenericMessageEvent("bob", "bet 100"));
     sayFn.mockClear();
 
-    await call(env, contextAlice, null);
+    await call(env, contextAlice, createGenericMessageEvent("alice"));
     // Alice's call triggers advance to turn (since charlie pre-folded, action is complete)
     expect(sayFn.mock.calls).toMatchInlineSnapshot(`
       [
@@ -1425,11 +1495,11 @@ describe("Poker Durable Object", () => {
 
     // === TEST PRE-CALL ===
     // bob bets, then alice can pre-call to queue the call for next bet
-    await bet(env, contextBob, { text: "bet 100" });
+    await bet(env, contextBob, createGenericMessageEvent("bob", "bet 100"));
     sayFn.mockClear();
 
     // alice uses pre-call which immediately calls since there's an active bet
-    await preCall(env, contextAlice, null);
+    await preCall(env, contextAlice, createGenericMessageEvent("alice"));
     const gameStateAfterPreCall = await getGameState(
       stub,
       workspaceId,
@@ -1466,37 +1536,44 @@ describe("Poker Durable Object", () => {
     const sayFn = vi.fn();
     const postEphemeralFn = vi.fn();
 
-    const contextUser1 = {
-      teamId: workspaceId,
-      channelId: channelId,
+    const contextUser1 = createContext({
       userId: "winner",
-      say: sayFn,
-      client: { chat: { postEphemeral: postEphemeralFn } },
-    };
-
-    const contextUser2 = {
-      teamId: workspaceId,
-      channelId: channelId,
+      sayFn,
+      postEphemeralFn,
+      workspaceId,
+      channelId,
+    });
+    const contextUser2 = createContext({
       userId: "loser",
-      say: sayFn,
-      client: { chat: { postEphemeral: postEphemeralFn } },
-    };
+      sayFn,
+      postEphemeralFn,
+      workspaceId,
+      channelId,
+    });
 
     const stub = getStub({ workspaceId, channelId });
 
     // === SETUP ===
-    await newGame(env, contextUser1);
-    await joinGame(env, contextUser1);
-    await joinGame(env, contextUser2);
-    await buyIn(env, contextUser1, { text: "buy in 500" });
-    await buyIn(env, contextUser2, { text: "buy in 500" });
+    await newGame(env, contextUser1, createGenericMessageEvent("winner"));
+    await joinGame(env, contextUser1, createGenericMessageEvent("winner"));
+    await joinGame(env, contextUser2, createGenericMessageEvent("loser"));
+    await buyIn(
+      env,
+      contextUser1,
+      createGenericMessageEvent("winner", "buy in 500")
+    );
+    await buyIn(
+      env,
+      contextUser2,
+      createGenericMessageEvent("loser", "buy in 500")
+    );
     sayFn.mockClear();
 
     // Play a quick round - loser folds
-    await startRound(env, contextUser1, null);
+    await startRound(env, contextUser1, createGenericMessageEvent("winner"));
     sayFn.mockClear();
 
-    await fold(env, contextUser2, null);
+    await fold(env, contextUser2, createGenericMessageEvent("loser"));
     sayFn.mockClear();
 
     // Verify winner has chips
@@ -1511,7 +1588,7 @@ describe("Poker Durable Object", () => {
     expect(getPlayerById(gameStateAfterRound, "loser")?.chips).toBe(460); // 500 - 40 (SB lost)
 
     // Winner cashes out
-    await cashOut(env, contextUser1, null);
+    await cashOut(env, contextUser1, createGenericMessageEvent("winner"));
     expect(sayFn.mock.calls).toMatchInlineSnapshot(`
       [
         [
@@ -1533,7 +1610,7 @@ describe("Poker Durable Object", () => {
     expect(getPlayerById(gameStateAfterCashOut, "loser")?.chips).toBe(460);
 
     // Try to cash out with no chips
-    await cashOut(env, contextUser1, null);
+    await cashOut(env, contextUser1, createGenericMessageEvent("winner"));
     expect(sayFn.mock.calls).toMatchInlineSnapshot(`
       [
         [
@@ -1560,34 +1637,41 @@ describe("Poker Durable Object", () => {
     const sayFn = vi.fn();
     const postEphemeralFn = vi.fn();
 
-    const contextUser1 = {
-      teamId: workspaceId,
-      channelId: channelId,
+    const contextUser1 = createContext({
       userId: "stayer",
-      say: sayFn,
-      client: { chat: { postEphemeral: postEphemeralFn } },
-    };
-
-    const contextUser2 = {
-      teamId: workspaceId,
-      channelId: channelId,
+      sayFn,
+      postEphemeralFn,
+      workspaceId,
+      channelId,
+    });
+    const contextUser2 = createContext({
       userId: "leaver",
-      say: sayFn,
-      client: { chat: { postEphemeral: postEphemeralFn } },
-    };
+      sayFn,
+      postEphemeralFn,
+      workspaceId,
+      channelId,
+    });
 
     const stub = getStub({ workspaceId, channelId });
 
     // === SETUP ===
-    await newGame(env, contextUser1);
-    await joinGame(env, contextUser1);
-    await joinGame(env, contextUser2);
-    await buyIn(env, contextUser1, { text: "buy in 500" });
-    await buyIn(env, contextUser2, { text: "buy in 500" });
+    await newGame(env, contextUser1, createGenericMessageEvent("stayer"));
+    await joinGame(env, contextUser1, createGenericMessageEvent("stayer"));
+    await joinGame(env, contextUser2, createGenericMessageEvent("leaver"));
+    await buyIn(
+      env,
+      contextUser1,
+      createGenericMessageEvent("stayer", "buy in 500")
+    );
+    await buyIn(
+      env,
+      contextUser2,
+      createGenericMessageEvent("leaver", "buy in 500")
+    );
     sayFn.mockClear();
 
     // Start a round
-    await startRound(env, contextUser1, null);
+    await startRound(env, contextUser1, createGenericMessageEvent("stayer"));
     const gameStateDuringRound = await getGameState(
       stub,
       workspaceId,
@@ -1597,7 +1681,7 @@ describe("Poker Durable Object", () => {
     sayFn.mockClear();
 
     // leaver tries to leave during active round
-    await leaveGame(env, contextUser2);
+    await leaveGame(env, contextUser2, createGenericMessageEvent("leaver"));
     expect(sayFn.mock.calls).toMatchInlineSnapshot(`
       [
         [
@@ -1614,7 +1698,7 @@ describe("Poker Durable Object", () => {
     expect(gameStateMidRound.activePlayers.length).toBe(2);
 
     // Finish the round - leaver folds
-    await fold(env, contextUser2, null);
+    await fold(env, contextUser2, createGenericMessageEvent("leaver"));
     sayFn.mockClear();
 
     // Verify leaver was removed
@@ -1648,42 +1732,48 @@ describe("Poker Durable Object", () => {
     const sayFn = vi.fn();
     const postEphemeralFn = vi.fn();
 
-    const contextUser1 = {
-      teamId: workspaceId,
-      channelId: channelId,
+    const contextUser1 = createContext({
       userId: "player1",
-      say: sayFn,
-      client: { chat: { postEphemeral: postEphemeralFn } },
-    };
-
-    const contextUser2 = {
-      teamId: workspaceId,
-      channelId: channelId,
+      sayFn,
+      postEphemeralFn,
+      workspaceId,
+      channelId,
+    });
+    const contextUser2 = createContext({
       userId: "player2",
-      say: sayFn,
-      client: { chat: { postEphemeral: postEphemeralFn } },
-    };
-
-    const contextNewPlayer = {
-      teamId: workspaceId,
-      channelId: channelId,
+      sayFn,
+      postEphemeralFn,
+      workspaceId,
+      channelId,
+    });
+    const contextNewPlayer = createContext({
       userId: "newplayer",
-      say: sayFn,
-      client: { chat: { postEphemeral: postEphemeralFn } },
-    };
+      sayFn,
+      postEphemeralFn,
+      workspaceId,
+      channelId,
+    });
 
     const stub = getStub({ workspaceId, channelId });
 
     // === SETUP ===
-    await newGame(env, contextUser1);
-    await joinGame(env, contextUser1);
-    await joinGame(env, contextUser2);
-    await buyIn(env, contextUser1, { text: "buy in 500" });
-    await buyIn(env, contextUser2, { text: "buy in 500" });
+    await newGame(env, contextUser1, createGenericMessageEvent("player1"));
+    await joinGame(env, contextUser1, createGenericMessageEvent("player1"));
+    await joinGame(env, contextUser2, createGenericMessageEvent("player2"));
+    await buyIn(
+      env,
+      contextUser1,
+      createGenericMessageEvent("player1", "buy in 500")
+    );
+    await buyIn(
+      env,
+      contextUser2,
+      createGenericMessageEvent("player2", "buy in 500")
+    );
     sayFn.mockClear();
 
     // Start a round
-    await startRound(env, contextUser1, null);
+    await startRound(env, contextUser1, createGenericMessageEvent("player1"));
     const gameStateDuringRound = await getGameState(
       stub,
       workspaceId,
@@ -1694,7 +1784,11 @@ describe("Poker Durable Object", () => {
     sayFn.mockClear();
 
     // New player tries to join during active round
-    await joinGame(env, contextNewPlayer);
+    await joinGame(
+      env,
+      contextNewPlayer,
+      createGenericMessageEvent("newplayer")
+    );
     expect(sayFn.mock.calls).toMatchInlineSnapshot(`
       [
         [
@@ -1711,7 +1805,7 @@ describe("Poker Durable Object", () => {
     expect(gameStateMidRound.activePlayers.length).toBe(2);
 
     // Finish the round - player2 folds
-    await fold(env, contextUser2, null);
+    await fold(env, contextUser2, createGenericMessageEvent("player2"));
 
     // New player join was queued and will take effect after round
     // Verify the queued player message was shown
@@ -1740,40 +1834,47 @@ describe("Poker Durable Object", () => {
     const sayFn = vi.fn();
     const postEphemeralFn = vi.fn();
 
-    const contextUser1 = {
-      teamId: workspaceId,
-      channelId: channelId,
+    const contextUser1 = createContext({
       userId: "player1",
-      say: sayFn,
-      client: { chat: { postEphemeral: postEphemeralFn } },
-    };
-
-    const contextUser2 = {
-      teamId: workspaceId,
-      channelId: channelId,
+      sayFn,
+      postEphemeralFn,
+      workspaceId,
+      channelId,
+    });
+    const contextUser2 = createContext({
       userId: "player2",
-      say: sayFn,
-      client: { chat: { postEphemeral: postEphemeralFn } },
-    };
+      sayFn,
+      postEphemeralFn,
+      workspaceId,
+      channelId,
+    });
 
     const stub = getStub({ workspaceId, channelId });
 
     // === SETUP ===
-    await newGame(env, contextUser1);
-    await joinGame(env, contextUser1);
-    await joinGame(env, contextUser2);
-    await buyIn(env, contextUser1, { text: "buy in 500" });
-    await buyIn(env, contextUser2, { text: "buy in 500" });
+    await newGame(env, contextUser1, createGenericMessageEvent("player1"));
+    await joinGame(env, contextUser1, createGenericMessageEvent("player1"));
+    await joinGame(env, contextUser2, createGenericMessageEvent("player2"));
+    await buyIn(
+      env,
+      contextUser1,
+      createGenericMessageEvent("player1", "buy in 500")
+    );
+    await buyIn(
+      env,
+      contextUser2,
+      createGenericMessageEvent("player2", "buy in 500")
+    );
     sayFn.mockClear();
 
     // Start round - player2 is SB/dealer, player1 is BB
     // So player2 acts first
-    await startRound(env, contextUser1, null);
+    await startRound(env, contextUser1, createGenericMessageEvent("player1"));
     sayFn.mockClear();
     postEphemeralFn.mockClear();
 
     // player1 (BB) tries to act but it's player2's turn
-    await check(env, contextUser1, null);
+    await check(env, contextUser1, createGenericMessageEvent("player1"));
     expect(sayFn.mock.calls).toMatchInlineSnapshot(`
       [
         [
@@ -1785,7 +1886,11 @@ describe("Poker Durable Object", () => {
     `);
     sayFn.mockClear();
 
-    await bet(env, contextUser1, { text: "bet 100" });
+    await bet(
+      env,
+      contextUser1,
+      createGenericMessageEvent("player1", "bet 100")
+    );
     expect(sayFn.mock.calls).toMatchInlineSnapshot(`
       [
         [
@@ -1797,7 +1902,7 @@ describe("Poker Durable Object", () => {
     `);
     sayFn.mockClear();
 
-    await fold(env, contextUser1, null);
+    await fold(env, contextUser1, createGenericMessageEvent("player1"));
     expect(sayFn.mock.calls).toMatchInlineSnapshot(`
       [
         [
@@ -1810,11 +1915,11 @@ describe("Poker Durable Object", () => {
     sayFn.mockClear();
 
     // player2 calls correctly
-    await call(env, contextUser2, null);
+    await call(env, contextUser2, createGenericMessageEvent("player2"));
     sayFn.mockClear();
 
     // Now it's player1's turn - after player2 calls, player1 (BB) can check
-    await check(env, contextUser1, null);
+    await check(env, contextUser1, createGenericMessageEvent("player1"));
     // This should advance to flop
     const gameStateFlop = await getGameState(stub, workspaceId, channelId);
     expect(gameStateFlop.gameState).toBe(GameState.Flop);
@@ -1822,7 +1927,11 @@ describe("Poker Durable Object", () => {
 
     // On flop, player2 acts first (SB/dealer acts first in heads-up post-flop in this game)
     // player2 bets 100 (minimum bet is 80)
-    await bet(env, contextUser2, { text: "bet 100" });
+    await bet(
+      env,
+      contextUser2,
+      createGenericMessageEvent("player2", "bet 100")
+    );
     expect(sayFn.mock.calls).toMatchInlineSnapshot(`
       [
         [
@@ -1836,7 +1945,7 @@ describe("Poker Durable Object", () => {
     sayFn.mockClear();
 
     // player1 tries to check but there's an active bet - should fail
-    await check(env, contextUser1, null);
+    await check(env, contextUser1, createGenericMessageEvent("player1"));
     expect(sayFn.mock.calls).toMatchInlineSnapshot(`
       [
         [
@@ -1862,40 +1971,47 @@ describe("Poker Durable Object", () => {
     const sayFn = vi.fn();
     const postEphemeralFn = vi.fn();
 
-    const contextUser1 = {
-      teamId: workspaceId,
-      channelId: channelId,
+    const contextUser1 = createContext({
       userId: "dealer",
-      say: sayFn,
-      client: { chat: { postEphemeral: postEphemeralFn } },
-    };
-
-    const contextUser2 = {
-      teamId: workspaceId,
-      channelId: channelId,
+      sayFn,
+      postEphemeralFn,
+      workspaceId,
+      channelId,
+    });
+    const contextUser2 = createContext({
       userId: "player",
-      say: sayFn,
-      client: { chat: { postEphemeral: postEphemeralFn } },
-    };
+      sayFn,
+      postEphemeralFn,
+      workspaceId,
+      channelId,
+    });
 
     const stub = getStub({ workspaceId, channelId });
 
     // === SETUP ===
-    await newGame(env, contextUser1);
-    await joinGame(env, contextUser1);
-    await joinGame(env, contextUser2);
-    await buyIn(env, contextUser1, { text: "buy in 1000" });
-    await buyIn(env, contextUser2, { text: "buy in 1000" });
+    await newGame(env, contextUser1, createGenericMessageEvent("dealer"));
+    await joinGame(env, contextUser1, createGenericMessageEvent("dealer"));
+    await joinGame(env, contextUser2, createGenericMessageEvent("player"));
+    await buyIn(
+      env,
+      contextUser1,
+      createGenericMessageEvent("dealer", "buy in 1000")
+    );
+    await buyIn(
+      env,
+      contextUser2,
+      createGenericMessageEvent("player", "buy in 1000")
+    );
     sayFn.mockClear();
 
     // Start first round
-    await startRound(env, contextUser1, null);
+    await startRound(env, contextUser1, createGenericMessageEvent("dealer"));
     const gameStateRound1 = await getGameState(stub, workspaceId, channelId);
     expect(gameStateRound1.gameState).toBe(GameState.PreFlop);
     sayFn.mockClear();
 
     // Queue up pre-deal during active round
-    await preDeal(env, contextUser1, null);
+    await preDeal(env, contextUser1, createGenericMessageEvent("dealer"));
     expect(sayFn.mock.calls).toMatchInlineSnapshot(`
       [
         [
@@ -1908,7 +2024,7 @@ describe("Poker Durable Object", () => {
     sayFn.mockClear();
 
     // End current round with a fold
-    await fold(env, contextUser2, null);
+    await fold(env, contextUser2, createGenericMessageEvent("player"));
 
     // Pre-deal should have triggered automatic new round
     const gameStateRound2 = await getGameState(stub, workspaceId, channelId);
@@ -1932,38 +2048,45 @@ describe("Poker Durable Object", () => {
     const sayFn = vi.fn();
     const postEphemeralFn = vi.fn();
 
-    const contextUser1 = {
-      teamId: workspaceId,
-      channelId: channelId,
+    const contextUser1 = createContext({
       userId: "polite",
-      say: sayFn,
-      client: { chat: { postEphemeral: postEphemeralFn } },
-    };
-
-    const contextUser2 = {
-      teamId: workspaceId,
-      channelId: channelId,
+      sayFn,
+      postEphemeralFn,
+      workspaceId,
+      channelId,
+    });
+    const contextUser2 = createContext({
       userId: "winner",
-      say: sayFn,
-      client: { chat: { postEphemeral: postEphemeralFn } },
-    };
+      sayFn,
+      postEphemeralFn,
+      workspaceId,
+      channelId,
+    });
 
     const stub = getStub({ workspaceId, channelId });
 
     // === SETUP ===
-    await newGame(env, contextUser1);
-    await joinGame(env, contextUser1);
-    await joinGame(env, contextUser2);
-    await buyIn(env, contextUser1, { text: "buy in 500" });
-    await buyIn(env, contextUser2, { text: "buy in 500" });
+    await newGame(env, contextUser1, createGenericMessageEvent("polite"));
+    await joinGame(env, contextUser1, createGenericMessageEvent("polite"));
+    await joinGame(env, contextUser2, createGenericMessageEvent("winner"));
+    await buyIn(
+      env,
+      contextUser1,
+      createGenericMessageEvent("polite", "buy in 500")
+    );
+    await buyIn(
+      env,
+      contextUser2,
+      createGenericMessageEvent("winner", "buy in 500")
+    );
     sayFn.mockClear();
 
     // Start round
-    await startRound(env, contextUser1, null);
+    await startRound(env, contextUser1, createGenericMessageEvent("polite"));
     sayFn.mockClear();
 
     // polite player queues pre-NH
-    await preNH(env, contextUser1, null);
+    await preNH(env, contextUser1, createGenericMessageEvent("polite"));
     expect(sayFn.mock.calls).toMatchInlineSnapshot(`
       [
         [
@@ -1976,7 +2099,7 @@ describe("Poker Durable Object", () => {
     sayFn.mockClear();
 
     // End round with fold
-    await fold(env, contextUser2, null);
+    await fold(env, contextUser2, createGenericMessageEvent("winner"));
 
     // Check that :nh: message appeared
     const endMessages = sayFn.mock.calls[0][0].text;
@@ -1998,60 +2121,67 @@ describe("Poker Durable Object", () => {
     const sayFn = vi.fn();
     const postEphemeralFn = vi.fn();
 
-    const contextUser1 = {
-      teamId: workspaceId,
-      channelId: channelId,
+    const contextUser1 = createContext({
       userId: "player1",
-      say: sayFn,
-      client: { chat: { postEphemeral: postEphemeralFn } },
-    };
-
-    const contextUser2 = {
-      teamId: workspaceId,
-      channelId: channelId,
+      sayFn,
+      postEphemeralFn,
+      workspaceId,
+      channelId,
+    });
+    const contextUser2 = createContext({
       userId: "player2",
-      say: sayFn,
-      client: { chat: { postEphemeral: postEphemeralFn } },
-    };
+      sayFn,
+      postEphemeralFn,
+      workspaceId,
+      channelId,
+    });
 
     const stub = getStub({ workspaceId, channelId });
 
     // === SETUP ===
-    await newGame(env, contextUser1);
-    await joinGame(env, contextUser1);
-    await joinGame(env, contextUser2);
-    await buyIn(env, contextUser1, { text: "buy in 500" });
-    await buyIn(env, contextUser2, { text: "buy in 500" });
+    await newGame(env, contextUser1, createGenericMessageEvent("player1"));
+    await joinGame(env, contextUser1, createGenericMessageEvent("player1"));
+    await joinGame(env, contextUser2, createGenericMessageEvent("player2"));
+    await buyIn(
+      env,
+      contextUser1,
+      createGenericMessageEvent("player1", "buy in 500")
+    );
+    await buyIn(
+      env,
+      contextUser2,
+      createGenericMessageEvent("player2", "buy in 500")
+    );
     sayFn.mockClear();
 
     // === START ROUND ===
-    await startRound(env, contextUser1, null);
+    await startRound(env, contextUser1, createGenericMessageEvent("player1"));
     sayFn.mockClear();
     postEphemeralFn.mockClear();
 
     // Both players call/check through to showdown
-    await call(env, contextUser2, null); // SB calls
+    await call(env, contextUser2, createGenericMessageEvent("player2")); // SB calls
     sayFn.mockClear();
-    await check(env, contextUser1, null); // BB checks -> Flop
+    await check(env, contextUser1, createGenericMessageEvent("player1")); // BB checks -> Flop
     sayFn.mockClear();
     postEphemeralFn.mockClear();
 
     // Check through flop
-    await check(env, contextUser2, null);
+    await check(env, contextUser2, createGenericMessageEvent("player2"));
     sayFn.mockClear();
-    await check(env, contextUser1, null); // -> Turn
+    await check(env, contextUser1, createGenericMessageEvent("player1")); // -> Turn
     sayFn.mockClear();
 
     // Check through turn
-    await check(env, contextUser2, null);
+    await check(env, contextUser2, createGenericMessageEvent("player2"));
     sayFn.mockClear();
-    await check(env, contextUser1, null); // -> River
+    await check(env, contextUser1, createGenericMessageEvent("player1")); // -> River
     sayFn.mockClear();
 
     // Check through river -> Showdown
-    await check(env, contextUser2, null);
+    await check(env, contextUser2, createGenericMessageEvent("player2"));
     sayFn.mockClear();
-    await check(env, contextUser1, null);
+    await check(env, contextUser1, createGenericMessageEvent("player1"));
 
     // Verify showdown occurred
     const gameStateFinal = await getGameState(stub, workspaceId, channelId);
@@ -2083,46 +2213,53 @@ describe("Poker Durable Object", () => {
     const sayFn = vi.fn();
     const postEphemeralFn = vi.fn();
 
-    const contextUser1 = {
-      teamId: workspaceId,
-      channelId: channelId,
+    const contextUser1 = createContext({
       userId: "viewer",
-      say: sayFn,
-      client: { chat: { postEphemeral: postEphemeralFn } },
-    };
-
-    const contextUser2 = {
-      teamId: workspaceId,
-      channelId: channelId,
+      sayFn,
+      postEphemeralFn,
+      workspaceId,
+      channelId,
+    });
+    const contextUser2 = createContext({
       userId: "opponent",
-      say: sayFn,
-      client: { chat: { postEphemeral: postEphemeralFn } },
-    };
+      sayFn,
+      postEphemeralFn,
+      workspaceId,
+      channelId,
+    });
 
     const stub = getStub({ workspaceId, channelId });
 
     // === SETUP ===
-    await newGame(env, contextUser1);
-    await joinGame(env, contextUser1);
-    await joinGame(env, contextUser2);
-    await buyIn(env, contextUser1, { text: "buy in 500" });
-    await buyIn(env, contextUser2, { text: "buy in 500" });
+    await newGame(env, contextUser1, createGenericMessageEvent("viewer"));
+    await joinGame(env, contextUser1, createGenericMessageEvent("viewer"));
+    await joinGame(env, contextUser2, createGenericMessageEvent("opponent"));
+    await buyIn(
+      env,
+      contextUser1,
+      createGenericMessageEvent("viewer", "buy in 500")
+    );
+    await buyIn(
+      env,
+      contextUser2,
+      createGenericMessageEvent("opponent", "buy in 500")
+    );
     sayFn.mockClear();
 
     // === START ROUND ===
-    await startRound(env, contextUser1, null);
+    await startRound(env, contextUser1, createGenericMessageEvent("viewer"));
     sayFn.mockClear();
     postEphemeralFn.mockClear();
 
     // Get to flop so we have community cards
-    await call(env, contextUser2, null);
+    await call(env, contextUser2, createGenericMessageEvent("opponent"));
     sayFn.mockClear();
-    await check(env, contextUser1, null);
+    await check(env, contextUser1, createGenericMessageEvent("viewer"));
     sayFn.mockClear();
     postEphemeralFn.mockClear();
 
     // viewer uses show cards command
-    await showCards(env, contextUser1, null);
+    await showCards(env, contextUser1, createGenericMessageEvent("viewer"));
 
     // Verify ephemeral message was sent with hand info
     // showCards sends private messages to the player about their hand
@@ -2146,39 +2283,46 @@ describe("Poker Durable Object", () => {
     const sayFn = vi.fn();
     const postEphemeralFn = vi.fn();
 
-    const contextUser1 = {
-      teamId: workspaceId,
-      channelId: channelId,
+    const contextUser1 = createContext({
       userId: "revealer",
-      say: sayFn,
-      client: { chat: { postEphemeral: postEphemeralFn } },
-    };
-
-    const contextUser2 = {
-      teamId: workspaceId,
-      channelId: channelId,
+      sayFn,
+      postEphemeralFn,
+      workspaceId,
+      channelId,
+    });
+    const contextUser2 = createContext({
       userId: "other",
-      say: sayFn,
-      client: { chat: { postEphemeral: postEphemeralFn } },
-    };
+      sayFn,
+      postEphemeralFn,
+      workspaceId,
+      channelId,
+    });
 
     const stub = getStub({ workspaceId, channelId });
 
     // === SETUP ===
-    await newGame(env, contextUser1);
-    await joinGame(env, contextUser1);
-    await joinGame(env, contextUser2);
-    await buyIn(env, contextUser1, { text: "buy in 500" });
-    await buyIn(env, contextUser2, { text: "buy in 500" });
+    await newGame(env, contextUser1, createGenericMessageEvent("revealer"));
+    await joinGame(env, contextUser1, createGenericMessageEvent("revealer"));
+    await joinGame(env, contextUser2, createGenericMessageEvent("other"));
+    await buyIn(
+      env,
+      contextUser1,
+      createGenericMessageEvent("revealer", "buy in 500")
+    );
+    await buyIn(
+      env,
+      contextUser2,
+      createGenericMessageEvent("other", "buy in 500")
+    );
     sayFn.mockClear();
 
     // === START ROUND ===
-    await startRound(env, contextUser1, null);
+    await startRound(env, contextUser1, createGenericMessageEvent("revealer"));
     sayFn.mockClear();
     postEphemeralFn.mockClear();
 
     // Try to reveal during active hand - should fail
-    await revealCards(env, contextUser1, null);
+    await revealCards(env, contextUser1, createGenericMessageEvent("revealer"));
     expect(sayFn.mock.calls).toMatchInlineSnapshot(`
       [
         [
@@ -2191,12 +2335,12 @@ describe("Poker Durable Object", () => {
     sayFn.mockClear();
 
     // End the hand with a fold
-    await fold(env, contextUser2, null);
+    await fold(env, contextUser2, createGenericMessageEvent("other"));
     sayFn.mockClear();
 
     // Now in WaitingForPlayers state - reveal should work
     // But player's cards are cleared after round ends
-    await revealCards(env, contextUser1, null);
+    await revealCards(env, contextUser1, createGenericMessageEvent("revealer"));
     // Should say player has no cards or reveal their last hand
     expect(sayFn.mock.calls.length).toBeGreaterThan(0);
   });
@@ -2214,32 +2358,39 @@ describe("Poker Durable Object", () => {
     const sayFn = vi.fn();
     const postEphemeralFn = vi.fn();
 
-    const contextUser1 = {
-      teamId: workspaceId,
-      channelId: channelId,
+    const contextUser1 = createContext({
       userId: "rich",
-      say: sayFn,
-      client: { chat: { postEphemeral: postEphemeralFn } },
-    };
-
-    const contextUser2 = {
-      teamId: workspaceId,
-      channelId: channelId,
+      sayFn,
+      postEphemeralFn,
+      workspaceId,
+      channelId,
+    });
+    const contextUser2 = createContext({
       userId: "poor",
-      say: sayFn,
-      client: { chat: { postEphemeral: postEphemeralFn } },
-    };
+      sayFn,
+      postEphemeralFn,
+      workspaceId,
+      channelId,
+    });
 
     // === SETUP ===
-    await newGame(env, contextUser1);
-    await joinGame(env, contextUser1);
-    await joinGame(env, contextUser2);
-    await buyIn(env, contextUser1, { text: "buy in 1000" });
-    await buyIn(env, contextUser2, { text: "buy in 200" });
+    await newGame(env, contextUser1, createGenericMessageEvent("rich"));
+    await joinGame(env, contextUser1, createGenericMessageEvent("rich"));
+    await joinGame(env, contextUser2, createGenericMessageEvent("poor"));
+    await buyIn(
+      env,
+      contextUser1,
+      createGenericMessageEvent("rich", "buy in 1000")
+    );
+    await buyIn(
+      env,
+      contextUser2,
+      createGenericMessageEvent("poor", "buy in 200")
+    );
     sayFn.mockClear();
 
     // Use show chips command
-    await showChips(env, contextUser1, null);
+    await showChips(env, contextUser1, createGenericMessageEvent("rich"));
 
     // Verify chip display
     expect(sayFn.mock.calls).toMatchInlineSnapshot(`
@@ -2270,40 +2421,47 @@ describe("Poker Durable Object", () => {
     const sayFn = vi.fn();
     const postEphemeralFn = vi.fn();
 
-    const contextUser1 = {
-      teamId: workspaceId,
-      channelId: channelId,
+    const contextUser1 = createContext({
       userId: "tracker1",
-      say: sayFn,
-      client: { chat: { postEphemeral: postEphemeralFn } },
-    };
-
-    const contextUser2 = {
-      teamId: workspaceId,
-      channelId: channelId,
+      sayFn,
+      postEphemeralFn,
+      workspaceId,
+      channelId,
+    });
+    const contextUser2 = createContext({
       userId: "tracker2",
-      say: sayFn,
-      client: { chat: { postEphemeral: postEphemeralFn } },
-    };
+      sayFn,
+      postEphemeralFn,
+      workspaceId,
+      channelId,
+    });
 
     const stub = getStub({ workspaceId, channelId });
 
     // === SETUP ===
-    await newGame(env, contextUser1);
-    await joinGame(env, contextUser1);
-    await joinGame(env, contextUser2);
-    await buyIn(env, contextUser1, { text: "buy in 500" });
-    await buyIn(env, contextUser2, { text: "buy in 500" });
+    await newGame(env, contextUser1, createGenericMessageEvent("tracker1"));
+    await joinGame(env, contextUser1, createGenericMessageEvent("tracker1"));
+    await joinGame(env, contextUser2, createGenericMessageEvent("tracker2"));
+    await buyIn(
+      env,
+      contextUser1,
+      createGenericMessageEvent("tracker1", "buy in 500")
+    );
+    await buyIn(
+      env,
+      contextUser2,
+      createGenericMessageEvent("tracker2", "buy in 500")
+    );
     sayFn.mockClear();
 
     // === ROUND 1 ===
-    await startRound(env, contextUser1, null);
+    await startRound(env, contextUser1, createGenericMessageEvent("tracker1"));
     sayFn.mockClear();
     postEphemeralFn.mockClear();
 
     // Get to flop
-    await call(env, contextUser2, null);
-    await check(env, contextUser1, null);
+    await call(env, contextUser2, createGenericMessageEvent("tracker2"));
+    await check(env, contextUser1, createGenericMessageEvent("tracker1"));
 
     // Check that flop message mentions discovery
     const flopMessages = sayFn.mock.calls.map((c) => c[0].text).join("\n");
@@ -2324,15 +2482,15 @@ describe("Poker Durable Object", () => {
     expect(flopsCount).toBe(1);
 
     // Finish round
-    await fold(env, contextUser1, null);
+    await fold(env, contextUser1, createGenericMessageEvent("tracker1"));
     sayFn.mockClear();
 
     // === ROUND 2 - Another flop ===
-    await startRound(env, contextUser1, null);
+    await startRound(env, contextUser1, createGenericMessageEvent("tracker1"));
     sayFn.mockClear();
 
-    await call(env, contextUser2, null);
-    await check(env, contextUser1, null);
+    await call(env, contextUser2, createGenericMessageEvent("tracker2"));
+    await check(env, contextUser1, createGenericMessageEvent("tracker1"));
 
     // Verify second flop was recorded
     const flopsCount2 = await runInDurableObject(
@@ -2364,49 +2522,63 @@ describe("Poker Durable Object", () => {
     const sayFn = vi.fn();
     const postEphemeralFn = vi.fn();
 
-    const contextAlice = {
-      teamId: workspaceId,
-      channelId: channelId,
+    const contextAlice = createContext({
       userId: "alice",
-      say: sayFn,
-      client: { chat: { postEphemeral: postEphemeralFn } },
-    };
-
-    const contextBob = {
-      teamId: workspaceId,
-      channelId: channelId,
+      sayFn,
+      postEphemeralFn,
+      workspaceId,
+      channelId,
+    });
+    const contextBob = createContext({
       userId: "bob",
-      say: sayFn,
-      client: { chat: { postEphemeral: postEphemeralFn } },
-    };
-
-    const contextCharlie = {
-      teamId: workspaceId,
-      channelId: channelId,
+      sayFn,
+      postEphemeralFn,
+      workspaceId,
+      channelId,
+    });
+    const contextCharlie = createContext({
       userId: "charlie",
-      say: sayFn,
-      client: { chat: { postEphemeral: postEphemeralFn } },
-    };
+      sayFn,
+      postEphemeralFn,
+      workspaceId,
+      channelId,
+    });
 
     const stub = getStub({ workspaceId, channelId });
 
     // === SETUP ===
-    await newGame(env, contextAlice);
-    await joinGame(env, contextAlice);
-    await joinGame(env, contextBob);
-    await joinGame(env, contextCharlie);
-    await buyIn(env, contextAlice, { text: "buy in 1000" });
-    await buyIn(env, contextBob, { text: "buy in 1000" });
-    await buyIn(env, contextCharlie, { text: "buy in 1000" });
+    await newGame(env, contextAlice, createGenericMessageEvent("alice"));
+    await joinGame(env, contextAlice, createGenericMessageEvent("alice"));
+    await joinGame(env, contextBob, createGenericMessageEvent("bob"));
+    await joinGame(env, contextCharlie, createGenericMessageEvent("charlie"));
+    await buyIn(
+      env,
+      contextAlice,
+      createGenericMessageEvent("alice", "buy in 1000")
+    );
+    await buyIn(
+      env,
+      contextBob,
+      createGenericMessageEvent("bob", "buy in 1000")
+    );
+    await buyIn(
+      env,
+      contextCharlie,
+      createGenericMessageEvent("charlie", "buy in 1000")
+    );
     sayFn.mockClear();
 
     // === START ROUND ===
-    await startRound(env, contextAlice, null);
+    await startRound(env, contextAlice, createGenericMessageEvent("alice"));
     sayFn.mockClear();
     postEphemeralFn.mockClear();
 
     // charlie (BB) queues a pre-bet of 200
-    await preBet(env, contextCharlie, { text: "pre-bet 200" });
+    await preBet(
+      env,
+      contextCharlie,
+      createGenericMessageEvent("charlie", "pre-bet 200")
+    );
     expect(sayFn.mock.calls).toMatchInlineSnapshot(`
       [
         [
@@ -2419,11 +2591,11 @@ describe("Poker Durable Object", () => {
     sayFn.mockClear();
 
     // alice calls
-    await call(env, contextAlice, null);
+    await call(env, contextAlice, createGenericMessageEvent("alice"));
     sayFn.mockClear();
 
     // bob calls - this triggers charlie's pre-bet (which raises to 200)
-    await call(env, contextBob, null);
+    await call(env, contextBob, createGenericMessageEvent("bob"));
     const gameStateAfterPreBet = await getGameState(
       stub,
       workspaceId,
@@ -2451,9 +2623,9 @@ describe("Poker Durable Object", () => {
     expect(getPlayerById(gameStateAfterPreBet, "charlie")?.chips).toBe(800); // 1000 - 200
 
     // alice and bob need to call the raise to advance to flop
-    await call(env, contextAlice, null);
+    await call(env, contextAlice, createGenericMessageEvent("alice"));
     sayFn.mockClear();
-    await call(env, contextBob, null);
+    await call(env, contextBob, createGenericMessageEvent("bob"));
 
     const gameStateFlop = await getGameState(stub, workspaceId, channelId);
     expect(gameStateFlop.gameState).toBe(GameState.Flop);
@@ -2473,38 +2645,45 @@ describe("Poker Durable Object", () => {
     const sayFn = vi.fn();
     const postEphemeralFn = vi.fn();
 
-    const contextUser1 = {
-      teamId: workspaceId,
-      channelId: channelId,
+    const contextUser1 = createContext({
       userId: "salty",
-      say: sayFn,
-      client: { chat: { postEphemeral: postEphemeralFn } },
-    };
-
-    const contextUser2 = {
-      teamId: workspaceId,
-      channelId: channelId,
+      sayFn,
+      postEphemeralFn,
+      workspaceId,
+      channelId,
+    });
+    const contextUser2 = createContext({
       userId: "winner",
-      say: sayFn,
-      client: { chat: { postEphemeral: postEphemeralFn } },
-    };
+      sayFn,
+      postEphemeralFn,
+      workspaceId,
+      channelId,
+    });
 
     const stub = getStub({ workspaceId, channelId });
 
     // === SETUP ===
-    await newGame(env, contextUser1);
-    await joinGame(env, contextUser1);
-    await joinGame(env, contextUser2);
-    await buyIn(env, contextUser1, { text: "buy in 500" });
-    await buyIn(env, contextUser2, { text: "buy in 500" });
+    await newGame(env, contextUser1, createGenericMessageEvent("salty"));
+    await joinGame(env, contextUser1, createGenericMessageEvent("salty"));
+    await joinGame(env, contextUser2, createGenericMessageEvent("winner"));
+    await buyIn(
+      env,
+      contextUser1,
+      createGenericMessageEvent("salty", "buy in 500")
+    );
+    await buyIn(
+      env,
+      contextUser2,
+      createGenericMessageEvent("winner", "buy in 500")
+    );
     sayFn.mockClear();
 
     // Start round
-    await startRound(env, contextUser1, null);
+    await startRound(env, contextUser1, createGenericMessageEvent("salty"));
     sayFn.mockClear();
 
     // salty player queues pre-AH (will say asshole at end)
-    await preAH(env, contextUser1, null);
+    await preAH(env, contextUser1, createGenericMessageEvent("salty"));
     expect(sayFn.mock.calls).toMatchInlineSnapshot(`
       [
         [
@@ -2517,7 +2696,7 @@ describe("Poker Durable Object", () => {
     sayFn.mockClear();
 
     // End round with fold
-    await fold(env, contextUser2, null);
+    await fold(env, contextUser2, createGenericMessageEvent("winner"));
 
     // Check that :ah: message appeared
     const endMessages = sayFn.mock.calls[0][0].text;
@@ -2539,53 +2718,83 @@ describe("Poker Durable Object", () => {
     const sayFn = vi.fn();
     const postEphemeralFn = vi.fn();
 
-    const contextShortStack = {
-      teamId: workspaceId,
-      channelId: channelId,
+    const contextShortStack = createContext({
       userId: "shortstack",
-      say: sayFn,
-      client: { chat: { postEphemeral: postEphemeralFn } },
-    };
-
-    const contextMediumStack = {
-      teamId: workspaceId,
-      channelId: channelId,
+      sayFn,
+      postEphemeralFn,
+      workspaceId,
+      channelId,
+    });
+    const contextMediumStack = createContext({
       userId: "mediumstack",
-      say: sayFn,
-      client: { chat: { postEphemeral: postEphemeralFn } },
-    };
-
-    const contextBigStack = {
-      teamId: workspaceId,
-      channelId: channelId,
+      sayFn,
+      postEphemeralFn,
+      workspaceId,
+      channelId,
+    });
+    const contextBigStack = createContext({
       userId: "bigstack",
-      say: sayFn,
-      client: { chat: { postEphemeral: postEphemeralFn } },
-    };
+      sayFn,
+      postEphemeralFn,
+      workspaceId,
+      channelId,
+    });
 
     const stub = getStub({ workspaceId, channelId });
 
     // === SETUP with different stack sizes ===
-    await newGame(env, contextShortStack);
-    await joinGame(env, contextShortStack);
-    await joinGame(env, contextMediumStack);
-    await joinGame(env, contextBigStack);
+    await newGame(
+      env,
+      contextShortStack,
+      createGenericMessageEvent("shortstack")
+    );
+    await joinGame(
+      env,
+      contextShortStack,
+      createGenericMessageEvent("shortstack")
+    );
+    await joinGame(
+      env,
+      contextMediumStack,
+      createGenericMessageEvent("mediumstack")
+    );
+    await joinGame(env, contextBigStack, createGenericMessageEvent("bigstack"));
 
     // Different buy-ins create side pot scenario
-    await buyIn(env, contextShortStack, { text: "buy in 100" }); // Short stack
-    await buyIn(env, contextMediumStack, { text: "buy in 300" }); // Medium stack
-    await buyIn(env, contextBigStack, { text: "buy in 600" }); // Big stack
+    await buyIn(
+      env,
+      contextShortStack,
+      createGenericMessageEvent("shortstack", "buy in 100")
+    ); // Short stack
+    await buyIn(
+      env,
+      contextMediumStack,
+      createGenericMessageEvent("mediumstack", "buy in 300")
+    ); // Medium stack
+    await buyIn(
+      env,
+      contextBigStack,
+      createGenericMessageEvent("bigstack", "buy in 600")
+    ); // Big stack
     sayFn.mockClear();
 
     // === START ROUND ===
-    await startRound(env, contextShortStack, null);
+    await startRound(
+      env,
+      contextShortStack,
+      createGenericMessageEvent("shortstack")
+    );
     const gameStateStart = await getGameState(stub, workspaceId, channelId);
     expect(gameStateStart.activePlayers.length).toBe(3);
     sayFn.mockClear();
     postEphemeralFn.mockClear();
 
     // shortstack (dealer) goes all-in with remaining chips
-    await bet(env, contextShortStack, { text: "bet 100" });
+    await bet(
+      env,
+      contextShortStack,
+      createGenericMessageEvent("shortstack", "bet 100")
+    );
     const gameStateAfterShort = await getGameState(
       stub,
       workspaceId,
@@ -2595,13 +2804,17 @@ describe("Poker Durable Object", () => {
     sayFn.mockClear();
 
     // mediumstack calls and goes all-in
-    await bet(env, contextMediumStack, { text: "bet 300" });
+    await bet(
+      env,
+      contextMediumStack,
+      createGenericMessageEvent("mediumstack", "bet 300")
+    );
     const gameStateAfterMed = await getGameState(stub, workspaceId, channelId);
     expect(getPlayerById(gameStateAfterMed, "mediumstack")?.chips).toBe(0);
     sayFn.mockClear();
 
     // bigstack calls the all-in
-    await call(env, contextBigStack, null);
+    await call(env, contextBigStack, createGenericMessageEvent("bigstack"));
     const gameStateFinal = await getGameState(stub, workspaceId, channelId);
 
     // Game should be over - all players all-in or called
@@ -2633,26 +2846,25 @@ describe("Poker Durable Object", () => {
     const sayFn = vi.fn();
     const postEphemeralFn = vi.fn();
 
-    const contextUser1 = {
-      teamId: workspaceId,
-      channelId: channelId,
+    const contextUser1 = createContext({
       userId: "nudger",
-      say: sayFn,
-      client: { chat: { postEphemeral: postEphemeralFn } },
-    };
-
-    const contextUser2 = {
-      teamId: workspaceId,
-      channelId: channelId,
+      sayFn,
+      postEphemeralFn,
+      workspaceId,
+      channelId,
+    });
+    const contextUser2 = createContext({
       userId: "slowpoke",
-      say: sayFn,
-      client: { chat: { postEphemeral: postEphemeralFn } },
-    };
+      sayFn,
+      postEphemeralFn,
+      workspaceId,
+      channelId,
+    });
 
     const stub = getStub({ workspaceId, channelId });
 
     // === TEST: Nudge with no game ===
-    await nudgePlayer(env, contextUser1, null);
+    await nudgePlayer(env, contextUser1, createGenericMessageEvent("nudger"));
     expect(sayFn.mock.calls).toMatchInlineSnapshot(`
       [
         [
@@ -2665,15 +2877,23 @@ describe("Poker Durable Object", () => {
     sayFn.mockClear();
 
     // === SETUP ===
-    await newGame(env, contextUser1);
-    await joinGame(env, contextUser1);
-    await joinGame(env, contextUser2);
-    await buyIn(env, contextUser1, { text: "buy in 500" });
-    await buyIn(env, contextUser2, { text: "buy in 500" });
+    await newGame(env, contextUser1, createGenericMessageEvent("nudger"));
+    await joinGame(env, contextUser1, createGenericMessageEvent("nudger"));
+    await joinGame(env, contextUser2, createGenericMessageEvent("slowpoke"));
+    await buyIn(
+      env,
+      contextUser1,
+      createGenericMessageEvent("nudger", "buy in 500")
+    );
+    await buyIn(
+      env,
+      contextUser2,
+      createGenericMessageEvent("slowpoke", "buy in 500")
+    );
     sayFn.mockClear();
 
     // === TEST: Nudge before game starts ===
-    await nudgePlayer(env, contextUser1, null);
+    await nudgePlayer(env, contextUser1, createGenericMessageEvent("nudger"));
     expect(sayFn.mock.calls).toMatchInlineSnapshot(`
       [
         [
@@ -2686,12 +2906,12 @@ describe("Poker Durable Object", () => {
     sayFn.mockClear();
 
     // === START ROUND ===
-    await startRound(env, contextUser1, null);
+    await startRound(env, contextUser1, createGenericMessageEvent("nudger"));
     sayFn.mockClear();
     postEphemeralFn.mockClear();
 
     // === TEST: Nudge during active game ===
-    await nudgePlayer(env, contextUser1, null);
+    await nudgePlayer(env, contextUser1, createGenericMessageEvent("nudger"));
     // Should nudge the current player (slowpoke is SB and acts first)
     expect(sayFn.mock.calls).toMatchInlineSnapshot(`
       [
@@ -2719,30 +2939,37 @@ describe("Poker Durable Object", () => {
     const sayFn = vi.fn();
     const postEphemeralFn = vi.fn();
 
-    const contextUser1 = {
-      teamId: workspaceId,
-      channelId: channelId,
+    const contextUser1 = createContext({
       userId: "counter1",
-      say: sayFn,
-      client: { chat: { postEphemeral: postEphemeralFn } },
-    };
-
-    const contextUser2 = {
-      teamId: workspaceId,
-      channelId: channelId,
+      sayFn,
+      postEphemeralFn,
+      workspaceId,
+      channelId,
+    });
+    const contextUser2 = createContext({
       userId: "counter2",
-      say: sayFn,
-      client: { chat: { postEphemeral: postEphemeralFn } },
-    };
+      sayFn,
+      postEphemeralFn,
+      workspaceId,
+      channelId,
+    });
 
     const stub = getStub({ workspaceId, channelId });
 
     // === SETUP ===
-    await newGame(env, contextUser1);
-    await joinGame(env, contextUser1);
-    await joinGame(env, contextUser2);
-    await buyIn(env, contextUser1, { text: "buy in 1000" });
-    await buyIn(env, contextUser2, { text: "buy in 1000" });
+    await newGame(env, contextUser1, createGenericMessageEvent("counter1"));
+    await joinGame(env, contextUser1, createGenericMessageEvent("counter1"));
+    await joinGame(env, contextUser2, createGenericMessageEvent("counter2"));
+    await buyIn(
+      env,
+      contextUser1,
+      createGenericMessageEvent("counter1", "buy in 1000")
+    );
+    await buyIn(
+      env,
+      contextUser2,
+      createGenericMessageEvent("counter2", "buy in 1000")
+    );
     sayFn.mockClear();
 
     // Verify no flops recorded initially
@@ -2760,12 +2987,12 @@ describe("Poker Durable Object", () => {
     expect(initialFlopCount).toBe(0);
 
     // === ROUND 1 ===
-    await startRound(env, contextUser1, null);
+    await startRound(env, contextUser1, createGenericMessageEvent("counter1"));
     sayFn.mockClear();
 
     // Get to flop
-    await call(env, contextUser2, null);
-    await check(env, contextUser1, null);
+    await call(env, contextUser2, createGenericMessageEvent("counter2"));
+    await check(env, contextUser1, createGenericMessageEvent("counter1"));
 
     // Verify flop message shows "1 flops discovered"
     const round1Messages = sayFn.mock.calls.map((c) => c[0].text).join("\n");
@@ -2786,15 +3013,15 @@ describe("Poker Durable Object", () => {
     expect(flopCountRound1).toBe(1);
 
     // Finish round
-    await fold(env, contextUser1, null);
+    await fold(env, contextUser1, createGenericMessageEvent("counter1"));
     sayFn.mockClear();
 
     // === ROUND 2 ===
-    await startRound(env, contextUser1, null);
+    await startRound(env, contextUser1, createGenericMessageEvent("counter1"));
     sayFn.mockClear();
 
-    await call(env, contextUser2, null);
-    await check(env, contextUser1, null);
+    await call(env, contextUser2, createGenericMessageEvent("counter2"));
+    await check(env, contextUser1, createGenericMessageEvent("counter1"));
 
     // Get flop count after round 2
     const flopCountRound2 = await runInDurableObject(
@@ -2812,15 +3039,15 @@ describe("Poker Durable Object", () => {
     expect(flopCountRound2).toBeGreaterThanOrEqual(1);
 
     // Finish round
-    await fold(env, contextUser1, null);
+    await fold(env, contextUser1, createGenericMessageEvent("counter1"));
     sayFn.mockClear();
 
     // === ROUND 3 ===
-    await startRound(env, contextUser1, null);
+    await startRound(env, contextUser1, createGenericMessageEvent("counter1"));
     sayFn.mockClear();
 
-    await call(env, contextUser2, null);
-    await check(env, contextUser1, null);
+    await call(env, contextUser2, createGenericMessageEvent("counter2"));
+    await check(env, contextUser1, createGenericMessageEvent("counter1"));
 
     // Verify flop count continues to increment for unique flops
     const flopCountRound3 = await runInDurableObject(
@@ -2873,4 +3100,41 @@ function getGameState(
       .one();
     return TexasHoldem.fromJson(JSON.parse(result.game as string)).getState();
   });
+}
+
+function createGenericMessageEvent(
+  userId: string,
+  text?: string
+): GenericMessageEvent {
+  return {
+    type: "message",
+    user: userId,
+    text: text ?? "test",
+  } as GenericMessageEvent;
+}
+
+function createContext({
+  userId,
+  sayFn,
+  postEphemeralFn,
+  workspaceId = "test-workspace",
+  channelId = "test-channel",
+}: {
+  userId: string;
+  sayFn: ReturnType<typeof vi.fn>;
+  postEphemeralFn?: ReturnType<typeof vi.fn>;
+  workspaceId?: string;
+  channelId?: string;
+}): SlackAppContextWithChannelId {
+  return {
+    teamId: workspaceId,
+    channelId: channelId,
+    userId,
+    say: sayFn,
+    client: {
+      chat: {
+        postEphemeral: postEphemeralFn ?? vi.fn(),
+      },
+    },
+  } as unknown as SlackAppContextWithChannelId;
 }

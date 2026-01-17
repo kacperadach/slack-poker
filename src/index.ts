@@ -924,7 +924,7 @@ export async function call(
   await sendGameEventMessages(env, context, game);
 }
 
-async function check(
+export async function check(
   env: Env,
   context: SlackAppContextWithChannelId,
   _payload: PostedMessage
