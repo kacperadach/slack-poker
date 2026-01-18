@@ -25,6 +25,7 @@ import {
   showStacks,
   nudgePlayer,
   takeHerToThe,
+  context,
 } from "..";
 import { MARCUS_USER_ID, CAMDEN_USER_ID, YUVI_USER_ID } from "../users";
 import {
@@ -4042,6 +4043,181 @@ describe("Poker Durable Object", () => {
         actionLogs[i - 1].data.timestamp
       );
     }
+  });
+
+  it("context command shows player positions and fold state", async () => {
+    vi.spyOn(Math, "random").mockReturnValue(0.6);
+    const workspaceId = "context-test-workspace";
+    const channelId = "context-test-channel";
+    const sayFn = vi.fn();
+    const postEphemeralFn = vi.fn();
+
+    const contextAlice = createContext({
+      userId: "alice",
+      sayFn,
+      postEphemeralFn,
+      workspaceId,
+      channelId,
+    });
+    const contextBob = createContext({
+      userId: "bob",
+      sayFn,
+      postEphemeralFn,
+      workspaceId,
+      channelId,
+    });
+    const contextCharlie = createContext({
+      userId: "charlie",
+      sayFn,
+      postEphemeralFn,
+      workspaceId,
+      channelId,
+    });
+
+    const payloadAlice = createGenericMessageEvent("alice");
+    const payloadBob = createGenericMessageEvent("bob");
+    const payloadCharlie = createGenericMessageEvent("charlie");
+
+    // Setup game with 3 players
+    await newGame(env, contextAlice, payloadAlice);
+    await joinGame(env, contextAlice, payloadAlice);
+    await joinGame(env, contextBob, payloadBob);
+    await joinGame(env, contextCharlie, payloadCharlie);
+
+    await buyIn(env, contextAlice, { text: "buy in 1000" } as GenericMessageEvent);
+    await buyIn(env, contextBob, { text: "buy in 1000" } as GenericMessageEvent);
+    await buyIn(env, contextCharlie, { text: "buy in 1000" } as GenericMessageEvent);
+
+    // Start round - alice is dealer (position 0), bob is SB, charlie is BB
+    await startRound(env, contextAlice, payloadAlice);
+
+    sayFn.mockClear();
+    postEphemeralFn.mockClear();
+
+    // Alice calls context - should see player list with positions
+    await context(env, contextAlice, payloadAlice);
+
+    // Check the ephemeral message content
+    expect(postEphemeralFn).toHaveBeenCalledTimes(1);
+    const contextMessage = postEphemeralFn.mock.calls[0][0];
+    expect(contextMessage.text).toMatchInlineSnapshot(`
+      "*Game Context*
+
+      *Game State:* Pre-Flop
+      *Pot Size:* 120 chips
+      *Turn:* :rotating_light: It's your turn :rotating_light:
+      *Action:* You must call 80 chips (current bet: 80)
+
+      *Players (table order):*
+      <@alice> (D) ⬅️
+      <@bob> (SB)
+      <@charlie> (BB)
+
+      *Your Cards:*
+      7:clubs: 5:clubs:
+
+      *Community Cards:* None yet"
+    `);
+
+    postEphemeralFn.mockClear();
+
+    // Alice calls
+    await call(env, contextAlice, payloadAlice);
+    // Bob checks
+    await check(env, contextBob, payloadBob);
+    // Charlie checks
+    await check(env, contextCharlie, payloadCharlie);
+
+    // Now on flop, alice bets
+    await bet(env, contextAlice, { text: "bet 50" } as GenericMessageEvent);
+
+    // Bob folds
+    await fold(env, contextBob, payloadBob);
+
+    postEphemeralFn.mockClear();
+
+    // Charlie calls context - should show bob as folded
+    await context(env, contextCharlie, payloadCharlie);
+
+    expect(postEphemeralFn).toHaveBeenCalledTimes(1);
+    const contextMessageAfterFold = postEphemeralFn.mock.calls[0][0];
+    expect(contextMessageAfterFold.text).toMatchInlineSnapshot(`
+      "*Game Context*
+
+      *Game State:* Pre-Flop
+      *Pot Size:* 200 chips
+      *Turn:* :rotating_light: It's your turn :rotating_light:
+      *Action:* You can check
+
+      *Players (table order):*
+      <@alice> (D) - called 80
+      <@bob> (SB) - folded
+      <@charlie> (BB) ⬅️
+
+      *Still in hand:* <@alice>, <@charlie>
+
+      *Your Cards:*
+      K:spades: 10:spades:
+
+      *Community Cards:* None yet"
+    `);
+  });
+
+  it("context command shows waiting for players state", async () => {
+    const workspaceId = "context-waiting-workspace";
+    const channelId = "context-waiting-channel";
+    const sayFn = vi.fn();
+    const postEphemeralFn = vi.fn();
+
+    const contextAlice = createContext({
+      userId: "alice",
+      sayFn,
+      postEphemeralFn,
+      workspaceId,
+      channelId,
+    });
+    const contextBob = createContext({
+      userId: "bob",
+      sayFn,
+      postEphemeralFn,
+      workspaceId,
+      channelId,
+    });
+
+    const payloadAlice = createGenericMessageEvent("alice");
+    const payloadBob = createGenericMessageEvent("bob");
+
+    // Setup game but don't start round
+    await newGame(env, contextAlice, payloadAlice);
+    await joinGame(env, contextAlice, payloadAlice);
+    await joinGame(env, contextBob, payloadBob);
+
+    await buyIn(env, contextAlice, { text: "buy in 500" } as GenericMessageEvent);
+    await buyIn(env, contextBob, { text: "buy in 500" } as GenericMessageEvent);
+
+    postEphemeralFn.mockClear();
+
+    // Alice calls context before round starts
+    await context(env, contextAlice, payloadAlice);
+
+    expect(postEphemeralFn).toHaveBeenCalledTimes(1);
+    const contextMessage = postEphemeralFn.mock.calls[0][0];
+    expect(contextMessage.text).toMatchInlineSnapshot(`
+      "*Game Context*
+
+      *Game State:* Waiting for Players
+      *Pot Size:* 0 chips
+      *Turn:* No active round
+      *Action:* Game has not started yet
+
+      *Players (table order):*
+      <@bob> (BB)
+      <@alice> (D+SB)
+
+      *Your Cards:* No cards yet
+
+      *Community Cards:* None yet"
+    `);
   });
 });
 

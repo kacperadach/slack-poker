@@ -1617,7 +1617,7 @@ async function getGameState(
   await sendGameEventMessages(env, context, game);
 }
 
-async function context(
+export async function context(
   env: Env,
   context: SlackAppContextWithChannelId,
   _payload: PostedMessage
@@ -1725,6 +1725,46 @@ async function context(
   message += `*Pot Size:* ${potSize} chips\n`;
   message += `*Turn:* ${turnText}\n`;
   message += `*Action:* ${actionText}\n\n`;
+
+  // Add player list in table order (starting from dealer)
+  const playersInOrder = game.getPlayersInTableOrder();
+  if (playersInOrder.length > 0) {
+    message += `*Players (table order):*\n`;
+    for (const p of playersInOrder) {
+      // Get player display name (use mapping or fall back to Slack mention)
+      const displayName =
+        userIdToName[p.playerId as keyof typeof userIdToName] ||
+        `<@${p.playerId}>`;
+
+      let line = displayName;
+      // Add position label if present
+      if (p.positionLabel) {
+        line += ` (${p.positionLabel})`;
+      }
+      // Add last action and state
+      if (p.lastAction) {
+        line += ` - ${p.lastAction}`;
+      }
+      if (p.isAllIn) {
+        line += " _(all-in)_";
+      }
+      // Add turn indicator on the right
+      if (p.isCurrentTurn) {
+        line += " ⬅️";
+      }
+      message += `${line}\n`;
+    }
+    message += "\n";
+
+    // Add non-folded players section
+    const nonFoldedPlayers = game.getNonFoldedPlayersInOrder();
+    if (nonFoldedPlayers.length > 0 && nonFoldedPlayers.length < playersInOrder.length) {
+      const nonFoldedNames = nonFoldedPlayers.map(
+        (id) => userIdToName[id as keyof typeof userIdToName] || `<@${id}>`
+      );
+      message += `*Still in hand:* ${nonFoldedNames.join(", ")}\n\n`;
+    }
+  }
 
   if (playerCards && playerCards.length > 0) {
     // Calculate hand description if there are community cards

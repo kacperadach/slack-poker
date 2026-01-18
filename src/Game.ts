@@ -1357,6 +1357,124 @@ export class TexasHoldem {
     return this.dealerPosition;
   }
 
+  /**
+   * Returns position label for a player based on their index in the active players array.
+   * Position labels: D (Dealer), SB (Small Blind), BB (Big Blind)
+   * Heads-up: Dealer is also SB (D+SB), other player is BB
+   */
+  public getPositionLabel(playerIndex: number): string {
+    const numPlayers = this.activePlayers.length;
+    if (numPlayers === 0) return "";
+
+    // Calculate position relative to dealer
+    const relativePosition =
+      (playerIndex - this.dealerPosition + numPlayers) % numPlayers;
+
+    // Heads-up: Dealer is also Small Blind
+    if (numPlayers === 2) {
+      if (relativePosition === 0) return "D+SB";
+      if (relativePosition === 1) return "BB";
+      return "";
+    }
+
+    if (relativePosition === 0) return "D";
+    if (relativePosition === 1) return "SB";
+    if (relativePosition === 2) return "BB";
+
+    return "";
+  }
+
+  /**
+   * Returns all players in action order (first to act at top, last to act at bottom).
+   * Pre-flop: UTG first, BB last
+   * Post-flop: SB first, D last
+   * Each entry includes: playerId, positionLabel, isFolded, isCurrentTurn, isAllIn, lastAction
+   */
+  public getPlayersInTableOrder(): Array<{
+    playerId: string;
+    positionLabel: string;
+    isFolded: boolean;
+    isCurrentTurn: boolean;
+    isAllIn: boolean;
+    lastAction: string | null;
+  }> {
+    const result: Array<{
+      playerId: string;
+      positionLabel: string;
+      isFolded: boolean;
+      isCurrentTurn: boolean;
+      isAllIn: boolean;
+      lastAction: string | null;
+    }> = [];
+
+    const numPlayers = this.activePlayers.length;
+    if (numPlayers === 0) return result;
+
+    const currentPlayer = this.getCurrentPlayer();
+    const currentPlayerId = currentPlayer?.getId();
+
+    // Determine starting position based on game state
+    // Pre-flop: start at UTG (dealer + 3), or dealer in heads-up (dealer is SB)
+    // Post-flop (or waiting): start at SB (dealer + 1)
+    let startOffset: number;
+    if (this.gameState === GameState.PreFlop) {
+      // Heads-up: dealer/SB acts first pre-flop
+      if (numPlayers === 2) {
+        startOffset = 0; // Dealer (who is also SB) acts first
+      } else {
+        startOffset = 3; // UTG position (after BB)
+      }
+    } else {
+      startOffset = 1; // SB position (first to act post-flop), or BB in heads-up
+    }
+
+    // Go around the table in action order
+    for (let i = 0; i < numPlayers; i++) {
+      const playerIndex = (this.dealerPosition + startOffset + i) % numPlayers;
+      const player = this.activePlayers[playerIndex];
+      const playerId = player.getId();
+
+      // Derive last action from player state
+      let lastAction: string | null = null;
+      const isFolded = this.foldedPlayers.has(playerId);
+      const hadTurn = player.getHadTurnThisRound();
+      const lastRaise = player.getLastRaise();
+
+      if (isFolded) {
+        lastAction = "folded";
+      } else if (hadTurn) {
+        const currentBet = player.getCurrentBet();
+        if (lastRaise > 0) {
+          lastAction = `raised to ${currentBet}`;
+        } else if (currentBet > 0) {
+          lastAction = `called ${currentBet}`;
+        } else {
+          lastAction = "checked";
+        }
+      }
+
+      result.push({
+        playerId,
+        positionLabel: this.getPositionLabel(playerIndex),
+        isFolded,
+        isCurrentTurn: playerId === currentPlayerId,
+        isAllIn: player.getIsAllIn(),
+        lastAction,
+      });
+    }
+
+    return result;
+  }
+
+  /**
+   * Returns list of non-folded player IDs in table order (starting from dealer).
+   */
+  public getNonFoldedPlayersInOrder(): string[] {
+    return this.getPlayersInTableOrder()
+      .filter((p) => !p.isFolded)
+      .map((p) => p.playerId);
+  }
+
   public getCurrentBetAmount(): number {
     return this.currentBetAmount;
   }
