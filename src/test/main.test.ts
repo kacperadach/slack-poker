@@ -79,10 +79,6 @@ beforeAll(() => {
   vi.setSystemTime(new Date("2026-01-16T12:00:00Z"));
 });
 
-afterAll(() => {
-  vi.useRealTimers();
-});
-
 describe("Poker Durable Object", () => {
   it("creates tables", async () => {
     const id = env.POKER_DURABLE_OBJECT.idFromName("test");
@@ -4084,9 +4080,15 @@ describe("Poker Durable Object", () => {
     await joinGame(env, contextBob, payloadBob);
     await joinGame(env, contextCharlie, payloadCharlie);
 
-    await buyIn(env, contextAlice, { text: "buy in 1000" } as GenericMessageEvent);
-    await buyIn(env, contextBob, { text: "buy in 1000" } as GenericMessageEvent);
-    await buyIn(env, contextCharlie, { text: "buy in 1000" } as GenericMessageEvent);
+    await buyIn(env, contextAlice, {
+      text: "buy in 1000",
+    } as GenericMessageEvent);
+    await buyIn(env, contextBob, {
+      text: "buy in 1000",
+    } as GenericMessageEvent);
+    await buyIn(env, contextCharlie, {
+      text: "buy in 1000",
+    } as GenericMessageEvent);
 
     // Start round - alice is dealer (position 0), bob is SB, charlie is BB
     await startRound(env, contextAlice, payloadAlice);
@@ -4124,19 +4126,21 @@ describe("Poker Durable Object", () => {
     // Alice calls
     await call(env, contextAlice, payloadAlice);
     // Bob checks
-    await check(env, contextBob, payloadBob);
+    await call(env, contextBob, payloadBob);
     // Charlie checks
     await check(env, contextCharlie, payloadCharlie);
 
-    // Now on flop, alice bets
-    await bet(env, contextAlice, { text: "bet 50" } as GenericMessageEvent);
+    const stub = getStub({ workspaceId, channelId });
+    const gameState = await getGameState(stub, workspaceId, channelId);
+
+    expect(gameState.gameState).toBe(GameState.Flop);
 
     // Bob folds
-    await fold(env, contextBob, payloadBob);
+    await check(env, contextBob, payloadBob);
 
     postEphemeralFn.mockClear();
 
-    // Charlie calls context - should show bob as folded
+    // Charlie calls context - should show bob as checked
     await context(env, contextCharlie, payloadCharlie);
 
     expect(postEphemeralFn).toHaveBeenCalledTimes(1);
@@ -4144,22 +4148,81 @@ describe("Poker Durable Object", () => {
     expect(contextMessageAfterFold.text).toMatchInlineSnapshot(`
       "*Game Context*
 
-      *Game State:* Pre-Flop
-      *Pot Size:* 200 chips
+      *Game State:* Flop
+      *Pot Size:* 240 chips
       *Turn:* :rotating_light: It's your turn :rotating_light:
       *Action:* You can check
 
       *Players (table order):*
-      <@alice> (D) - called 80
-      <@bob> (SB) - folded
+      <@bob> (SB) - checked
       <@charlie> (BB) ⬅️
+      <@alice> (D)
 
-      *Still in hand:* <@alice>, <@charlie>
-
-      *Your Cards:*
+      *You have Ass:*
       K:spades: 10:spades:
 
-      *Community Cards:* None yet"
+      *Community Cards:*
+      8:spades: 2:clubs: A:diamonds:
+      "
+    `);
+
+    postEphemeralFn.mockClear();
+
+    await bet(env, contextCharlie, { text: "bet 100" } as GenericMessageEvent);
+
+    // Charlie calls context - should show bob as checked
+    await context(env, contextAlice, payloadAlice);
+
+    expect(postEphemeralFn).toHaveBeenCalledTimes(1);
+    const contextMessageAfterBet = postEphemeralFn.mock.calls[0][0];
+    expect(contextMessageAfterBet.text).toMatchInlineSnapshot(`
+      "*Game Context*
+
+      *Game State:* Flop
+      *Pot Size:* 340 chips
+      *Turn:* :rotating_light: It's your turn :rotating_light:
+      *Action:* You must call 100 chips (current bet: 100)
+
+      *Players (table order):*
+      <@bob> (SB) - checked
+      <@charlie> (BB) - raised to 100
+      <@alice> (D) ⬅️
+
+      *You have Ass:*
+      7:clubs: 5:clubs:
+
+      *Community Cards:*
+      8:spades: 2:clubs: A:diamonds:
+      "
+    `);
+
+    await fold(env, contextAlice, payloadAlice);
+    postEphemeralFn.mockClear();
+
+    await context(env, contextBob, payloadBob);
+    expect(postEphemeralFn).toHaveBeenCalledTimes(1);
+    const contextMessageAfterAliceFold = postEphemeralFn.mock.calls[0][0];
+    expect(contextMessageAfterAliceFold.text).toMatchInlineSnapshot(`
+      "*Game Context*
+
+      *Game State:* Flop
+      *Pot Size:* 340 chips
+      *Turn:* :rotating_light: It's your turn :rotating_light:
+      *Action:* You must call 100 chips (current bet: 100)
+
+      *Players (table order):*
+      <@bob> (SB) - checked ⬅️
+      <@charlie> (BB) - raised to 100
+      <@alice> (D) - folded
+
+      *Still in hand:* <@bob>, <@charlie>
+
+      *You have Ass:*
+      6:clubs: 4:clubs:
+
+      *Community Cards:*
+      8:spades: 2:clubs: A:diamonds:
+      "
     `);
   });
 
@@ -4192,7 +4255,9 @@ describe("Poker Durable Object", () => {
     await joinGame(env, contextAlice, payloadAlice);
     await joinGame(env, contextBob, payloadBob);
 
-    await buyIn(env, contextAlice, { text: "buy in 500" } as GenericMessageEvent);
+    await buyIn(env, contextAlice, {
+      text: "buy in 500",
+    } as GenericMessageEvent);
     await buyIn(env, contextBob, { text: "buy in 500" } as GenericMessageEvent);
 
     postEphemeralFn.mockClear();
@@ -4294,3 +4359,7 @@ function createContext({
     },
   } as unknown as SlackAppContextWithChannelId;
 }
+
+afterAll(() => {
+  vi.useRealTimers();
+});
