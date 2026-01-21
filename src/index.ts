@@ -2556,19 +2556,36 @@ export async function showStacks(
     return;
   }
 
+  const bigBlind = game.getBigBlind();
+  const smallBlind = game.getSmallBlind();
+  const numActivePlayers = game.getActivePlayers().length;
+  const orbitCost = smallBlind + bigBlind;
+
   let message = "*Stacks*\n";
   game.getActivePlayers().forEach((player) => {
     const name =
       userIdToName[player.getId() as keyof typeof userIdToName] ||
       player.getId();
-    message += `${name}: ${player.getChips()} (Active)\n`;
+    const chips = player.getChips();
+    const bbMultiple = Math.round(chips / bigBlind);
+    const orbitsLeft =
+      numActivePlayers > 0
+        ? Math.round(chips / orbitCost)
+        : 0;
+    message += `${name}: ${chips} (${bbMultiple}xBB, ${orbitsLeft} orbits) Active\n`;
   });
 
   game.getInactivePlayers().forEach((player) => {
     const name =
       userIdToName[player.getId() as keyof typeof userIdToName] ||
       player.getId();
-    message += `${name}: ${player.getChips()} (Inactive)\n`;
+    const chips = player.getChips();
+    const bbMultiple = Math.round(chips / bigBlind);
+    const orbitsLeft =
+      numActivePlayers > 0
+        ? Math.round(chips / orbitCost)
+        : 0;
+    message += `${name}: ${chips} (${bbMultiple}xBB, ${orbitsLeft} orbits) Inactive\n`;
   });
 
   await context.say({ text: message });

@@ -3645,14 +3645,16 @@ describe("Poker Durable Object", () => {
     expect(stacksMessage).toContain("300");
     expect(stacksMessage).toContain("400");
 
-    // Should show active/inactive status
-    expect(stacksMessage).toContain("(Active)");
-    expect(stacksMessage).toContain("(Inactive)");
+    // Should show active/inactive status with BB multiples and orbits
+    expect(stacksMessage).toContain("Active");
+    expect(stacksMessage).toContain("Inactive");
+    expect(stacksMessage).toContain("xBB");
+    expect(stacksMessage).toContain("orbits");
 
-    // Verify Marcus and Yuvi are active, Camden is inactive
-    expect(stacksMessage).toMatch(/Marcus: 500 \(Active\)/);
-    expect(stacksMessage).toMatch(/Yuvi: 400 \(Active\)/);
-    expect(stacksMessage).toMatch(/Camden: 300 \(Inactive\)/);
+    // Verify Marcus and Yuvi are active, Camden is inactive (with BB and orbit info)
+    expect(stacksMessage).toMatch(/Marcus: 500 \(\d+xBB, \d+ orbits\) Active/);
+    expect(stacksMessage).toMatch(/Yuvi: 400 \(\d+xBB, \d+ orbits\) Active/);
+    expect(stacksMessage).toMatch(/Camden: 300 \(\d+xBB, \d+ orbits\) Inactive/);
   });
 
   /**
