@@ -1522,6 +1522,7 @@ const MESSAGE_HANDLERS = {
   c: context,
   a: ass,
   cjecl: check,
+  cbecmk: check,
   prenh: preNH,
   preah: preAH,
   predeal: preDeal,
