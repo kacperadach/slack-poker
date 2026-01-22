@@ -2060,15 +2060,6 @@ export async function preDeal(
     return;
   }
 
-  // Display stock price when a hand starts via preDeal (non-blocking, graceful failure)
-  // Check if a round actually started (gameState is PreFlop)
-  if (result.game.gameState === GameState.PreFlop) {
-    const stockPriceMessage = await getHubsStockPriceMessage();
-    if (stockPriceMessage) {
-      await context.say({ text: stockPriceMessage });
-    }
-  }
-
   await sendGameStateMessages(env, context, result.game);
 }
 
