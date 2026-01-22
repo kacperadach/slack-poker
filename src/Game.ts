@@ -32,6 +32,7 @@ export class TexasHoldem {
   private playerPositions: Map<string, number>;
   private preDealId: string | undefined = undefined;
   private events: GameEvent[];
+  private handCount: number;
 
   constructor(
     gameState: GameState = GameState.WaitingForPlayers,
@@ -48,7 +49,8 @@ export class TexasHoldem {
     currentBetAmount: number = 0,
     lastRaiseAmount: number = 0,
     playerPositions: Map<string, number> = new Map(),
-    preDealId: string | undefined = undefined
+    preDealId: string | undefined = undefined,
+    handCount: number = 0
   ) {
     this.gameState = gameState;
     this.deck = deck;
@@ -66,6 +68,7 @@ export class TexasHoldem {
     this.playerPositions = playerPositions;
     this.preDealId = preDealId;
     this.events = [];
+    this.handCount = handCount;
   }
 
   public progressGame(): void {
@@ -374,9 +377,17 @@ export class TexasHoldem {
     this.currentBetAmount = 0;
     this.lastRaiseAmount = 0;
 
+    // Increment hand count
+    this.handCount++;
+
     this.gameState = GameState.WaitingForPlayers;
     // Move dealer button to next player for next round
     this.dealerPosition = (this.dealerPosition + 1) % this.activePlayers.length;
+
+    // Check if we should shuffle player order
+    if (this.shouldShufflePlayerOrder()) {
+      this.shufflePlayerOrder();
+    }
 
     const playersToAdd: string[] = [];
     const playersToRemove: string[] = [];
@@ -1357,6 +1368,55 @@ export class TexasHoldem {
     return this.dealerPosition;
   }
 
+  public getHandCount(): number {
+    return this.handCount;
+  }
+
+  /**
+   * Shuffles the order of active players using Fisher-Yates algorithm.
+   * This is called every numPlayers * 10 hands, but never for 2-player games.
+   */
+  private shufflePlayerOrder(): void {
+    const numPlayers = this.activePlayers.length;
+    
+    // Never shuffle if 2 players
+    if (numPlayers <= 2) {
+      return;
+    }
+
+    // Fisher-Yates shuffle
+    for (let i = numPlayers - 1; i > 0; i--) {
+      const j = Math.floor(Math.random() * (i + 1));
+      [this.activePlayers[i], this.activePlayers[j]] = [
+        this.activePlayers[j],
+        this.activePlayers[i],
+      ];
+    }
+
+    // Reset dealer position after shuffle
+    this.dealerPosition = 0;
+
+    this.events.push(
+      new GameEvent("Player order has been shuffled!")
+    );
+  }
+
+  /**
+   * Checks if player order should be shuffled based on hand count.
+   * Shuffles every numPlayers * 10 hands, but never for 2-player games.
+   */
+  private shouldShufflePlayerOrder(): boolean {
+    const numPlayers = this.activePlayers.length;
+    
+    // Never shuffle if 2 players
+    if (numPlayers <= 2) {
+      return false;
+    }
+
+    const shuffleInterval = numPlayers * 10;
+    return this.handCount > 0 && this.handCount % shuffleInterval === 0;
+  }
+
   /**
    * Returns position label for a player based on their index in the active players array.
    * Position labels: D (Dealer), SB (Small Blind), BB (Big Blind)
@@ -1593,6 +1653,7 @@ export class TexasHoldem {
       lastRaiseAmount: this.lastRaiseAmount,
       playerPositions: Array.from(this.playerPositions.entries()),
       preDealId: this.preDealId,
+      handCount: this.handCount,
     } as const;
   }
 
@@ -1617,7 +1678,8 @@ export class TexasHoldem {
       data.currentBetAmount,
       data.lastRaiseAmount,
       new Map(data.playerPositions),
-      data.preDealId
+      data.preDealId,
+      data.handCount || 0
     );
     return game;
   }
@@ -1689,6 +1751,7 @@ export class TexasHoldem {
         | number
       )[][],
       preDealId: this.preDealId,
+      handCount: this.handCount,
     } as const;
   }
 }
