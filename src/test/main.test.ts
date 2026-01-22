@@ -1310,7 +1310,7 @@ describe("Poker Durable Object", () => {
         [
           {
             "text": "<@player1>'s turn
-      <@player2> raised 300 chips! and went all-in! Total Pot: 380",
+      <@player2> raised 300 chips! *:rotating_light: ALL-IN :rotating_light:* Total Pot: 380",
           },
         ],
       ]
@@ -1330,7 +1330,7 @@ describe("Poker Durable Object", () => {
       [
         [
           {
-            "text": "<@player1> called 300 chips and went all-in! Total Pot: 600
+            "text": "<@player1> called 300 chips *:rotating_light: ALL-IN :rotating_light:* Total Pot: 600
       Flop:
       10:spades: 2:diamonds: 8:spades: A:hearts: 4:spades:
       Turn:
