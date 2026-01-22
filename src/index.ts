@@ -1736,7 +1736,13 @@ export async function context(
         userIdToName[p.playerId as keyof typeof userIdToName] ||
         `<@${p.playerId}>`;
 
+      // Get chip count for this player
+      const playerObj = activePlayers.find((ap) => ap.getId() === p.playerId);
+      const chipCount = playerObj ? playerObj.getChips() : 0;
+
       let line = displayName;
+      // Add chip count
+      line += ` [${chipCount}]`;
       // Add position label if present
       if (p.positionLabel) {
         line += ` (${p.positionLabel})`;

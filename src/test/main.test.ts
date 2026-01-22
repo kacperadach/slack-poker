@@ -4113,9 +4113,9 @@ describe("Poker Durable Object", () => {
       *Action:* You must call 80 chips (current bet: 80)
 
       *Players (table order):*
-      <@alice> (D) ⬅️
-      <@bob> (SB)
-      <@charlie> (BB)
+      <@alice> [1000] (D) ⬅️
+      <@bob> [960] (SB)
+      <@charlie> [920] (BB)
 
       *Your Cards:*
       7:clubs: 5:clubs:
@@ -4156,9 +4156,9 @@ describe("Poker Durable Object", () => {
       *Action:* You can check
 
       *Players (table order):*
-      <@bob> (SB) - checked
-      <@charlie> (BB) ⬅️
-      <@alice> (D)
+      <@bob> [920] (SB) - checked
+      <@charlie> [920] (BB) ⬅️
+      <@alice> [920] (D)
 
       *You have Ass:*
       K:spades: 10:spades:
@@ -4186,9 +4186,9 @@ describe("Poker Durable Object", () => {
       *Action:* You must call 100 chips (current bet: 100)
 
       *Players (table order):*
-      <@bob> (SB) - checked
-      <@charlie> (BB) - raised to 100
-      <@alice> (D) ⬅️
+      <@bob> [920] (SB) - checked
+      <@charlie> [820] (BB) - raised to 100
+      <@alice> [920] (D) ⬅️
 
       *You have Ass:*
       7:clubs: 5:clubs:
@@ -4213,9 +4213,9 @@ describe("Poker Durable Object", () => {
       *Action:* You must call 100 chips (current bet: 100)
 
       *Players (table order):*
-      <@bob> (SB) - checked ⬅️
-      <@charlie> (BB) - raised to 100
-      <@alice> (D) - folded
+      <@bob> [920] (SB) - checked ⬅️
+      <@charlie> [820] (BB) - raised to 100
+      <@alice> [920] (D) - folded
 
       *Still in hand:* <@bob>, <@charlie>
 
@@ -4278,8 +4278,8 @@ describe("Poker Durable Object", () => {
       *Action:* Game has not started yet
 
       *Players (table order):*
-      <@bob> (BB)
-      <@alice> (D+SB)
+      <@bob> [500] (BB)
+      <@alice> [500] (D+SB)
 
       *Your Cards:* No cards yet
 
