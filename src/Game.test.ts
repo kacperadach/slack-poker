@@ -64,7 +64,6 @@ test("Adding player and buying in works correctly", () => {
 
   // Successful buy in
   assert.equal(game.buyIn(PLAYER_1, 1000), Success);
-  assert.equal(game.buyIn("invalid_player_id", 1000), "Player not found"); // should fail with invalid player id
   assert.equal(player?.getChips(), 1000);
 
   // Attempt to buy in during active round
@@ -74,6 +73,34 @@ test("Adding player and buying in works correctly", () => {
   assert.equal(game.startRound(PLAYER_1), Success);
   assert.equal(game.buyIn(PLAYER_1, 500), "Cannot buy in during active round"); // should fail during active round
   assert.equal(player?.getChips(), 1000 - game.getSmallBlind()); // chips should remain unchanged
+});
+
+test("Buy in auto-joins table if player not already joined", () => {
+  const game = new TexasHoldem();
+
+  // Verify player is not in the game
+  assert.equal(game.getActivePlayers().length, 0);
+  assert.equal(game.getInactivePlayers().length, 0);
+
+  // Buy in without joining first - should auto-join
+  assert.equal(game.buyIn(PLAYER_1, 1000), Success);
+
+  // Verify player was added to active players
+  assert.equal(game.getActivePlayers().length, 1);
+  const player = game.getActivePlayers().find((p) => p.getId() === PLAYER_1);
+  assert(player);
+  assert.equal(player?.getChips(), 1000);
+
+  // Verify events include both welcome and buy-in messages
+  const events = game.getEvents();
+  const welcomeEvent = events.find((e) =>
+    e.getDescription().includes("Welcome to the table")
+  );
+  const buyInEvent = events.find((e) =>
+    e.getDescription().includes("Bought-in for 1000 chips")
+  );
+  assert(welcomeEvent, "Should have welcome event");
+  assert(buyInEvent, "Should have buy-in event");
 });
 
 test("Players are dealt cards correctly", () => {
