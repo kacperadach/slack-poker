@@ -311,7 +311,7 @@ export class TexasHoldem {
     this.events.push(
       new GameEvent(
         `${smallBlindPlayer.getId()} posted small blind of ${smallBlindAmount}${
-          smallBlindPlayer.getChips() === 0 ? " and went all-in!" : ""
+          smallBlindPlayer.getChips() === 0 ? " *:rotating_light: ALL-IN :rotating_light:*" : ""
         }`
       )
     );
@@ -323,7 +323,7 @@ export class TexasHoldem {
 
     this.events.push(
       new GameEvent(
-        `${bigBlindPlayer.getId()} posted big blind of ${bigBlindAmount}${bigBlindPlayer.getChips() === 0 ? " and went all-in!" : ""}`
+        `${bigBlindPlayer.getId()} posted big blind of ${bigBlindAmount}${bigBlindPlayer.getChips() === 0 ? " *:rotating_light: ALL-IN :rotating_light:*" : ""}`
       )
     );
 
@@ -1049,7 +1049,7 @@ export class TexasHoldem {
 
     this.events.push(
       new GameEvent(
-        `${playerId} ${isRaise ? "raised" : "bet"} ${roundedAmount} chips!${player.getIsAllIn() ? " and went all-in!" : ""} Total Pot: ${
+        `${playerId} ${isRaise ? "raised" : "bet"} ${roundedAmount} chips!${player.getIsAllIn() ? " *:rotating_light: ALL-IN :rotating_light:*" : ""} Total Pot: ${
           this.currentPot
         }`
       )
@@ -1135,7 +1135,7 @@ export class TexasHoldem {
     this.addToPot(callAmount);
 
     const message = player.getIsAllIn()
-      ? `${playerId} called ${this.currentBetAmount} chips and went all-in! Total Pot: ${this.currentPot}`
+      ? `${playerId} called ${this.currentBetAmount} chips *:rotating_light: ALL-IN :rotating_light:* Total Pot: ${this.currentPot}`
       : `${playerId} called ${this.currentBetAmount} chips! Total Pot: ${this.currentPot}`;
 
     this.events.push(new GameEvent(message));

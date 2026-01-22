@@ -1746,7 +1746,7 @@ export async function context(
         line += ` - ${p.lastAction}`;
       }
       if (p.isAllIn) {
-        line += " _(all-in)_";
+        line += " *:rotating_light: ALL-IN :rotating_light:*";
       }
       // Add turn indicator on the right
       if (p.isCurrentTurn) {
