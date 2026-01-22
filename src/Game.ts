@@ -537,8 +537,13 @@ export class TexasHoldem {
     if (!player) {
       player = this.inactivePlayers.find((p) => p.getId() === playerId);
       if (!player) {
-        this.events.push(new GameEvent(`${playerId} Player not found!`));
-        return "Player not found";
+        // Auto-join the table if player is not found
+        this.addPlayer(playerId);
+        player = this.activePlayers.find((p) => p.getId() === playerId);
+        if (!player) {
+          this.events.push(new GameEvent(`${playerId} Failed to join table!`));
+          return "Failed to join table";
+        }
       }
     }
 

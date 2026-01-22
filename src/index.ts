@@ -346,6 +346,12 @@ export class PokerDurableObject extends DurableObject<Env> {
     }
 
     const game = TexasHoldem.fromJson(existing);
+
+    // Check if player needs to be auto-joined (not in active or inactive players)
+    const isInActive = game.getActivePlayers().some((p) => p.getId() === data.playerId);
+    const isInInactive = game.getInactivePlayers().some((p) => p.getId() === data.playerId);
+    const needsAutoJoin = !isInActive && !isInInactive;
+
     game.buyIn(data.playerId, data.amount);
 
     const messageReceivedAction: MessageReceivedActionV1 = {
@@ -361,6 +367,20 @@ export class PokerDurableObject extends DurableObject<Env> {
       handlerKey: data.handlerKey,
     };
     this.logAction(messageReceivedAction);
+
+    // If player was auto-joined, log the join action first
+    if (needsAutoJoin) {
+      const joinAction: ActionLogEntry = {
+        schemaVersion: 1,
+        workspaceId: data.workspaceId,
+        channelId: data.channelId,
+        timestamp: Date.now(),
+        actionType: "join",
+        messageText: data.messageText,
+        playerId: data.playerId,
+      };
+      this.logAction(joinAction);
+    }
 
     const buyInAction: ActionLogEntry = {
       schemaVersion: 1,
