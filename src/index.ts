@@ -19,6 +19,7 @@ import type {
   NewGameActionV1,
   RoundStartActionV1,
 } from "./ActionLog";
+import { getHubsStockPriceMessage } from "./StockPrice";
 
 /**
  * Welcome to Cloudflare Workers! This is your first Durable Objects application.
@@ -2059,6 +2060,15 @@ export async function preDeal(
     return;
   }
 
+  // Display stock price when a hand starts via preDeal (non-blocking, graceful failure)
+  // Check if a round actually started (gameState is PreFlop)
+  if (result.game.gameState === GameState.PreFlop) {
+    const stockPriceMessage = await getHubsStockPriceMessage();
+    if (stockPriceMessage) {
+      await context.say({ text: stockPriceMessage });
+    }
+  }
+
   await sendGameStateMessages(env, context, result.game);
 }
 
@@ -2518,6 +2528,15 @@ export async function startRound(
   if (!result.ok) {
     await context.say({ text: `No game exists! Type 'New Game'` });
     return;
+  }
+
+  // Display stock price when a hand starts (non-blocking, graceful failure)
+  // Check if a round actually started (gameState is PreFlop)
+  if (result.game.gameState === GameState.PreFlop) {
+    const stockPriceMessage = await getHubsStockPriceMessage();
+    if (stockPriceMessage) {
+      await context.say({ text: stockPriceMessage });
+    }
   }
 
   await sendGameStateMessages(env, context, result.game);
