@@ -600,6 +600,11 @@ describe("Poker Durable Object", () => {
       [
         [
           {
+            "text": ":chart_with_upwards_trend: $HUBS: $319.50 (+17.18, +5.68%)",
+          },
+        ],
+        [
+          {
             "text": "Starting round with players: 
       <@user2> 1000 chips
       <@user1> 1000 chips
@@ -804,6 +809,11 @@ describe("Poker Durable Object", () => {
       [
         [
           {
+            "text": ":chart_with_upwards_trend: $HUBS: $319.50 (+17.18, +5.68%)",
+          },
+        ],
+        [
+          {
             "text": "Starting round with players: 
       <@user2> 1080 chips
       <@user1> 920 chips
@@ -927,6 +937,11 @@ describe("Poker Durable Object", () => {
     expect(gameStatePreflop.currentPot).toBe(120); // 40 SB + 80 BB
     expect(sayFn.mock.calls).toMatchInlineSnapshot(`
       [
+        [
+          {
+            "text": ":chart_with_upwards_trend: $HUBS: $319.50 (+17.18, +5.68%)",
+          },
+        ],
         [
           {
             "text": "Starting round with players: 
@@ -1281,6 +1296,11 @@ describe("Poker Durable Object", () => {
       [
         [
           {
+            "text": ":chart_with_upwards_trend: $HUBS: $319.50 (+17.18, +5.68%)",
+          },
+        ],
+        [
+          {
             "text": "Starting round with players: 
       <@player1> 300 chips
       <@player2> 300 chips
@@ -1436,6 +1456,11 @@ describe("Poker Durable Object", () => {
     // First to act preflop is alice (after BB)
     expect(sayFn.mock.calls).toMatchInlineSnapshot(`
       [
+        [
+          {
+            "text": ":chart_with_upwards_trend: $HUBS: $319.50 (+17.18, +5.68%)",
+          },
+        ],
         [
           {
             "text": "Starting round with players: 

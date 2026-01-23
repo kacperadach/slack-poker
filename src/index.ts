@@ -1555,6 +1555,7 @@ const MESSAGE_HANDLERS = {
   "lets take her to the flop": takeHerToThe,
   "lets take her to the turn": takeHerToThe,
   "lets take her to the river": takeHerToThe,
+  hubs: hubsStockPrice,
 };
 
 function cleanMessageText(messageText: string) {
@@ -1914,6 +1915,19 @@ async function drillGto(
   await context.say({
     text: `<@${context.userId}> is drilling GTO! :drill-gto:`,
   });
+}
+
+async function hubsStockPrice(
+  _env: Env,
+  context: SlackAppContextWithChannelId,
+  _payload: PostedMessage
+) {
+  const stockPriceMessage = await getHubsStockPriceMessage();
+  if (stockPriceMessage) {
+    await context.say({ text: stockPriceMessage });
+  } else {
+    await context.say({ text: "Unable to fetch HUBS stock price at this time." });
+  }
 }
 
 export async function nudgePlayer(
