@@ -840,4 +840,127 @@ test("sidepot only for loser who bet more than all-in player", () => {
   assert.equal(player3.getChips(), 180);
 });
 
+test("Hand count increments after each round", () => {
+  const game = new TexasHoldem();
+
+  assert.equal(game.getHandCount(), 0);
+
+  assert.equal(game.addPlayer(PLAYER_1), true);
+  assert.equal(game.addPlayer(PLAYER_2), true);
+  assert.equal(game.buyIn(PLAYER_1, 1000), Success);
+  assert.equal(game.buyIn(PLAYER_2, 1000), Success);
+
+  // Play first round
+  assert.equal(game.startRound(PLAYER_1), Success);
+  const currentPlayer = game.getCurrentPlayer();
+  assert(currentPlayer);
+  assert.equal(game.fold(currentPlayer.getId()), Success + ": round ended");
+
+  assert.equal(game.getHandCount(), 1);
+
+  // Play second round
+  assert.equal(game.startRound(PLAYER_1), Success);
+  const currentPlayer2 = game.getCurrentPlayer();
+  assert(currentPlayer2);
+  assert.equal(game.fold(currentPlayer2.getId()), Success + ": round ended");
+
+  assert.equal(game.getHandCount(), 2);
+});
+
+test("2-player games never shuffle player order", () => {
+  const game = new TexasHoldem();
+
+  assert.equal(game.addPlayer(PLAYER_1), true);
+  assert.equal(game.addPlayer(PLAYER_2), true);
+  assert.equal(game.buyIn(PLAYER_1, 10000), Success);
+  assert.equal(game.buyIn(PLAYER_2, 10000), Success);
+
+  // Get initial player order
+  const initialOrder = game.getActivePlayers().map((p) => p.getId());
+
+  // Play 25 rounds (more than 2 * 10 = 20) - should never shuffle with 2 players
+  for (let i = 0; i < 25; i++) {
+    assert.equal(game.startRound(PLAYER_1), Success);
+    const currentPlayer = game.getCurrentPlayer();
+    assert(currentPlayer);
+    assert.equal(game.fold(currentPlayer.getId()), Success + ": round ended");
+  }
+
+  assert.equal(game.getHandCount(), 25);
+
+  // Player order should remain the same (no shuffle for 2 players)
+  const finalOrder = game.getActivePlayers().map((p) => p.getId());
+  assert.deepEqual(initialOrder, finalOrder);
+});
+
+test("3-player games shuffle every 30 hands (numPlayers * 10)", () => {
+  const game = new TexasHoldem();
+
+  assert.equal(game.addPlayer(PLAYER_1), true);
+  assert.equal(game.addPlayer(PLAYER_2), true);
+  assert.equal(game.addPlayer(PLAYER_3), true);
+  assert.equal(game.buyIn(PLAYER_1, 100000), Success);
+  assert.equal(game.buyIn(PLAYER_2, 100000), Success);
+  assert.equal(game.buyIn(PLAYER_3, 100000), Success);
+
+  // Helper function to complete a round quickly
+  const completeRound = () => {
+    assert.equal(game.startRound(PLAYER_1), Success);
+    // Just fold to end the round quickly
+    const currentPlayer = game.getCurrentPlayer();
+    assert(currentPlayer);
+    game.fold(currentPlayer.getId());
+  };
+
+  // Play 29 rounds - no shuffle yet
+  for (let i = 0; i < 29; i++) {
+    completeRound();
+  }
+
+  assert.equal(game.getHandCount(), 29);
+
+  // Get player order before the 30th hand completes
+  const orderBefore30 = game.getActivePlayers().map((p) => p.getId());
+
+  // Play the 30th round - should trigger shuffle
+  completeRound();
+  assert.equal(game.getHandCount(), 30);
+
+  // Check that dealer position was reset to 0 after shuffle
+  // (this is part of the shuffle logic)
+  assert.equal(game.getDealerPosition(), 0);
+
+  // Check events include shuffle message
+  const events = game.getEvents();
+  const shuffleEvent = events.find(
+    (e) => e.getDescription() === "Player order has been shuffled!"
+  );
+  assert(shuffleEvent, "Should have shuffle event after 30 hands");
+});
+
+test("Hand count is serialized and deserialized correctly", () => {
+  const game = new TexasHoldem();
+
+  assert.equal(game.addPlayer(PLAYER_1), true);
+  assert.equal(game.addPlayer(PLAYER_2), true);
+  assert.equal(game.buyIn(PLAYER_1, 1000), Success);
+  assert.equal(game.buyIn(PLAYER_2, 1000), Success);
+
+  // Play a few rounds
+  for (let i = 0; i < 5; i++) {
+    assert.equal(game.startRound(PLAYER_1), Success);
+    const currentPlayer = game.getCurrentPlayer();
+    assert(currentPlayer);
+    game.fold(currentPlayer.getId());
+  }
+
+  assert.equal(game.getHandCount(), 5);
+
+  // Serialize and deserialize
+  const json = game.toJson();
+  const restoredGame = TexasHoldem.fromJson(json);
+
+  assert.equal(restoredGame.getHandCount(), 5);
+});
+
 console.log("\nTest suite complete");
