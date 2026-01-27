@@ -82,6 +82,79 @@ export class PokerDurableObject extends DurableObject<Env> {
 			CREATE INDEX IF NOT EXISTS idx_actionlog_lookup
 			ON ActionLog (workspaceId, channelId, timestamp);
 		`);
+
+    // Table to track processed messages for idempotency
+    // This prevents duplicate processing when Slack retries message delivery
+    this.sql.exec(`
+			CREATE TABLE IF NOT EXISTS ProcessedMessages (
+				workspaceId TEXT NOT NULL,
+				channelId TEXT NOT NULL,
+				messageTs TEXT NOT NULL,
+				processedAt INTEGER NOT NULL,
+				PRIMARY KEY (workspaceId, channelId, messageTs)
+			);
+		`);
+
+    // Index for cleanup queries (to delete old entries)
+    this.sql.exec(`
+			CREATE INDEX IF NOT EXISTS idx_processedmessages_cleanup
+			ON ProcessedMessages (processedAt);
+		`);
+  }
+
+  /**
+   * Try to mark a message as processed. Returns an object indicating whether
+   * this is a new message that should be processed.
+   * Uses INSERT OR IGNORE for atomic check-and-set.
+   * 
+   * Returns { isNew: true } if this message hasn't been seen before.
+   * Returns { isNew: false } if this message was already processed.
+   */
+  async tryMarkMessageProcessed(
+    workspaceId: string,
+    channelId: string,
+    messageTs: string
+  ): Promise<{ isNew: boolean }> {
+    try {
+      // Use INSERT OR IGNORE - if the message already exists, this is a no-op
+      const result = this.sql.exec(
+        `
+				INSERT OR IGNORE INTO ProcessedMessages (workspaceId, channelId, messageTs, processedAt)
+				VALUES (?, ?, ?, ?)
+			`,
+        workspaceId,
+        channelId,
+        messageTs,
+        Date.now()
+      );
+      // rowsWritten might be a bigint, so use Number() for safe comparison
+      const rowsWritten = Number(result.rowsWritten);
+      // If rowsWritten > 0, we inserted (new message). If 0, it already existed.
+      return { isNew: rowsWritten > 0 };
+    } catch (error) {
+      // If there's any error, log it and allow processing to continue
+      // (fail open to avoid blocking all messages)
+      console.error("Error in tryMarkMessageProcessed:", error);
+      return { isNew: true };
+    }
+  }
+
+  /**
+   * Clean up old processed message entries to prevent unbounded growth.
+   * Call this periodically (e.g., on each request with a random chance).
+   */
+  cleanupOldProcessedMessages(maxAgeMs: number = 24 * 60 * 60 * 1000): void {
+    try {
+      const cutoff = Date.now() - maxAgeMs;
+      this.sql.exec(
+        `
+				DELETE FROM ProcessedMessages WHERE processedAt < ?
+			`,
+        cutoff
+      );
+    } catch (error) {
+      console.error("Error cleaning up old processed messages:", error);
+    }
   }
 
   addFlop(
@@ -1585,6 +1658,34 @@ async function handleMessage(
 ) {
   if (!isPostedMessageEvent(payload)) {
     return;
+  }
+
+  // Idempotency check: prevent duplicate message processing
+  // Slack can retry message delivery, so we track which messages we've already processed
+  const messageTs = payload.ts;
+  if (messageTs && context.teamId && context.channelId) {
+    try {
+      const stub = getDurableObject(env, context);
+      const result = await stub.tryMarkMessageProcessed(
+        context.teamId,
+        context.channelId,
+        messageTs
+      );
+      if (!result.isNew) {
+        // Message was already processed, skip to prevent duplicate actions
+        console.log(`Skipping duplicate message: workspace=${context.teamId}, channel=${context.channelId}, ts=${messageTs}`);
+        return;
+      }
+
+      // Occasionally clean up old entries (1% chance per request)
+      if (Math.random() < 0.01) {
+        stub.cleanupOldProcessedMessages();
+      }
+    } catch (error) {
+      // If idempotency check fails, log and continue processing
+      // (fail open to avoid blocking all messages)
+      console.error("Idempotency check failed, continuing with message processing:", error);
+    }
   }
 
   const messageText = cleanMessageText(payload.text);
