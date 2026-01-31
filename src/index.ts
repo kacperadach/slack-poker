@@ -100,16 +100,6 @@ export class PokerDurableObject extends DurableObject<Env> {
 			CREATE INDEX IF NOT EXISTS idx_processedmessages_cleanup
 			ON ProcessedMessages (processedAt);
 		`);
-
-    // Table to store per-channel settings (e.g., command whitelist mode)
-    this.sql.exec(`
-			CREATE TABLE IF NOT EXISTS ChannelSettings (
-				workspaceId TEXT NOT NULL,
-				channelId TEXT NOT NULL,
-				hubsOnlyMode INTEGER NOT NULL DEFAULT 0,
-				PRIMARY KEY (workspaceId, channelId)
-			);
-		`);
   }
 
   /**
@@ -175,45 +165,6 @@ export class PokerDurableObject extends DurableObject<Env> {
 			DELETE FROM ProcessedMessages WHERE processedAt < ?
 		`,
       cutoff
-    );
-  }
-
-  /**
-   * Check if "hubs only" mode is enabled for a channel.
-   * When enabled, only the HUBS command is allowed.
-   */
-  isHubsOnlyMode(workspaceId: string, channelId: string): boolean {
-    const result = this.sql.exec(
-      `
-			SELECT hubsOnlyMode FROM ChannelSettings
-			WHERE workspaceId = ? AND channelId = ?
-			LIMIT 1
-		`,
-      workspaceId,
-      channelId
-    );
-    const row = result.one();
-    return row ? (row.hubsOnlyMode as number) === 1 : false;
-  }
-
-  /**
-   * Enable or disable "hubs only" mode for a channel.
-   */
-  setHubsOnlyMode(
-    workspaceId: string,
-    channelId: string,
-    enabled: boolean
-  ): void {
-    this.sql.exec(
-      `
-			INSERT INTO ChannelSettings (workspaceId, channelId, hubsOnlyMode)
-			VALUES (?, ?, ?)
-			ON CONFLICT(workspaceId, channelId) DO UPDATE SET
-				hubsOnlyMode = excluded.hubsOnlyMode
-		`,
-      workspaceId,
-      channelId,
-      enabled ? 1 : 0
     );
   }
 
@@ -1689,8 +1640,6 @@ const MESSAGE_HANDLERS = {
   "lets take her to the turn": takeHerToThe,
   "lets take her to the river": takeHerToThe,
   hubs: hubsStockPrice,
-  "hubs only": enableHubsOnlyMode,
-  "all commands": disableHubsOnlyMode,
 };
 
 function cleanMessageText(messageText: string) {
@@ -1751,22 +1700,8 @@ async function handleMessage(
     return;
   }
 
-  // Check if "hubs only" mode is enabled for this channel
-  // When enabled, only allow: hubs, hubs only, all commands
-  const stub = getDurableObject(env, context);
-  const hubsOnlyMode = await stub.isHubsOnlyMode(context.teamId!, context.channelId);
-
-  // Commands allowed when in "hubs only" mode
-  const HUBS_ONLY_WHITELIST = ["hubs", "hubs only", "all commands"];
-
   for (const [key, handler] of Object.entries(MESSAGE_HANDLERS)) {
     if (messageText.startsWith(key)) {
-      // Check if we're in "hubs only" mode and this command is not whitelisted
-      if (hubsOnlyMode && !HUBS_ONLY_WHITELIST.includes(key)) {
-        // Silently ignore non-whitelisted commands
-        return;
-      }
-
       const meta: HandlerMeta = {
         normalizedText: messageText,
         handlerKey: key,
@@ -1775,6 +1710,7 @@ async function handleMessage(
         timestamp: Date.now(),
       };
       if (handler !== newGame && handler !== joinGame && handler !== buyIn) {
+        const stub = getDurableObject(env, context);
         const messageAction: MessageReceivedActionV1 = {
           schemaVersion: 1,
           workspaceId: context.teamId!,
@@ -2098,30 +2034,6 @@ async function hubsStockPrice(
   } else {
     await context.say({ text: "Unable to fetch HUBS stock price at this time." });
   }
-}
-
-async function enableHubsOnlyMode(
-  env: Env,
-  context: SlackAppContextWithChannelId,
-  _payload: PostedMessage
-) {
-  const stub = getDurableObject(env, context);
-  stub.setHubsOnlyMode(context.teamId!, context.channelId, true);
-  await context.say({
-    text: ":lock: HUBS only mode enabled for this channel. Only the HUBS command will work until 'all commands' is typed.",
-  });
-}
-
-async function disableHubsOnlyMode(
-  env: Env,
-  context: SlackAppContextWithChannelId,
-  _payload: PostedMessage
-) {
-  const stub = getDurableObject(env, context);
-  stub.setHubsOnlyMode(context.teamId!, context.channelId, false);
-  await context.say({
-    text: ":unlock: All commands are now enabled for this channel.",
-  });
 }
 
 export async function nudgePlayer(
