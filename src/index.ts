@@ -1696,6 +1696,7 @@ const MESSAGE_HANDLERS = {
   "hubs only": enableHubsOnlyMode,
   "all commands": disableHubsOnlyMode,
   hubs: hubsStockPrice,
+  gyvs: hubsStockPrice,
 };
 
 function cleanMessageText(messageText: string) {
@@ -1762,7 +1763,7 @@ async function handleMessage(
   const hubsOnlyMode = await stub.isHubsOnlyMode(context.teamId!, context.channelId);
 
   // Commands allowed when in "hubs only" mode
-  const HUBS_ONLY_WHITELIST = ["hubs", "hubs only", "all commands"];
+  const HUBS_ONLY_WHITELIST = ["hubs", "hubs only", "all commands", "gyvs"];
 
   for (const [key, handler] of Object.entries(MESSAGE_HANDLERS)) {
     if (messageText.startsWith(key)) {
