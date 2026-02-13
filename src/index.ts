@@ -1621,6 +1621,7 @@ const MESSAGE_HANDLERS = {
   rank: getGameState,
   help: help,
   poke: nudgePlayer,
+  "silent poke": silentNudgePlayer,
   "it'll be a poke for me": nudgePlayer,
   seppuku: commitSeppuku,
   ":phone:": call,
@@ -2157,6 +2158,41 @@ export async function nudgePlayer(
 
   await context.say({
     text: `<@${currentPlayer.getId()}> it's your turn and you need to roll!`,
+  });
+}
+
+export async function silentNudgePlayer(
+  env: Env,
+  context: SlackAppContextWithChannelId,
+  _payload: PostedMessage
+) {
+  const game = await fetchGame(env, context);
+  if (!game) {
+    await context.say({ text: `No game exists! Type 'New Game'` });
+    return;
+  }
+
+  if (game.getGameState() === GameState.WaitingForPlayers) {
+    await context.say({
+      text: "Game has not started yet! Who the hell am I going to nudge?",
+    });
+    return;
+  }
+
+  const currentPlayer = game.getCurrentPlayer();
+  if (!currentPlayer) {
+    await context.say({
+      text: "No current player which means the code is ASS",
+    });
+    return;
+  }
+
+  // Get display name without tagging - very very quietly
+  const playerId = currentPlayer.getId();
+  const displayName = userIdToName[playerId as keyof typeof userIdToName] || playerId;
+  
+  await context.say({
+    text: `^${displayName.toLowerCase()}^ ... ᶦᵗ'ˢ ʸᵒᵘʳ ᵗᵘʳⁿ`,
   });
 }
 
