@@ -1624,7 +1624,9 @@ const MESSAGE_HANDLERS = {
   help: help,
   poke: nudgePlayer,
   "silent poke": silentNudgePlayer,
+  "loud poke": loudNudgePlayer,
   "it'll be a poke for me": nudgePlayer,
+  "it'll be a loud poke for me": loudNudgePlayer,
   seppuku: commitSeppuku,
   ":phone:": call,
   chexk: check,
@@ -1647,6 +1649,7 @@ const MESSAGE_HANDLERS = {
   "i choose to see my dards": showCards,
   "i choose to cut my trash hand": fold,
   "i choose to poke": nudgePlayer,
+  "i choose to loud poke": loudNudgePlayer,
   "its going to be a call for me": call,
   "itll be a call for me": call,
   "its gonna be a call for me": call,
@@ -1676,6 +1679,7 @@ const MESSAGE_HANDLERS = {
   "im gonna go ahead and donk": bet,
   "im gonna go ahead and call": call,
   "im gonna go ahead and poke": nudgePlayer,
+  "im gonna go ahead and loud poke": loudNudgePlayer,
   "drill gto": drillGto,
   "i choose to drill gto": drillGto,
   donk: bet,
@@ -2195,6 +2199,37 @@ export async function silentNudgePlayer(
   
   await context.say({
     text: `^${displayName.toLowerCase()}^ ... ᶦᵗ'ˢ ʸᵒᵘʳ ᵗᵘʳⁿ`,
+  });
+}
+
+export async function loudNudgePlayer(
+  env: Env,
+  context: SlackAppContextWithChannelId,
+  _payload: PostedMessage
+) {
+  const game = await fetchGame(env, context);
+  if (!game) {
+    await context.say({ text: `No game exists! Type 'New Game'` });
+    return;
+  }
+
+  if (game.getGameState() === GameState.WaitingForPlayers) {
+    await context.say({
+      text: ":rotating_light::rotating_light::rotating_light: GAME HAS NOT STARTED YET! WHO THE HELL AM I GOING TO NUDGE?! :rotating_light::rotating_light::rotating_light:",
+    });
+    return;
+  }
+
+  const currentPlayer = game.getCurrentPlayer();
+  if (!currentPlayer) {
+    await context.say({
+      text: ":rotating_light::rotating_light::rotating_light: NO CURRENT PLAYER WHICH MEANS THE CODE IS ASS :rotating_light::rotating_light::rotating_light:",
+    });
+    return;
+  }
+
+  await context.say({
+    text: `:rotating_light::rotating_light::rotating_light: <@${currentPlayer.getId()}> :rotating_light::rotating_light::rotating_light:\n:mega::mega::mega: *IT'S YOUR TURN AND YOU NEED TO ROLL RIGHT NOW!!!* :mega::mega::mega:\n:alarm_clock: HELLO??? WE'RE ALL WAITING!!! :alarm_clock:`,
   });
 }
 
