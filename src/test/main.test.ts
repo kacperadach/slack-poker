@@ -5,12 +5,12 @@ import { describe, it, expect, vi, beforeAll, afterAll } from "vitest";
 vi.mock("../StockPrice", () => ({
   fetchStockPrice: vi.fn().mockResolvedValue({
     symbol: "HUBS",
-    price: 650.0,
-    change: 5.25,
-    changePercent: 0.81,
+    price: 1000.0,
+    change: 10.0,
+    changePercent: 1.0,
   }),
-  formatStockPrice: vi.fn().mockReturnValue(":chart_with_upwards_trend: $HUBS: $650.00 (+5.25, +0.81%)"),
-  getHubsStockPriceMessage: vi.fn().mockResolvedValue(":chart_with_upwards_trend: $HUBS: $650.00 (+5.25, +0.81%)"),
+  formatStockPrice: vi.fn().mockReturnValue(":chart_with_upwards_trend: $HUBS: $1,000.00 (+10.00, +1.00%)"),
+  getHubsStockPriceMessage: vi.fn().mockResolvedValue(":chart_with_upwards_trend: $HUBS: $1,000.00 (+10.00, +1.00%)"),
 }));
 import { GameState, TexasHoldem } from "../Game";
 import {
@@ -612,7 +612,7 @@ describe("Poker Durable Object", () => {
       [
         [
           {
-            "text": ":chart_with_upwards_trend: $HUBS: $650.00 (+5.25, +0.81%)",
+            "text": ":chart_with_upwards_trend: $HUBS: $1,000.00 (+10.00, +1.00%)",
           },
         ],
         [
@@ -821,7 +821,7 @@ describe("Poker Durable Object", () => {
       [
         [
           {
-            "text": ":chart_with_upwards_trend: $HUBS: $650.00 (+5.25, +0.81%)",
+            "text": ":chart_with_upwards_trend: $HUBS: $1,000.00 (+10.00, +1.00%)",
           },
         ],
         [
@@ -951,7 +951,7 @@ describe("Poker Durable Object", () => {
       [
         [
           {
-            "text": ":chart_with_upwards_trend: $HUBS: $650.00 (+5.25, +0.81%)",
+            "text": ":chart_with_upwards_trend: $HUBS: $1,000.00 (+10.00, +1.00%)",
           },
         ],
         [
@@ -1308,7 +1308,7 @@ describe("Poker Durable Object", () => {
       [
         [
           {
-            "text": ":chart_with_upwards_trend: $HUBS: $650.00 (+5.25, +0.81%)",
+            "text": ":chart_with_upwards_trend: $HUBS: $1,000.00 (+10.00, +1.00%)",
           },
         ],
         [
@@ -1470,7 +1470,7 @@ describe("Poker Durable Object", () => {
       [
         [
           {
-            "text": ":chart_with_upwards_trend: $HUBS: $650.00 (+5.25, +0.81%)",
+            "text": ":chart_with_upwards_trend: $HUBS: $1,000.00 (+10.00, +1.00%)",
           },
         ],
         [
