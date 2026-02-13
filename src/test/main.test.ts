@@ -1,5 +1,17 @@
 import { env, runInDurableObject } from "cloudflare:test";
 import { describe, it, expect, vi, beforeAll, afterAll } from "vitest";
+
+// Mock the stock price module to return consistent values in tests
+vi.mock("../StockPrice", () => ({
+  fetchStockPrice: vi.fn().mockResolvedValue({
+    symbol: "HUBS",
+    price: 1000.0,
+    change: 10.0,
+    changePercent: 1.0,
+  }),
+  formatStockPrice: vi.fn().mockReturnValue(":chart_with_upwards_trend: $HUBS: $1,000.00 (+10.00, +1.00%)"),
+  getHubsStockPriceMessage: vi.fn().mockResolvedValue(":chart_with_upwards_trend: $HUBS: $1,000.00 (+10.00, +1.00%)"),
+}));
 import { GameState, TexasHoldem } from "../Game";
 import {
   buyIn,
@@ -600,7 +612,7 @@ describe("Poker Durable Object", () => {
       [
         [
           {
-            "text": ":chart_with_upwards_trend: $HUBS: $248.20 (+19.25, +8.41%)",
+            "text": ":chart_with_upwards_trend: $HUBS: $1,000.00 (+10.00, +1.00%)",
           },
         ],
         [
@@ -809,7 +821,7 @@ describe("Poker Durable Object", () => {
       [
         [
           {
-            "text": ":chart_with_upwards_trend: $HUBS: $248.20 (+19.25, +8.41%)",
+            "text": ":chart_with_upwards_trend: $HUBS: $1,000.00 (+10.00, +1.00%)",
           },
         ],
         [
@@ -939,7 +951,7 @@ describe("Poker Durable Object", () => {
       [
         [
           {
-            "text": ":chart_with_upwards_trend: $HUBS: $248.20 (+19.25, +8.41%)",
+            "text": ":chart_with_upwards_trend: $HUBS: $1,000.00 (+10.00, +1.00%)",
           },
         ],
         [
@@ -1296,7 +1308,7 @@ describe("Poker Durable Object", () => {
       [
         [
           {
-            "text": ":chart_with_upwards_trend: $HUBS: $248.20 (+19.25, +8.41%)",
+            "text": ":chart_with_upwards_trend: $HUBS: $1,000.00 (+10.00, +1.00%)",
           },
         ],
         [
@@ -1458,7 +1470,7 @@ describe("Poker Durable Object", () => {
       [
         [
           {
-            "text": ":chart_with_upwards_trend: $HUBS: $248.20 (+19.25, +8.41%)",
+            "text": ":chart_with_upwards_trend: $HUBS: $1,000.00 (+10.00, +1.00%)",
           },
         ],
         [
