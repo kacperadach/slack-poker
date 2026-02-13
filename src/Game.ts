@@ -1507,7 +1507,8 @@ export class TexasHoldem {
   public showCards(
     playerId: string,
     reveal: boolean = false,
-    showCommunityCards: boolean = true
+    showCommunityCards: boolean = true,
+    showPlayerCards: boolean = true
   ): void {
     let player = this.activePlayers.find((p) => p.getId() === playerId);
 
@@ -1554,7 +1555,12 @@ export class TexasHoldem {
       );
     }
 
-    this.events.push(new GameEvent(message, cards, !reveal, playerId));
+    // When showPlayerCards is false, don't include the cards in the event (for cardless reveal)
+    if (showPlayerCards) {
+      this.events.push(new GameEvent(message, cards, !reveal, playerId));
+    } else {
+      this.events.push(new GameEvent(message, [], !reveal, playerId));
+    }
   }
 
   public getGameStateEvent(): void {

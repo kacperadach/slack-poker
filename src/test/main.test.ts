@@ -600,7 +600,7 @@ describe("Poker Durable Object", () => {
       [
         [
           {
-            "text": ":chart_with_downwards_trend: $HUBS: $319.66 (-9.33, -2.84%)",
+            "text": ":chart_with_upwards_trend: $HUBS: $248.20 (+19.25, +8.41%)",
           },
         ],
         [
@@ -809,7 +809,7 @@ describe("Poker Durable Object", () => {
       [
         [
           {
-            "text": ":chart_with_downwards_trend: $HUBS: $319.66 (-9.33, -2.84%)",
+            "text": ":chart_with_upwards_trend: $HUBS: $248.20 (+19.25, +8.41%)",
           },
         ],
         [
@@ -939,7 +939,7 @@ describe("Poker Durable Object", () => {
       [
         [
           {
-            "text": ":chart_with_downwards_trend: $HUBS: $319.66 (-9.33, -2.84%)",
+            "text": ":chart_with_upwards_trend: $HUBS: $248.20 (+19.25, +8.41%)",
           },
         ],
         [
@@ -1296,7 +1296,7 @@ describe("Poker Durable Object", () => {
       [
         [
           {
-            "text": ":chart_with_downwards_trend: $HUBS: $319.66 (-9.33, -2.84%)",
+            "text": ":chart_with_upwards_trend: $HUBS: $248.20 (+19.25, +8.41%)",
           },
         ],
         [
@@ -1458,7 +1458,7 @@ describe("Poker Durable Object", () => {
       [
         [
           {
-            "text": ":chart_with_downwards_trend: $HUBS: $319.66 (-9.33, -2.84%)",
+            "text": ":chart_with_upwards_trend: $HUBS: $248.20 (+19.25, +8.41%)",
           },
         ],
         [
