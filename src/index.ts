@@ -1617,6 +1617,8 @@ const MESSAGE_HANDLERS = {
   "pre-bet": preBet,
   cards: showCards,
   dards: showCards,
+  "reveal dardless": revealCardsCardless,
+  "reveal cardless": revealCardsCardless,
   reveal: revealCards,
   rank: getGameState,
   help: help,
@@ -2275,6 +2277,28 @@ export async function revealCards(
   }
 
   game.showCards(context.userId!, true);
+  await sendGameEventMessages(env, context, game);
+}
+
+export async function revealCardsCardless(
+  env: Env,
+  context: SlackAppContextWithChannelId,
+  _payload: PostedMessage
+) {
+  const game = await fetchGame(env, context);
+  if (!game) {
+    await context.say({ text: `No game exists! Type 'New Game'` });
+    return;
+  }
+  if (game.getGameState() !== GameState.WaitingForPlayers) {
+    await context.say({
+      text: `<@${context.userId}> :narp-brain: Nice try bud`,
+    });
+    return;
+  }
+
+  // Reveal hand description only, without showing the actual cards
+  game.showCards(context.userId!, true, true, false);
   await sendGameEventMessages(env, context, game);
 }
 
