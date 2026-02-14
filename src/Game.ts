@@ -1169,6 +1169,43 @@ export class TexasHoldem {
     }
   }
 
+  public allIn(playerId: string): string {
+    if (this.gameState === GameState.WaitingForPlayers) {
+      this.events.push(
+        new GameEvent(`${playerId} Cannot go all-in, game is not active!`)
+      );
+      return "Cannot go all-in, game is not active";
+    }
+
+    const player = this.getCurrentPlayer();
+    if (!player || player.getId() !== playerId) {
+      this.events.push(
+        new GameEvent(`${playerId} Cannot go all-in, not your turn!`)
+      );
+      return "Not your turn to go all-in";
+    }
+
+    const playerChips = player.getChips();
+    if (playerChips <= 0) {
+      this.events.push(
+        new GameEvent(`${playerId} Cannot go all-in, you have no chips!`)
+      );
+      return "No chips to go all-in with";
+    }
+
+    // Calculate what amount the all-in would be
+    const allInAmount = player.getCurrentBet() + playerChips;
+
+    // Use bet if we're raising, otherwise use call logic
+    if (allInAmount > this.currentBetAmount) {
+      // Going all-in as a bet/raise
+      return this.bet(playerId, allInAmount);
+    } else {
+      // Going all-in as a call (can't cover the full bet)
+      return this.call(playerId);
+    }
+  }
+
   private handleSidePots(): void {
     // Get active players who haven't folded
     const activeNonFoldedPlayers = this.activePlayers.filter(
