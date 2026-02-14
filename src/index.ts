@@ -768,6 +768,64 @@ export class PokerDurableObject extends DurableObject<Env> {
     return { ok: true, game: game.getState() };
   }
 
+  async allInWithAction(data: {
+    workspaceId: string;
+    channelId: string;
+    playerId: string;
+    messageText: string;
+    normalizedText: string;
+    handlerKey: string;
+    slackMessageTs: string;
+    timestamp: number;
+  }): Promise<
+    | { ok: true; game: ReturnType<TexasHoldem["getState"]> }
+    | { ok: false; reason: "no_game" }
+  > {
+    const existing = await this.fetchGame(data.workspaceId, data.channelId);
+    if (!existing) {
+      return { ok: false, reason: "no_game" };
+    }
+
+    const game = TexasHoldem.fromJson(existing);
+    const player = game.getCurrentPlayer();
+    const allInAmount = player ? player.getCurrentBet() + player.getChips() : 0;
+    game.allIn(data.playerId);
+
+    const messageReceivedAction: MessageReceivedActionV1 = {
+      schemaVersion: 1,
+      workspaceId: data.workspaceId,
+      channelId: data.channelId,
+      timestamp: data.timestamp,
+      actionType: "message_received",
+      messageText: data.messageText,
+      playerId: data.playerId,
+      slackMessageTs: data.slackMessageTs,
+      normalizedText: data.normalizedText,
+      handlerKey: data.handlerKey,
+    };
+    this.logAction(messageReceivedAction);
+
+    const allInAction: ActionLogEntry = {
+      schemaVersion: 1,
+      workspaceId: data.workspaceId,
+      channelId: data.channelId,
+      timestamp: Date.now(),
+      actionType: "all_in",
+      messageText: data.messageText,
+      playerId: data.playerId,
+      amount: allInAmount,
+    };
+
+    this.saveGameWithAction(
+      data.workspaceId,
+      data.channelId,
+      JSON.stringify(game.toJson()),
+      allInAction
+    );
+
+    return { ok: true, game: game.getState() };
+  }
+
   async startRoundWithAction(data: {
     workspaceId: string;
     channelId: string;
@@ -1607,6 +1665,9 @@ const MESSAGE_HANDLERS = {
   check: check,
   call: call,
   bet: bet,
+  "all in": allIn,
+  "all-in": allIn,
+  allin: allIn,
   precheck: preCheck,
   "pre-check": preCheck,
   prefold: preFold,
@@ -1634,6 +1695,10 @@ const MESSAGE_HANDLERS = {
   "i choose to check": check,
   "i choose to fold": fold,
   "i choose to bet": bet,
+  "i choose to all in": allIn,
+  "i choose to all-in": allIn,
+  "i choose to go all in": allIn,
+  "i choose to go all-in": allIn,
   "i choose to pre-check": preCheck,
   "i choose to precheck": preCheck,
   "i choose to pre-fold": preFold,
@@ -1678,6 +1743,8 @@ const MESSAGE_HANDLERS = {
   "im gonna go ahead and prebet": preBet,
   "im gonna go ahead and donk": bet,
   "im gonna go ahead and call": call,
+  "im gonna go ahead and all in": allIn,
+  "im gonna go ahead and go all in": allIn,
   "im gonna go ahead and poke": nudgePlayer,
   "im gonna go ahead and loud poke": loudNudgePlayer,
   "drill gto": drillGto,
@@ -2680,6 +2747,39 @@ export async function call(
   const timestamp = meta?.timestamp ?? Date.now();
 
   const result = await stub.callWithAction({
+    workspaceId: context.teamId!,
+    channelId: context.channelId,
+    playerId: context.userId!,
+    messageText: rawMessageText,
+    normalizedText,
+    handlerKey,
+    slackMessageTs,
+    timestamp,
+  });
+
+  if (!result.ok) {
+    await context.say({ text: `No game exists! Type 'New Game'` });
+    return;
+  }
+
+  await sendGameStateMessages(env, context, result.game);
+}
+
+export async function allIn(
+  env: Env,
+  context: SlackAppContextWithChannelId,
+  payload: PostedMessage,
+  meta?: HandlerMeta
+) {
+  const stub = getDurableObject(env, context);
+  const rawMessageText = meta?.messageText ?? payload.text ?? "";
+  const normalizedText =
+    meta?.normalizedText ?? cleanMessageText(rawMessageText);
+  const handlerKey = meta?.handlerKey ?? "all in";
+  const slackMessageTs = meta?.slackMessageTs ?? payload.ts ?? "";
+  const timestamp = meta?.timestamp ?? Date.now();
+
+  const result = await stub.allInWithAction({
     workspaceId: context.teamId!,
     channelId: context.channelId,
     playerId: context.userId!,

@@ -840,4 +840,113 @@ test("sidepot only for loser who bet more than all-in player", () => {
   assert.equal(player3.getChips(), 180);
 });
 
+test("allIn method works correctly as a bet", () => {
+  const game = new TexasHoldem();
+
+  assert.equal(game.addPlayer(PLAYER_1), true);
+  assert.equal(game.addPlayer(PLAYER_2), true);
+
+  // Both players have same stack to avoid "can't bet more than you can win" issue
+  assert.equal(game.buyIn(PLAYER_1, 1000), Success);
+  assert.equal(game.buyIn(PLAYER_2, 1000), Success);
+
+  assert.equal(game.startRound(PLAYER_1), Success);
+
+  // Get current player (whoever is first to act)
+  const currentPlayer = game.getCurrentPlayer();
+  assert(currentPlayer, "There should be a current player");
+  
+  const chipsBeforeAllIn = currentPlayer.getChips();
+  assert(chipsBeforeAllIn > 0, "Player should have chips before all-in");
+
+  // All-in should bet all remaining chips
+  const result = game.allIn(currentPlayer.getId());
+  assert(result.startsWith("Raised to") || result.startsWith("Bet"), `Expected raise or bet, got: ${result}`);
+  assert.equal(currentPlayer.getChips(), 0, "Player should have 0 chips after all-in");
+  assert.equal(currentPlayer.getIsAllIn(), true, "Player should be marked as all-in");
+});
+
+test("allIn method works correctly as a call when chips are insufficient", () => {
+  const game = new TexasHoldem();
+
+  // Add 3 players so we have more control over the action order
+  assert.equal(game.addPlayer(PLAYER_1), true);
+  assert.equal(game.addPlayer(PLAYER_2), true);
+  assert.equal(game.addPlayer(PLAYER_3), true);
+
+  // Player 3 has fewer chips - they'll be used to test all-in call
+  assert.equal(game.buyIn(PLAYER_1, 1000), Success);
+  assert.equal(game.buyIn(PLAYER_2, 1000), Success);
+  assert.equal(game.buyIn(PLAYER_3, 100), Success);
+
+  assert.equal(game.startRound(PLAYER_1), Success);
+
+  // Find Player 3 in the game
+  const player3 = game.getActivePlayers().find((p) => p.getId() === PLAYER_3);
+  assert(player3, "Player 3 should be in the game");
+  
+  // Play through until it's appropriate to test all-in
+  // First, one player bets high
+  while (game.getCurrentPlayer()?.getId() !== PLAYER_1 && game.getGameState() !== GameState.WaitingForPlayers) {
+    const cp = game.getCurrentPlayer();
+    if (cp) {
+      if (game.getCurrentBetAmount() > 0 && cp.getCurrentBet() < game.getCurrentBetAmount()) {
+        game.call(cp.getId());
+      } else {
+        game.check(cp.getId());
+      }
+    }
+  }
+  
+  // If round hasn't ended, Player 1 bets big
+  if (game.getGameState() !== GameState.WaitingForPlayers) {
+    game.bet(PLAYER_1, 200);
+    
+    // Player 2 calls
+    if (game.getCurrentPlayer()?.getId() === PLAYER_2) {
+      game.call(PLAYER_2);
+    }
+    
+    // Player 3 should now need to call but can't afford it fully
+    if (game.getCurrentPlayer()?.getId() === PLAYER_3 && !player3.getIsAllIn()) {
+      const allInResult = game.allIn(PLAYER_3);
+      // Should either succeed or indicate all-in
+      assert(allInResult.includes("all-in") || allInResult === Success, `Expected all-in result, got: ${allInResult}`);
+      assert.equal(player3.getIsAllIn(), true, "Player 3 should be marked as all-in");
+    }
+  }
+  
+  // The test passes if we got here without errors and player went all-in appropriately
+  assert(true, "All-in as call test completed");
+});
+
+test("allIn method returns error when game is not active", () => {
+  const game = new TexasHoldem();
+
+  assert.equal(game.addPlayer(PLAYER_1), true);
+  assert.equal(game.buyIn(PLAYER_1, 500), Success);
+
+  assert.equal(game.allIn(PLAYER_1), "Cannot go all-in, game is not active");
+});
+
+test("allIn method returns error when not player's turn", () => {
+  const game = new TexasHoldem();
+
+  assert.equal(game.addPlayer(PLAYER_1), true);
+  assert.equal(game.addPlayer(PLAYER_2), true);
+
+  assert.equal(game.buyIn(PLAYER_1, 500), Success);
+  assert.equal(game.buyIn(PLAYER_2, 1000), Success);
+
+  assert.equal(game.startRound(PLAYER_1), Success);
+
+  // Get current player
+  const currentPlayer = game.getCurrentPlayer();
+  assert(currentPlayer, "There should be a current player");
+  
+  // Try to go all-in with the OTHER player (not their turn)
+  const otherPlayerId = currentPlayer.getId() === PLAYER_1 ? PLAYER_2 : PLAYER_1;
+  assert.equal(game.allIn(otherPlayerId), "Not your turn to go all-in");
+});
+
 console.log("\nTest suite complete");

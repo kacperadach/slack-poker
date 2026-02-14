@@ -148,6 +148,15 @@ export interface FoldActionV1 extends ActionLogBase {
   playerId: string;
 }
 
+export interface AllInActionV1 extends ActionLogBase {
+  actionType: "all_in";
+  schemaVersion: 1;
+  /** Player going all-in */
+  playerId: string;
+  /** All-in amount */
+  amount: number;
+}
+
 // =============================================================================
 // Utility Actions
 // =============================================================================
@@ -185,6 +194,7 @@ export type ActionLogEntry =
   | CallActionV1
   | CheckActionV1
   | FoldActionV1
+  | AllInActionV1
   // Utility
   | MessageReceivedActionV1;
 
@@ -197,8 +207,8 @@ export type ActionType = ActionLogEntry["actionType"];
 
 export function isPlayerAction(
   action: ActionLogEntry
-): action is BetActionV1 | CallActionV1 | CheckActionV1 | FoldActionV1 {
-  return ["bet", "call", "check", "fold"].includes(action.actionType);
+): action is BetActionV1 | CallActionV1 | CheckActionV1 | FoldActionV1 | AllInActionV1 {
+  return ["bet", "call", "check", "fold", "all_in"].includes(action.actionType);
 }
 
 export function isPlayerManagementAction(
@@ -249,6 +259,10 @@ export function isCheck(action: ActionLike): action is CheckActionV1 {
 
 export function isFold(action: ActionLike): action is FoldActionV1 {
   return action.actionType === "fold";
+}
+
+export function isAllIn(action: ActionLike): action is AllInActionV1 {
+  return action.actionType === "all_in";
 }
 
 export function isMessageReceived(
@@ -317,6 +331,12 @@ export function assertFold(action: ActionLike): FoldActionV1 {
   return action;
 }
 
+export function assertAllIn(action: ActionLike): AllInActionV1 {
+  if (!isAllIn(action))
+    throw new Error(`Expected all_in, got ${action.actionType}`);
+  return action;
+}
+
 export function assertMessageReceived(
   action: ActionLike
 ): MessageReceivedActionV1 {
@@ -358,5 +378,6 @@ export const ALL_ACTION_TYPES: ActionType[] = [
   "call",
   "check",
   "fold",
+  "all_in",
   "message_received",
 ];
