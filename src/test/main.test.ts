@@ -55,6 +55,7 @@ import {
   assertCheck,
   assertFold,
 } from "../ActionLog";
+import { buildShowdownWinPercentageMessage } from "../ShowdownWinPercentage";
 
 async function getActionLogSnapshot(
   stub: DurableObjectStub,
@@ -4322,6 +4323,137 @@ describe("Poker Durable Object", () => {
 
       *Community Cards:* None yet"
     `);
+  });
+
+  it("builds showdown win percentage message from API responses", async () => {
+    const winPctByCommunityCount: Record<
+      number,
+      { seats: Array<{ position: string; win_pct: string }> }
+    > = {
+      0: {
+        seats: [
+          { position: "1", win_pct: "60.00" },
+          { position: "2", win_pct: "40.00" },
+        ],
+      },
+      3: {
+        seats: [
+          { position: "1", win_pct: "65.00" },
+          { position: "2", win_pct: "35.00" },
+        ],
+      },
+      4: {
+        seats: [
+          { position: "1", win_pct: "72.00" },
+          { position: "2", win_pct: "28.00" },
+        ],
+      },
+      5: {
+        seats: [
+          { position: "1", win_pct: "100.00" },
+          { position: "2", win_pct: "0.00" },
+        ],
+      },
+    };
+
+    const mockFetch = vi.fn(async (input: RequestInfo | URL) => {
+      const requestUrl =
+        typeof input === "string"
+          ? input
+          : input instanceof URL
+            ? input.toString()
+            : input.url;
+      const url = new URL(requestUrl);
+      const communityCount = url.searchParams.getAll("community_cards[]").length;
+      const payload = winPctByCommunityCount[communityCount] ?? { seats: [] };
+      return new Response(JSON.stringify(payload), {
+        status: 200,
+        headers: { "content-type": "application/json" },
+      });
+    });
+
+    const message = await buildShowdownWinPercentageMessage(
+      {
+        activePlayers: [
+          {
+            id: "player1",
+            cards: [
+              { rank: "A", suit: "Hearts" },
+              { rank: "K", suit: "Hearts" },
+            ],
+          },
+          {
+            id: "player2",
+            cards: [
+              { rank: "5", suit: "Spades" },
+              { rank: "4", suit: "Spades" },
+            ],
+          },
+        ],
+        foldedPlayers: [],
+        communityCards: [
+          { rank: "2", suit: "Clubs" },
+          { rank: "7", suit: "Diamonds" },
+          { rank: "9", suit: "Hearts" },
+          { rank: "Q", suit: "Clubs" },
+          { rank: "A", suit: "Spades" },
+        ],
+      },
+      [
+        { description: "Community Cards:" },
+        { description: "player1 had Two Pair" },
+        { description: "player2 had One Pair" },
+        { description: "Main pot of 160 won by: player1" },
+      ],
+      mockFetch as unknown as typeof fetch
+    );
+
+    expect(mockFetch).toHaveBeenCalledTimes(4);
+    expect(message).toContain("*Showdown Win Percentage*");
+    expect(message).toContain(
+      "<@player1> - Pre-flop: 60.00% | Flop: 65.00% | Turn: 72.00% | River: 100.00%"
+    );
+    expect(message).toContain(
+      "<@player2> - Pre-flop: 40.00% | Flop: 35.00% | Turn: 28.00% | River: 0.00%"
+    );
+  });
+
+  it("returns null for non-showdown event sets", async () => {
+    const mockFetch = vi.fn();
+
+    const message = await buildShowdownWinPercentageMessage(
+      {
+        activePlayers: [
+          {
+            id: "player1",
+            cards: [
+              { rank: "A", suit: "Hearts" },
+              { rank: "K", suit: "Hearts" },
+            ],
+          },
+          {
+            id: "player2",
+            cards: [
+              { rank: "5", suit: "Spades" },
+              { rank: "4", suit: "Spades" },
+            ],
+          },
+        ],
+        foldedPlayers: ["player2"],
+        communityCards: [
+          { rank: "2", suit: "Clubs" },
+          { rank: "7", suit: "Diamonds" },
+          { rank: "9", suit: "Hearts" },
+          { rank: "Q", suit: "Clubs" },
+          { rank: "A", suit: "Spades" },
+        ],
+      },
+      [{ description: "player2 folded!" }],
+      mockFetch as unknown as typeof fetch
+    );
+
+    expect(message).toBeNull();
+    expect(mockFetch).not.toHaveBeenCalled();
   });
 });
 
