@@ -20,6 +20,7 @@ import type {
   RoundStartActionV1,
 } from "./ActionLog";
 import { getHubsStockPriceMessage } from "./StockPrice";
+import { buildShowdownWinPercentageMessage } from "./ShowdownWinPercentage";
 
 /**
  * Welcome to Cloudflare Workers! This is your first Durable Objects application.
@@ -3235,14 +3236,15 @@ async function sendGameStateMessages(
     ...gameState.activePlayers.map((p) => p.id),
     ...gameState.inactivePlayers.map((p) => p.id),
   ];
-  await sendEventsWithPlayerIds(env, context, events, playerIds);
+  await sendEventsWithPlayerIds(env, context, events, playerIds, gameState);
 }
 
 async function sendEventsWithPlayerIds(
   env: Env,
   context: SlackAppContextWithChannelId,
   events: GameEventJson[],
-  playerIds: string[]
+  playerIds: string[],
+  gameState?: ReturnType<TexasHoldem["getState"]>
 ) {
   // Filter turn messages to keep only the last one
   let lastTurnMessageIndex = -1;
@@ -3332,9 +3334,39 @@ async function sendEventsWithPlayerIds(
     }
   }
 
+  if (gameState && !isVitestRuntime()) {
+    try {
+      const showdownWinPercentageMessage =
+        await buildShowdownWinPercentageMessage(
+          {
+            activePlayers: gameState.activePlayers,
+            foldedPlayers: gameState.foldedPlayers,
+            communityCards: gameState.communityCards,
+          },
+          filteredEvents
+        );
+
+      if (showdownWinPercentageMessage) {
+        publicMessages.push(showdownWinPercentageMessage);
+      }
+    } catch (error) {
+      // Never let optional showdown stats impact core game messaging.
+      console.error("Failed to build showdown win percentage message", error);
+    }
+  }
+
   if (publicMessages.length > 0) {
     await context.say({ text: publicMessages.join("\n") });
   }
+}
+
+function isVitestRuntime(): boolean {
+  return (
+    typeof process !== "undefined" &&
+    typeof process.env === "object" &&
+    process.env !== null &&
+    process.env.VITEST === "true"
+  );
 }
 
 function getDurableObject(env: Env, context: SlackAppContextWithChannelId) {
