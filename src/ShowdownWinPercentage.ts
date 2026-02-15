@@ -131,26 +131,15 @@ async function fetchStreetWinPercentages(
   communityCards: CardSnapshot[],
   fetchFn: typeof fetch
 ): Promise<Map<string, number>> {
-  const useTenAsTResponse = await fetchStreetWinPercentagesAttempt(
-    players,
-    communityCards,
-    fetchFn,
-    true
-  );
-  if (useTenAsTResponse.size > 0 || !hasTen(players, communityCards)) {
-    return useTenAsTResponse;
-  }
-
-  return fetchStreetWinPercentagesAttempt(players, communityCards, fetchFn, false);
+  return fetchStreetWinPercentagesAttempt(players, communityCards, fetchFn);
 }
 
 async function fetchStreetWinPercentagesAttempt(
   players: ShowdownPlayer[],
   communityCards: CardSnapshot[],
-  fetchFn: typeof fetch,
-  useTenAsT: boolean
+  fetchFn: typeof fetch
 ): Promise<Map<string, number>> {
-  const url = buildCardPlayerUrl(players, communityCards, useTenAsT);
+  const url = buildCardPlayerUrl(players, communityCards);
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort(), CARDPLAYER_TIMEOUT_MS);
 
@@ -183,8 +172,7 @@ async function fetchStreetWinPercentagesAttempt(
 
 function buildCardPlayerUrl(
   players: ShowdownPlayer[],
-  communityCards: CardSnapshot[],
-  useTenAsT: boolean
+  communityCards: CardSnapshot[]
 ): URL {
   const url = new URL(CARDPLAYER_ENDPOINT);
   url.searchParams.set("game_type", "texas_holdem");
@@ -192,11 +180,11 @@ function buildCardPlayerUrl(
   players.forEach((player, seatIndex) => {
     url.searchParams.append(
       `seats[${seatIndex}][hand][]`,
-      toApiCard(player.cards[0], useTenAsT)
+      toApiCard(player.cards[0])
     );
     url.searchParams.append(
       `seats[${seatIndex}][hand][]`,
-      toApiCard(player.cards[1], useTenAsT)
+      toApiCard(player.cards[1])
     );
     url.searchParams.append(
       `seats[${seatIndex}][position]`,
@@ -205,7 +193,7 @@ function buildCardPlayerUrl(
   });
 
   communityCards.forEach((card) => {
-    const serialized = toApiCard(card, useTenAsT);
+    const serialized = toApiCard(card);
     url.searchParams.append("community_cards[]", serialized);
     url.searchParams.append("board[]", serialized);
     url.searchParams.append("board_cards[]", serialized);
@@ -266,16 +254,16 @@ function parsePercent(value: unknown): number | null {
   return Number.isFinite(parsed) ? parsed : null;
 }
 
-function toApiCard(card: CardSnapshot, useTenAsT: boolean): string {
-  const rank = normalizeRank(card.rank, useTenAsT);
+function toApiCard(card: CardSnapshot): string {
+  const rank = normalizeRank(card.rank);
   const suit = normalizeSuit(card.suit);
   return `${rank}${suit}`;
 }
 
-function normalizeRank(rank: string, useTenAsT: boolean): string {
+function normalizeRank(rank: string): string {
   const upperRank = rank.toUpperCase();
   if (upperRank === "10") {
-    return useTenAsT ? "T" : "10";
+    return "T";
   }
   return upperRank;
 }
@@ -293,11 +281,6 @@ function normalizeSuit(suit: string): string {
     default:
       return suit.charAt(0).toUpperCase();
   }
-}
-
-function hasTen(players: ShowdownPlayer[], communityCards: CardSnapshot[]): boolean {
-  const playerCards = players.flatMap((player) => player.cards);
-  return [...playerCards, ...communityCards].some((card) => card.rank === "10");
 }
 
 function formatPercent(value: number | undefined): string {

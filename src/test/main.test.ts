@@ -4418,6 +4418,71 @@ describe("Poker Durable Object", () => {
     );
   });
 
+  it("always serializes rank 10 as T for cardplayer API", async () => {
+    const mockFetch = vi.fn(async (_input: RequestInfo | URL) => {
+      return new Response(
+        JSON.stringify({
+          seats: [
+            { position: "1", win_pct: "50.00" },
+            { position: "2", win_pct: "50.00" },
+          ],
+        }),
+        {
+          status: 200,
+          headers: { "content-type": "application/json" },
+        }
+      );
+    });
+
+    await buildShowdownWinPercentageMessage(
+      {
+        activePlayers: [
+          {
+            id: "player1",
+            cards: [
+              { rank: "10", suit: "Hearts" },
+              { rank: "A", suit: "Clubs" },
+            ],
+          },
+          {
+            id: "player2",
+            cards: [
+              { rank: "K", suit: "Spades" },
+              { rank: "Q", suit: "Spades" },
+            ],
+          },
+        ],
+        foldedPlayers: [],
+        communityCards: [
+          { rank: "2", suit: "Clubs" },
+          { rank: "7", suit: "Diamonds" },
+          { rank: "9", suit: "Hearts" },
+          { rank: "Q", suit: "Clubs" },
+          { rank: "A", suit: "Spades" },
+        ],
+      },
+      [
+        { description: "player1 had Two Pair" },
+        { description: "player2 had One Pair" },
+        { description: "Main pot of 160 won by: player1" },
+      ],
+      mockFetch as unknown as typeof fetch
+    );
+
+    expect(mockFetch).toHaveBeenCalled();
+    const firstCallInput = mockFetch.mock.calls[0][0];
+    const requestUrl =
+      typeof firstCallInput === "string"
+        ? firstCallInput
+        : firstCallInput instanceof URL
+          ? firstCallInput.toString()
+          : firstCallInput.url;
+    const parsedUrl = new URL(requestUrl);
+    const seatCards = parsedUrl.searchParams.getAll("seats[0][hand][]");
+    expect(seatCards).toContain("TH");
+    expect(seatCards).not.toContain("10H");
+  });
+
   it("returns null for non-showdown event sets", async () => {
     const mockFetch = vi.fn();
 
