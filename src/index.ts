@@ -3437,12 +3437,21 @@ async function sendEventsWithPlayerIds(
 }
 
 function isVitestRuntime(): boolean {
-  return (
+  if (
     typeof process !== "undefined" &&
     typeof process.env === "object" &&
-    process.env !== null &&
-    process.env.VITEST === "true"
-  );
+    process.env !== null
+  ) {
+    if (process.env.VITEST === "true") {
+      return true;
+    }
+    if (typeof process.env.VITEST_WORKER_ID === "string") {
+      return true;
+    }
+  }
+
+  // @cloudflare/vitest-pool-workers exposes this global in worker runtime.
+  return typeof (globalThis as { __vitest_worker__?: unknown }).__vitest_worker__ !== "undefined";
 }
 
 function getDurableObject(env: Env, context: SlackAppContextWithChannelId) {
