@@ -13,6 +13,7 @@ vi.mock("../StockPrice", () => ({
   getHubsStockPriceMessage: vi.fn().mockResolvedValue(":chart_with_upwards_trend: $HUBS: $1,000.00 (+10.00, +1.00%)"),
 }));
 import { GameState, TexasHoldem } from "../Game";
+import { Card } from "../Card";
 import {
   buyIn,
   joinGame,
@@ -33,6 +34,7 @@ import {
   leaveGame,
   showCards,
   revealCards,
+  revealSingleCard,
   showChips,
   showStacks,
   nudgePlayer,
@@ -2874,6 +2876,93 @@ describe("Poker Durable Object", () => {
     await revealCards(env, contextUser1, createGenericMessageEvent("revealer"));
     // Should say player has no cards or reveal their last hand
     expect(sayFn.mock.calls.length).toBeGreaterThan(0);
+  });
+
+  /**
+   * Game Scenario 15b: Reveal Single Card Command
+   *
+   * Tests:
+   * - Player can reveal only card 1 or card 2 while waiting for players
+   * - Invalid selection is rejected
+   */
+  it("game scenario 15b - reveal single card", async () => {
+    vi.spyOn(Math, "random").mockReturnValue(0.33);
+    const workspaceId = "test-workspace-15b";
+    const channelId = "test-channel-15b";
+    const sayFn = vi.fn();
+    const postEphemeralFn = vi.fn();
+
+    const contextUser1 = createContext({
+      userId: "revealer",
+      sayFn,
+      postEphemeralFn,
+      workspaceId,
+      channelId,
+    });
+    const contextUser2 = createContext({
+      userId: "other",
+      sayFn,
+      postEphemeralFn,
+      workspaceId,
+      channelId,
+    });
+
+    const stub = getStub({ workspaceId, channelId });
+
+    // === SETUP ===
+    await newGame(env, contextUser1, createGenericMessageEvent("revealer"));
+    await joinGame(env, contextUser1, createGenericMessageEvent("revealer"));
+    await joinGame(env, contextUser2, createGenericMessageEvent("other"));
+    await buyIn(
+      env,
+      contextUser1,
+      createGenericMessageEvent("revealer", "buy in 500")
+    );
+    await buyIn(
+      env,
+      contextUser2,
+      createGenericMessageEvent("other", "buy in 500")
+    );
+    await startRound(env, contextUser1, createGenericMessageEvent("revealer"));
+
+    // End the hand so reveal is allowed (WaitingForPlayers state)
+    await fold(env, contextUser2, createGenericMessageEvent("other"));
+    sayFn.mockClear();
+
+    const gameState = await getGameState(stub, workspaceId, channelId);
+    const revealer = getPlayerById(gameState, "revealer");
+    expect(revealer).toBeDefined();
+    expect(revealer?.cards.length).toBe(2);
+    const cardOne = Card.fromJson(revealer!.cards[0]).toSlackString();
+    const cardTwo = Card.fromJson(revealer!.cards[1]).toSlackString();
+
+    await revealSingleCard(
+      env,
+      contextUser1,
+      createGenericMessageEvent("revealer", "reveal dard 1")
+    );
+    expect(sayFn.mock.calls.length).toBeGreaterThan(0);
+    const revealOneMessage = sayFn.mock.calls[0][0].text;
+    expect(revealOneMessage).toContain(cardOne);
+    expect(revealOneMessage).not.toContain(cardTwo);
+
+    sayFn.mockClear();
+    await revealSingleCard(
+      env,
+      contextUser1,
+      createGenericMessageEvent("revealer", "reveal dard 2")
+    );
+    const revealTwoMessage = sayFn.mock.calls[0][0].text;
+    expect(revealTwoMessage).toContain(cardTwo);
+    expect(revealTwoMessage).not.toContain(cardOne);
+
+    sayFn.mockClear();
+    await revealSingleCard(
+      env,
+      contextUser1,
+      createGenericMessageEvent("revealer", "reveal dard 3")
+    );
+    expect(sayFn.mock.calls[0][0].text).toContain("Invalid format");
   });
 
   /**
