@@ -21,6 +21,7 @@ import type {
 } from "./ActionLog";
 import { getHubsStockPriceMessage } from "./StockPrice";
 import { buildShowdownWinPercentageMessage } from "./ShowdownWinPercentage";
+import { ensureNarpBrainOnError } from "./slackErrorEmoji";
 
 /**
  * Welcome to Cloudflare Workers! This is your first Durable Objects application.
@@ -1649,6 +1650,9 @@ export default {
 
 const ALGO_MESSAGE =
   "Complaining about the algo? How about you try tightening up ranges, punishing leaks, and owning your position. Cut trash hands, widen late, and 3-bet light when stacks and image align. Always clock SPR, ICM, and blocker dynamics. Dont just run hot—range merge, polarize, and balance frequencies. Table select like a shark, exploit the fish, and never bleed chips OOP. To level up: study solvers, drill GTO, then weaponize exploit when villains deviate.";
+const NO_GAME_EXISTS_MESSAGE = ensureNarpBrainOnError(
+  "No game exists! Type 'New Game'"
+);
 
 const MESSAGE_HANDLERS = {
   "new game": newGame,
@@ -1885,7 +1889,7 @@ async function getGameState(
 ) {
   const game = await fetchGame(env, context);
   if (!game) {
-    await context.say({ text: `No game exists! Type 'New Game'` });
+    await context.say({ text: NO_GAME_EXISTS_MESSAGE });
     return;
   }
 
@@ -1903,7 +1907,7 @@ export async function context(
     await context.client.chat.postEphemeral({
       channel: context.channelId,
       user: context.userId!,
-      text: `No game exists! Type 'New Game'`,
+      text: NO_GAME_EXISTS_MESSAGE,
     });
     return;
   }
@@ -1944,7 +1948,7 @@ export async function context(
     await context.client.chat.postEphemeral({
       channel: context.channelId,
       user: context.userId!,
-      text: `You are not in the game!`,
+      text: ensureNarpBrainOnError("You are not in the game!"),
     });
     return;
   }
@@ -1953,7 +1957,7 @@ export async function context(
     await context.client.chat.postEphemeral({
       channel: context.channelId,
       user: context.userId!,
-      text: `You are inactive. You are not at the table.`,
+      text: ensureNarpBrainOnError("You are inactive. You are not at the table."),
     });
     return;
   }
@@ -2179,7 +2183,11 @@ async function hubsStockPrice(
   if (stockPriceMessage) {
     await context.say({ text: stockPriceMessage });
   } else {
-    await context.say({ text: "Unable to fetch HUBS stock price at this time." });
+    await context.say({
+      text: ensureNarpBrainOnError(
+        "Unable to fetch HUBS stock price at this time."
+      ),
+    });
   }
 }
 
@@ -2214,13 +2222,15 @@ export async function nudgePlayer(
 ) {
   const game = await fetchGame(env, context);
   if (!game) {
-    await context.say({ text: `No game exists! Type 'New Game'` });
+    await context.say({ text: NO_GAME_EXISTS_MESSAGE });
     return;
   }
 
   if (game.getGameState() === GameState.WaitingForPlayers) {
     await context.say({
-      text: "Game has not started yet! Who the hell am I going to nudge?",
+      text: ensureNarpBrainOnError(
+        "Game has not started yet! Who the hell am I going to nudge?"
+      ),
     });
     return;
   }
@@ -2228,7 +2238,7 @@ export async function nudgePlayer(
   const currentPlayer = game.getCurrentPlayer();
   if (!currentPlayer) {
     await context.say({
-      text: "No current player which means the code is ASS",
+      text: ensureNarpBrainOnError("No current player which means the code is ASS"),
     });
     return;
   }
@@ -2245,13 +2255,15 @@ export async function silentNudgePlayer(
 ) {
   const game = await fetchGame(env, context);
   if (!game) {
-    await context.say({ text: `No game exists! Type 'New Game'` });
+    await context.say({ text: NO_GAME_EXISTS_MESSAGE });
     return;
   }
 
   if (game.getGameState() === GameState.WaitingForPlayers) {
     await context.say({
-      text: "Game has not started yet! Who the hell am I going to nudge?",
+      text: ensureNarpBrainOnError(
+        "Game has not started yet! Who the hell am I going to nudge?"
+      ),
     });
     return;
   }
@@ -2259,7 +2271,7 @@ export async function silentNudgePlayer(
   const currentPlayer = game.getCurrentPlayer();
   if (!currentPlayer) {
     await context.say({
-      text: "No current player which means the code is ASS",
+      text: ensureNarpBrainOnError("No current player which means the code is ASS"),
     });
     return;
   }
@@ -2280,13 +2292,15 @@ export async function loudNudgePlayer(
 ) {
   const game = await fetchGame(env, context);
   if (!game) {
-    await context.say({ text: `No game exists! Type 'New Game'` });
+    await context.say({ text: NO_GAME_EXISTS_MESSAGE });
     return;
   }
 
   if (game.getGameState() === GameState.WaitingForPlayers) {
     await context.say({
-      text: ":rotating_light::rotating_light::rotating_light: GAME HAS NOT STARTED YET! WHO THE HELL AM I GOING TO NUDGE?! :rotating_light::rotating_light::rotating_light:",
+      text: ensureNarpBrainOnError(
+        ":rotating_light::rotating_light::rotating_light: GAME HAS NOT STARTED YET! WHO THE HELL AM I GOING TO NUDGE?! :rotating_light::rotating_light::rotating_light:"
+      ),
     });
     return;
   }
@@ -2294,7 +2308,9 @@ export async function loudNudgePlayer(
   const currentPlayer = game.getCurrentPlayer();
   if (!currentPlayer) {
     await context.say({
-      text: ":rotating_light::rotating_light::rotating_light: NO CURRENT PLAYER WHICH MEANS THE CODE IS ASS :rotating_light::rotating_light::rotating_light:",
+      text: ensureNarpBrainOnError(
+        ":rotating_light::rotating_light::rotating_light: NO CURRENT PLAYER WHICH MEANS THE CODE IS ASS :rotating_light::rotating_light::rotating_light:"
+      ),
     });
     return;
   }
@@ -2383,7 +2399,7 @@ export async function revealSingleCard(
 ) {
   const game = await fetchGame(env, context);
   if (!game) {
-    await context.say({ text: `No game exists! Type 'New Game'` });
+    await context.say({ text: NO_GAME_EXISTS_MESSAGE });
     return;
   }
   if (game.getGameState() !== GameState.WaitingForPlayers) {
@@ -2396,7 +2412,9 @@ export async function revealSingleCard(
   const selectedCardIndex = parseRevealSingleCardIndex(payload.text ?? "");
   if (selectedCardIndex === null) {
     await context.say({
-      text: `Invalid format! Use 'reveal dard 1' or 'reveal dard 2'`,
+      text: ensureNarpBrainOnError(
+        "Invalid format! Use 'reveal dard 1' or 'reveal dard 2'"
+      ),
     });
     return;
   }
@@ -2412,7 +2430,7 @@ export async function revealCards(
 ) {
   const game = await fetchGame(env, context);
   if (!game) {
-    await context.say({ text: `No game exists! Type 'New Game'` });
+    await context.say({ text: NO_GAME_EXISTS_MESSAGE });
     return;
   }
   if (game.getGameState() !== GameState.WaitingForPlayers) {
@@ -2433,7 +2451,7 @@ export async function revealCardsCardless(
 ) {
   const game = await fetchGame(env, context);
   if (!game) {
-    await context.say({ text: `No game exists! Type 'New Game'` });
+    await context.say({ text: NO_GAME_EXISTS_MESSAGE });
     return;
   }
   if (game.getGameState() !== GameState.WaitingForPlayers) {
@@ -2455,7 +2473,7 @@ export async function showCards(
 ) {
   const game = await fetchGame(env, context);
   if (!game) {
-    await context.say({ text: `No game exists! Type 'New Game'` });
+    await context.say({ text: NO_GAME_EXISTS_MESSAGE });
     return;
   }
 
@@ -2502,7 +2520,7 @@ export async function preDeal(
   });
 
   if (!result.ok) {
-    await context.say({ text: `No game exists! Type 'New Game'` });
+    await context.say({ text: NO_GAME_EXISTS_MESSAGE });
     return;
   }
 
@@ -2535,7 +2553,7 @@ export async function preNH(
   });
 
   if (!result.ok) {
-    await context.say({ text: `No game exists! Type 'New Game'` });
+    await context.say({ text: NO_GAME_EXISTS_MESSAGE });
     return;
   }
 
@@ -2568,7 +2586,7 @@ export async function preAH(
   });
 
   if (!result.ok) {
-    await context.say({ text: `No game exists! Type 'New Game'` });
+    await context.say({ text: NO_GAME_EXISTS_MESSAGE });
     return;
   }
 
@@ -2601,7 +2619,7 @@ export async function preCheck(
   });
 
   if (!result.ok) {
-    await context.say({ text: `No game exists! Type 'New Game'` });
+    await context.say({ text: NO_GAME_EXISTS_MESSAGE });
     return;
   }
 
@@ -2634,7 +2652,7 @@ export async function preFold(
   });
 
   if (!result.ok) {
-    await context.say({ text: `No game exists! Type 'New Game'` });
+    await context.say({ text: NO_GAME_EXISTS_MESSAGE });
     return;
   }
 
@@ -2667,7 +2685,7 @@ export async function preCall(
   });
 
   if (!result.ok) {
-    await context.say({ text: `No game exists! Type 'New Game'` });
+    await context.say({ text: NO_GAME_EXISTS_MESSAGE });
     return;
   }
 
@@ -2693,7 +2711,9 @@ export async function preBet(
 
   if (isNaN(betAmount) || betAmount <= 0) {
     await context.say({
-      text: 'Invalid bet amount! Please use format: "pre-bet {chips}"',
+      text: ensureNarpBrainOnError(
+        'Invalid bet amount! Please use format: "pre-bet {chips}"'
+      ),
     });
     return;
   }
@@ -2718,7 +2738,7 @@ export async function preBet(
   });
 
   if (!result.ok) {
-    await context.say({ text: `No game exists! Type 'New Game'` });
+    await context.say({ text: NO_GAME_EXISTS_MESSAGE });
     return;
   }
 
@@ -2743,7 +2763,9 @@ export async function bet(
 
   if (isNaN(betAmount) || betAmount <= 0) {
     await context.say({
-      text: 'Invalid bet amount! Please use format: "bet {chips}"',
+      text: ensureNarpBrainOnError(
+        'Invalid bet amount! Please use format: "bet {chips}"'
+      ),
     });
     return;
   }
@@ -2769,7 +2791,7 @@ export async function bet(
   });
 
   if (!result.ok) {
-    await context.say({ text: `No game exists! Type 'New Game'` });
+    await context.say({ text: NO_GAME_EXISTS_MESSAGE });
     return;
   }
 
@@ -2802,7 +2824,7 @@ export async function call(
   });
 
   if (!result.ok) {
-    await context.say({ text: `No game exists! Type 'New Game'` });
+    await context.say({ text: NO_GAME_EXISTS_MESSAGE });
     return;
   }
 
@@ -2835,7 +2857,7 @@ export async function allIn(
   });
 
   if (!result.ok) {
-    await context.say({ text: `No game exists! Type 'New Game'` });
+    await context.say({ text: NO_GAME_EXISTS_MESSAGE });
     return;
   }
 
@@ -2868,7 +2890,7 @@ export async function check(
   });
 
   if (!result.ok) {
-    await context.say({ text: `No game exists! Type 'New Game'` });
+    await context.say({ text: NO_GAME_EXISTS_MESSAGE });
     return;
   }
 
@@ -2915,19 +2937,25 @@ export async function takeHerToThe(
 
   if (!result.ok) {
     if (result.reason === "no_game") {
-      await context.say({ text: `No game exists! Type 'New Game'` });
+      await context.say({ text: NO_GAME_EXISTS_MESSAGE });
     } else if (result.reason === "invalid_state") {
       if (targetPhase === "flop") {
         await context.say({
-          text: `We're not in pre-flop! Can't take her to the flop from here.`,
+          text: ensureNarpBrainOnError(
+            "We're not in pre-flop! Can't take her to the flop from here."
+          ),
         });
       } else if (targetPhase === "turn") {
         await context.say({
-          text: `We're not on the flop! Can't take her to the turn from here.`,
+          text: ensureNarpBrainOnError(
+            "We're not on the flop! Can't take her to the turn from here."
+          ),
         });
       } else {
         await context.say({
-          text: `We're not on the turn! Can't take her to the river from here.`,
+          text: ensureNarpBrainOnError(
+            "We're not on the turn! Can't take her to the river from here."
+          ),
         });
       }
     }
@@ -2963,7 +2991,7 @@ export async function fold(
   });
 
   if (!result.ok) {
-    await context.say({ text: `No game exists! Type 'New Game'` });
+    await context.say({ text: NO_GAME_EXISTS_MESSAGE });
     return;
   }
 
@@ -2996,7 +3024,7 @@ export async function startRound(
   });
 
   if (!result.ok) {
-    await context.say({ text: `No game exists! Type 'New Game'` });
+    await context.say({ text: NO_GAME_EXISTS_MESSAGE });
     return;
   }
 
@@ -3019,7 +3047,7 @@ export async function showChips(
 ) {
   const game = await fetchGame(env, context);
   if (!game) {
-    await context.say({ text: `No game exists! Type 'New Game'` });
+    await context.say({ text: NO_GAME_EXISTS_MESSAGE });
     return;
   }
 
@@ -3041,7 +3069,7 @@ export async function showStacks(
 ) {
   const game = await fetchGame(env, context);
   if (!game) {
-    await context.say({ text: `No game exists! Type 'New Game'` });
+    await context.say({ text: NO_GAME_EXISTS_MESSAGE });
     return;
   }
 
@@ -3106,7 +3134,7 @@ export async function cashOut(
   });
 
   if (!result.ok) {
-    await context.say({ text: `No game exists! Type 'New Game'` });
+    await context.say({ text: NO_GAME_EXISTS_MESSAGE });
     return;
   }
 
@@ -3124,7 +3152,9 @@ export async function buyIn(
 
   if (isNaN(buyInAmount) || buyInAmount <= 0) {
     await context.say({
-      text: 'Invalid buy in amount! Please use format: "buy in {chips}"',
+      text: ensureNarpBrainOnError(
+        'Invalid buy in amount! Please use format: "buy in {chips}"'
+      ),
     });
     return;
   }
@@ -3150,7 +3180,7 @@ export async function buyIn(
   });
 
   if (!result.ok) {
-    await context.say({ text: `No game exists! Type 'New Game'` });
+    await context.say({ text: NO_GAME_EXISTS_MESSAGE });
     return;
   }
 
@@ -3183,7 +3213,7 @@ export async function leaveGame(
   });
 
   if (!result.ok) {
-    await context.say({ text: `No game exists! Type 'New Game'` });
+    await context.say({ text: NO_GAME_EXISTS_MESSAGE });
     return;
   }
 
@@ -3215,7 +3245,7 @@ export async function joinGame(
   });
 
   if (!result.ok) {
-    await context.say({ text: `No game exists! Type 'New Game'` });
+    await context.say({ text: NO_GAME_EXISTS_MESSAGE });
     return;
   }
 
@@ -3248,7 +3278,9 @@ export async function newGame(
 
   if (!result.ok) {
     await context.say({
-      text: `Cannot start new game - ${result.blockingPlayerId} still has chips!`,
+      text: ensureNarpBrainOnError(
+        `Cannot start new game - ${result.blockingPlayerId} still has chips!`
+      ),
     });
     return;
   }
@@ -3365,15 +3397,16 @@ async function sendEventsWithPlayerIds(
     playerIds.forEach((playerId) => {
       message = message.replace(new RegExp(playerId, "g"), `<@${playerId}>`);
     });
+    const slackMessage = ensureNarpBrainOnError(message);
 
     if (event.ephemeral) {
       await context.client.chat.postEphemeral({
         channel: context.channelId,
         user: event.playerId,
-        text: message,
+        text: slackMessage,
       });
     } else {
-      publicMessages.push(message);
+      publicMessages.push(slackMessage);
     }
   }
 
@@ -3517,15 +3550,16 @@ async function sendGameEventMessages(
     playerIds.forEach((playerId) => {
       message = message.replace(new RegExp(playerId, "g"), `<@${playerId}>`);
     });
+    const slackMessage = ensureNarpBrainOnError(message);
 
     if (event.isEphemeral()) {
       await context.client.chat.postEphemeral({
         channel: context.channelId,
         user: event.getPlayerId(),
-        text: message,
+        text: slackMessage,
       });
     } else {
-      publicMessages.push(message);
+      publicMessages.push(slackMessage);
     }
   }
 
