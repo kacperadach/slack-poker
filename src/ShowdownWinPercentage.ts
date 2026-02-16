@@ -1,3 +1,5 @@
+import { TexasHoldem } from "poker-odds-calc";
+
 type CardSnapshot = {
   rank: string;
   suit: string;
@@ -30,19 +32,13 @@ type ShowdownPlayer = {
   position: number;
 };
 
-type CardPlayerSeat = {
-  position?: string | number;
-  win_pct?: string | number;
-};
+type StreetWinPercentageCalculator = (
+  players: ShowdownPlayer[],
+  communityCards: CardSnapshot[],
+  streetLabel: StreetConfig["label"]
+) => Promise<Map<string, number>> | Map<string, number>;
 
-type CardPlayerResponse = {
-  seats?: CardPlayerSeat[];
-};
-
-const CARDPLAYER_ENDPOINT =
-  "https://www.cardplayer.com/wp-json/pocker/v1/cardplayer/";
-const CARDPLAYER_TIMEOUT_MS = 2500;
-const CARDPLAYER_LOG_BODY_PREVIEW_LENGTH = 2000;
+const PRE_FLOP_ITERATION_LIMIT = 100_000;
 const STREETS: StreetConfig[] = [
   { label: "Pre-flop", communityCardCount: 0 },
   { label: "Flop", communityCardCount: 3 },
@@ -53,11 +49,12 @@ const STREETS: StreetConfig[] = [
 export async function buildShowdownWinPercentageMessage(
   gameState: ShowdownGameStateSnapshot,
   events: ShowdownEventSnapshot[],
-  fetchFn: typeof fetch = fetch
+  calculateStreetWinPercentagesFn: StreetWinPercentageCalculator = 
+    calculateStreetWinPercentages
 ): Promise<string | null> {
   if (!didHandGoToShowdown(events)) {
     console.info(
-      "[ShowdownWinPercentage] Skipping CardPlayer lookup because hand did not reach showdown",
+      "[ShowdownWinPercentage] Skipping showdown equity calculation because hand did not reach showdown",
       {
         eventCount: events.length,
       }
@@ -68,7 +65,7 @@ export async function buildShowdownWinPercentageMessage(
   const showdownPlayers = getShowdownPlayers(gameState);
   if (showdownPlayers.length < 2 || gameState.communityCards.length < 5) {
     console.info(
-      "[ShowdownWinPercentage] Skipping CardPlayer lookup because showdown snapshot is incomplete",
+      "[ShowdownWinPercentage] Skipping showdown equity calculation because snapshot is incomplete",
       {
         showdownPlayerCount: showdownPlayers.length,
         communityCardCount: gameState.communityCards.length,
@@ -80,10 +77,9 @@ export async function buildShowdownWinPercentageMessage(
   const streetResults = await Promise.all(
     STREETS.map(async (street) => {
       const board = gameState.communityCards.slice(0, street.communityCardCount);
-      const results = await fetchStreetWinPercentages(
+      const results = await calculateStreetWinPercentagesFn(
         showdownPlayers,
         board,
-        fetchFn,
         street.label
       );
       return { label: street.label, results };
@@ -95,7 +91,7 @@ export async function buildShowdownWinPercentageMessage(
   );
   if (!hasAtLeastOneStreet) {
     console.warn(
-      "[ShowdownWinPercentage] CardPlayer lookups completed without usable win percentages",
+      "[ShowdownWinPercentage] Local equity calculations completed without usable win percentages",
       {
         streetResultCounts: streetResults.map(({ label, results }) => ({
           streetLabel: label,
@@ -161,130 +157,60 @@ function getShowdownPlayers(
     }));
 }
 
-async function fetchStreetWinPercentages(
+async function calculateStreetWinPercentages(
   players: ShowdownPlayer[],
   communityCards: CardSnapshot[],
-  fetchFn: typeof fetch,
   streetLabel: StreetConfig["label"]
 ): Promise<Map<string, number>> {
-  return fetchStreetWinPercentagesAttempt(
-    players,
-    communityCards,
-    fetchFn,
-    streetLabel
-  );
-}
-
-async function fetchStreetWinPercentagesAttempt(
-  players: ShowdownPlayer[],
-  communityCards: CardSnapshot[],
-  fetchFn: typeof fetch,
-  streetLabel: StreetConfig["label"]
-): Promise<Map<string, number>> {
-  const url = buildCardPlayerUrl(players, communityCards);
-  const controller = new AbortController();
-  const timeout = setTimeout(() => controller.abort(), CARDPLAYER_TIMEOUT_MS);
-  const requestLogContext = {
-    streetLabel,
-    playerCount: players.length,
-    board: formatBoardForLog(communityCards),
-    url: url.toString(),
-  };
-
-  console.info(
-    "[ShowdownWinPercentage] Requesting CardPlayer win percentage data",
-    requestLogContext
-  );
-
   try {
-    const response = await fetchFn(url.toString(), {
-      method: "GET",
-      headers: {
-        Accept: "application/json",
-      },
-      signal: controller.signal,
+    const table = new TexasHoldem();
+    if (communityCards.length < 3) {
+      // Pre-flop/early street odds can be expensive to enumerate exactly.
+      // Keep the library's Monte Carlo strategy but make the iteration budget explicit.
+      table.limit(PRE_FLOP_ITERATION_LIMIT);
+    }
+
+    players.forEach((player) => {
+      table.addPlayer([
+        toCalculatorCard(player.cards[0]),
+        toCalculatorCard(player.cards[1]),
+      ]);
     });
-    const responseBody = await response.text();
-    const contentType = response.headers.get("content-type") || "";
-    const responseLogContext = {
-      ...requestLogContext,
-      status: response.status,
-      statusText: response.statusText,
-      ok: response.ok,
-      contentType,
-      body: formatBodyForLog(responseBody),
-    };
 
-    if (!response.ok) {
-      console.warn(
-        "[ShowdownWinPercentage] CardPlayer request returned non-OK status",
-        responseLogContext
-      );
-      return new Map<string, number>();
+    if (communityCards.length >= 3) {
+      table.setBoard(communityCards.map((card) => toCalculatorCard(card)));
     }
 
-    if (!contentType.toLowerCase().includes("application/json")) {
-      console.warn(
-        "[ShowdownWinPercentage] CardPlayer response content-type was not JSON",
-        responseLogContext
-      );
-      return new Map<string, number>();
-    }
+    const result = table.calculate();
+    const resultPlayers = result.getPlayers();
+    const extractedResults = new Map<string, number>();
 
-    const payload = parseCardPlayerPayload(responseBody, responseLogContext);
-    if (!payload) {
-      return new Map<string, number>();
-    }
-
-    const extractedResults = extractStreetWinPercentages(payload, players);
-    console.info(
-      "[ShowdownWinPercentage] Parsed CardPlayer win percentage response",
-      {
-        ...responseLogContext,
-        seatCount: Array.isArray(payload.seats) ? payload.seats.length : 0,
-        matchedPlayerCount: extractedResults.size,
+    resultPlayers.forEach((resultPlayer, playerIndex) => {
+      const showdownPlayer = players[playerIndex];
+      if (!showdownPlayer) {
+        return;
       }
-    );
+      extractedResults.set(showdownPlayer.playerId, resultPlayer.getWinsPercentage());
+    });
+
+    console.info("[ShowdownWinPercentage] Calculated local showdown equities", {
+      streetLabel,
+      playerCount: players.length,
+      board: formatBoardForLog(communityCards),
+      iterations: result.getIterations(),
+      approximate: result.isApproximate(),
+      matchedPlayerCount: extractedResults.size,
+    });
+
     return extractedResults;
   } catch (error) {
-    console.error("[ShowdownWinPercentage] CardPlayer request threw an error", {
-      ...requestLogContext,
-      timeoutMs: CARDPLAYER_TIMEOUT_MS,
-      aborted: controller.signal.aborted,
-      isAbortError: isAbortError(error),
+    console.error("[ShowdownWinPercentage] Local equity calculation failed", {
+      streetLabel,
+      playerCount: players.length,
+      board: formatBoardForLog(communityCards),
       error: getErrorMessage(error),
     });
     return new Map<string, number>();
-  } finally {
-    clearTimeout(timeout);
-  }
-}
-
-function parseCardPlayerPayload(
-  responseBody: string,
-  responseLogContext: {
-    streetLabel: StreetConfig["label"];
-    playerCount: number;
-    board: string;
-    url: string;
-    status: number;
-    statusText: string;
-    ok: boolean;
-    contentType: string;
-    body: string;
-  }
-): CardPlayerResponse | null {
-  try {
-    return JSON.parse(responseBody) as CardPlayerResponse;
-  } catch (error) {
-    console.warn(
-      "[ShowdownWinPercentage] Failed to parse CardPlayer response body as JSON",
-      {
-        ...responseLogContext,
-        parseError: getErrorMessage(error),
-      }
-    );
-    return null;
   }
 }
 
@@ -292,27 +218,7 @@ function formatBoardForLog(communityCards: CardSnapshot[]): string {
   if (communityCards.length === 0) {
     return "(none)";
   }
-  return communityCards.map((card) => toApiCard(card)).join(" ");
-}
-
-function formatBodyForLog(body: string): string {
-  const trimmed = body.trim();
-  if (trimmed.length === 0) {
-    return "(empty)";
-  }
-  if (trimmed.length <= CARDPLAYER_LOG_BODY_PREVIEW_LENGTH) {
-    return trimmed;
-  }
-  return `${trimmed.slice(0, CARDPLAYER_LOG_BODY_PREVIEW_LENGTH)}...(truncated)`;
-}
-
-function isAbortError(error: unknown): boolean {
-  return (
-    typeof error === "object" &&
-    error !== null &&
-    "name" in error &&
-    (error as { name?: unknown }).name === "AbortError"
-  );
+  return communityCards.map((card) => toCalculatorCard(card).toUpperCase()).join(" ");
 }
 
 function getErrorMessage(error: unknown): string {
@@ -322,91 +228,7 @@ function getErrorMessage(error: unknown): string {
   return String(error);
 }
 
-function buildCardPlayerUrl(
-  players: ShowdownPlayer[],
-  communityCards: CardSnapshot[]
-): URL {
-  const url = new URL(CARDPLAYER_ENDPOINT);
-  url.searchParams.set("game_type", "texas_holdem");
-
-  players.forEach((player, seatIndex) => {
-    url.searchParams.append(
-      `seats[${seatIndex}][hand][]`,
-      toApiCard(player.cards[0])
-    );
-    url.searchParams.append(
-      `seats[${seatIndex}][hand][]`,
-      toApiCard(player.cards[1])
-    );
-    url.searchParams.append(
-      `seats[${seatIndex}][position]`,
-      String(player.position)
-    );
-  });
-
-  // CardPlayer's calculator expects post-flop board cards as one
-  // space-delimited `board` query parameter (e.g. "2C 7D 9H").
-  if (communityCards.length >= 3) {
-    url.searchParams.append(
-      "board",
-      communityCards.map((card) => toApiCard(card)).join(" ")
-    );
-  }
-
-  return url;
-}
-
-function extractStreetWinPercentages(
-  payload: CardPlayerResponse,
-  players: ShowdownPlayer[]
-): Map<string, number> {
-  const playerIdsByPosition = new Map<number, string>();
-  players.forEach((player) => {
-    playerIdsByPosition.set(player.position, player.playerId);
-  });
-
-  const results = new Map<string, number>();
-  if (!Array.isArray(payload.seats)) {
-    return results;
-  }
-
-  payload.seats.forEach((seat, seatIndex) => {
-    const parsedPosition = Number.parseInt(String(seat.position), 10);
-    const playerId =
-      playerIdsByPosition.get(parsedPosition) ??
-      (players[seatIndex] ? players[seatIndex].playerId : undefined);
-
-    if (!playerId) {
-      return;
-    }
-
-    const winPercent = parsePercent(seat.win_pct);
-    if (winPercent === null) {
-      return;
-    }
-
-    results.set(playerId, winPercent);
-  });
-
-  return results;
-}
-
-function parsePercent(value: unknown): number | null {
-  if (typeof value !== "number" && typeof value !== "string") {
-    return null;
-  }
-
-  const parsed = Number.parseFloat(
-    String(value)
-      .replace(/,/g, "")
-      .replace("%", "")
-      .trim()
-  );
-
-  return Number.isFinite(parsed) ? parsed : null;
-}
-
-function toApiCard(card: CardSnapshot): string {
+function toCalculatorCard(card: CardSnapshot): string {
   const rank = normalizeRank(card.rank);
   const suit = normalizeSuit(card.suit);
   return `${rank}${suit}`;
@@ -423,15 +245,15 @@ function normalizeRank(rank: string): string {
 function normalizeSuit(suit: string): string {
   switch (suit) {
     case "Hearts":
-      return "H";
+      return "h";
     case "Diamonds":
-      return "D";
+      return "d";
     case "Clubs":
-      return "C";
+      return "c";
     case "Spades":
-      return "S";
+      return "s";
     default:
-      return suit.charAt(0).toUpperCase();
+      return suit.charAt(0).toLowerCase();
   }
 }
 

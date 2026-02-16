@@ -4414,58 +4414,30 @@ describe("Poker Durable Object", () => {
     `);
   });
 
-  it("builds showdown win percentage message from API responses", async () => {
-    const winPctByCommunityCount: Record<
-      number,
-      { seats: Array<{ position: string; win_pct: string }> }
-    > = {
-      0: {
-        seats: [
-          { position: "1", win_pct: "60.00" },
-          { position: "2", win_pct: "40.00" },
-        ],
-      },
-      3: {
-        seats: [
-          { position: "1", win_pct: "65.00" },
-          { position: "2", win_pct: "35.00" },
-        ],
-      },
-      4: {
-        seats: [
-          { position: "1", win_pct: "72.00" },
-          { position: "2", win_pct: "28.00" },
-        ],
-      },
-      5: {
-        seats: [
-          { position: "1", win_pct: "100.00" },
-          { position: "2", win_pct: "0.00" },
-        ],
-      },
+  it("builds showdown win percentage message from street calculations", async () => {
+    const winPctByCommunityCount: Record<number, [number, number]> = {
+      0: [60, 40],
+      3: [65, 35],
+      4: [72, 28],
+      5: [100, 0],
     };
 
-    const mockFetch = vi.fn(async (input: RequestInfo | URL) => {
-      const requestUrl =
-        typeof input === "string"
-          ? input
-          : input instanceof URL
-            ? input.toString()
-            : input.url;
-      const url = new URL(requestUrl);
-      const board = url.searchParams.get("board");
-      const communityCount = board
-        ? board
-            .trim()
-            .split(/\s+/)
-            .filter((value) => value.length > 0).length
-        : 0;
-      const payload = winPctByCommunityCount[communityCount] ?? { seats: [] };
-      return new Response(JSON.stringify(payload), {
-        status: 200,
-        headers: { "content-type": "application/json" },
-      });
-    });
+    const mockStreetCalculator = vi.fn(
+      async (
+        players: Array<{ playerId: string }>,
+        communityCards: Array<{ rank: string; suit: string }>
+      ) => {
+        const winPcts = winPctByCommunityCount[communityCards.length] ?? [];
+        const results = new Map<string, number>();
+        players.forEach((player, playerIndex) => {
+          const winPct = winPcts[playerIndex];
+          if (typeof winPct === "number") {
+            results.set(player.playerId, winPct);
+          }
+        });
+        return results;
+      }
+    );
 
     const message = await buildShowdownWinPercentageMessage(
       {
@@ -4500,31 +4472,18 @@ describe("Poker Durable Object", () => {
         { description: "player2 had One Pair" },
         { description: "Main pot of 160 won by: player1" },
       ],
-      mockFetch as unknown as typeof fetch
+      mockStreetCalculator as unknown as (
+        players: unknown[],
+        communityCards: Array<{ rank: string; suit: string }>,
+        streetLabel: string
+      ) => Promise<Map<string, number>>
     );
 
-    expect(mockFetch).toHaveBeenCalledTimes(4);
-    const requestUrls = mockFetch.mock.calls.map(([input]) =>
-      typeof input === "string"
-        ? input
-        : input instanceof URL
-          ? input.toString()
-          : input.url
+    expect(mockStreetCalculator).toHaveBeenCalledTimes(4);
+    const cardCountByCall = mockStreetCalculator.mock.calls.map(
+      ([, communityCards]) => communityCards.length
     );
-    const boardByCall = requestUrls.map(
-      (requestUrl) => new URL(requestUrl).searchParams.get("board")
-    );
-    expect(boardByCall).toEqual([
-      null,
-      "2C 7D 9H",
-      "2C 7D 9H QC",
-      "2C 7D 9H QC AS",
-    ]);
-    requestUrls.forEach((requestUrl) => {
-      const parsedUrl = new URL(requestUrl);
-      expect(parsedUrl.searchParams.has("dead_cards")).toBe(false);
-      expect(parsedUrl.searchParams.getAll("community_cards[]")).toHaveLength(0);
-    });
+    expect(cardCountByCall).toEqual([0, 3, 4, 5]);
     expect(message).toContain("*Showdown Win Percentage*");
     expect(message).toContain(
       "<@player1> - Pre-flop: 60.00% | Flop: 65.00% | Turn: 72.00% | River: 100.00%"
@@ -4534,23 +4493,8 @@ describe("Poker Durable Object", () => {
     );
   });
 
-  it("always serializes rank 10 as T for cardplayer API", async () => {
-    const mockFetch = vi.fn(async (_input: RequestInfo | URL) => {
-      return new Response(
-        JSON.stringify({
-          seats: [
-            { position: "1", win_pct: "50.00" },
-            { position: "2", win_pct: "50.00" },
-          ],
-        }),
-        {
-          status: 200,
-          headers: { "content-type": "application/json" },
-        }
-      );
-    });
-
-    await buildShowdownWinPercentageMessage(
+  it("calculates showdown win percentages locally with poker-odds-calc", async () => {
+    const message = await buildShowdownWinPercentageMessage(
       {
         activePlayers: [
           {
@@ -4581,38 +4525,19 @@ describe("Poker Durable Object", () => {
         { description: "player1 had Two Pair" },
         { description: "player2 had One Pair" },
         { description: "Main pot of 160 won by: player1" },
-      ],
-      mockFetch as unknown as typeof fetch
+      ]
     );
 
-    expect(mockFetch).toHaveBeenCalled();
-    const firstCallInput = mockFetch.mock.calls[0][0];
-    const requestUrl =
-      typeof firstCallInput === "string"
-        ? firstCallInput
-        : firstCallInput instanceof URL
-          ? firstCallInput.toString()
-          : firstCallInput.url;
-    const parsedUrl = new URL(requestUrl);
-    const seatCards = parsedUrl.searchParams.getAll("seats[0][hand][]");
-    expect(seatCards).toContain("TH");
-    expect(seatCards).not.toContain("10H");
-
-    // River request should serialize board cards as one space-delimited value.
-    const riverCallInput = mockFetch.mock.calls[3][0];
-    const riverRequestUrl =
-      typeof riverCallInput === "string"
-        ? riverCallInput
-        : riverCallInput instanceof URL
-          ? riverCallInput.toString()
-          : riverCallInput.url;
-    const parsedRiverUrl = new URL(riverRequestUrl);
-    expect(parsedRiverUrl.searchParams.get("board")).toBe("2C 7D 9H QC AS");
-    expect(parsedRiverUrl.searchParams.has("dead_cards")).toBe(false);
+    expect(message).toContain("*Showdown Win Percentage*");
+    expect(message).toContain("<@player1> - Pre-flop:");
+    expect(message).toContain("<@player2> - Pre-flop:");
+    expect(message).not.toContain("N/A");
+    const percentMatches = message?.match(/\d+\.\d{2}%/g) ?? [];
+    expect(percentMatches.length).toBeGreaterThanOrEqual(8);
   });
 
   it("returns null for non-showdown event sets", async () => {
-    const mockFetch = vi.fn();
+    const mockStreetCalculator = vi.fn();
 
     const message = await buildShowdownWinPercentageMessage(
       {
@@ -4642,11 +4567,15 @@ describe("Poker Durable Object", () => {
         ],
       },
       [{ description: "player2 folded!" }],
-      mockFetch as unknown as typeof fetch
+      mockStreetCalculator as unknown as (
+        players: unknown[],
+        communityCards: Array<{ rank: string; suit: string }>,
+        streetLabel: string
+      ) => Promise<Map<string, number>>
     );
 
     expect(message).toBeNull();
-    expect(mockFetch).not.toHaveBeenCalled();
+    expect(mockStreetCalculator).not.toHaveBeenCalled();
   });
 });
 
