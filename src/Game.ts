@@ -1545,7 +1545,8 @@ export class TexasHoldem {
     playerId: string,
     reveal: boolean = false,
     showCommunityCards: boolean = true,
-    showPlayerCards: boolean = true
+    showPlayerCards: boolean = true,
+    cardIndexToReveal?: number
   ): void {
     let player = this.activePlayers.find((p) => p.getId() === playerId);
 
@@ -1562,6 +1563,26 @@ export class TexasHoldem {
       this.events.push(new GameEvent(`${playerId} has no cards to show!`));
       return;
     }
+    const isSingleCardReveal = cardIndexToReveal !== undefined;
+    if (
+      isSingleCardReveal &&
+      (!Number.isInteger(cardIndexToReveal) ||
+        (cardIndexToReveal as number) < 0 ||
+        (cardIndexToReveal as number) >= cards.length)
+    ) {
+      this.events.push(
+        new GameEvent(
+          `${playerId} Invalid card selection! Choose 1 or 2.`
+        )
+      );
+      return;
+    }
+
+    let cardsToShow = cards;
+    if (isSingleCardReveal) {
+      cardsToShow = [cards[cardIndexToReveal as number]];
+    }
+
     const cardStrings = [...this.communityCards, ...cards].map((card) => {
       const rank = card.getRank() === "10" ? "T" : card.getRank().charAt(0);
       const suit = card.getSuit().charAt(0).toLowerCase();
@@ -1569,7 +1590,11 @@ export class TexasHoldem {
     });
 
     let message = "";
-    if (this.communityCards.length > 0) {
+    if (isSingleCardReveal) {
+      message = reveal
+        ? `${playerId} revealed card ${(cardIndexToReveal as number) + 1}`
+        : `Your card ${(cardIndexToReveal as number) + 1}`;
+    } else if (this.communityCards.length > 0) {
       let handDescription = rankDescription[rankCards(cardStrings)];
       if (handDescription == "High Card") {
         handDescription = "Ass";
@@ -1594,7 +1619,7 @@ export class TexasHoldem {
 
     // When showPlayerCards is false, don't include the cards in the event (for cardless reveal)
     if (showPlayerCards) {
-      this.events.push(new GameEvent(message, cards, !reveal, playerId));
+      this.events.push(new GameEvent(message, cardsToShow, !reveal, playerId));
     } else {
       this.events.push(new GameEvent(message, [], !reveal, playerId));
     }

@@ -1681,6 +1681,8 @@ const MESSAGE_HANDLERS = {
   dards: showCards,
   "reveal dardless": revealCardsCardless,
   "reveal cardless": revealCardsCardless,
+  "reveal dard": revealSingleCard,
+  "reveal card": revealSingleCard,
   reveal: revealCards,
   rank: getGameState,
   help: help,
@@ -2361,6 +2363,46 @@ async function help(
       .map((cmd) => `\`${cmd}\``)
       .join("\n")}`,
   });
+}
+
+function parseRevealSingleCardIndex(messageText: string): 0 | 1 | null {
+  const normalizedText = cleanMessageText(messageText);
+  const match = normalizedText.match(
+    /^reveal\s+(?:dard|card)s?\s*\{?\s*([12])\s*\}?$/
+  );
+  if (!match) {
+    return null;
+  }
+  return match[1] === "1" ? 0 : 1;
+}
+
+export async function revealSingleCard(
+  env: Env,
+  context: SlackAppContextWithChannelId,
+  payload: PostedMessage
+) {
+  const game = await fetchGame(env, context);
+  if (!game) {
+    await context.say({ text: `No game exists! Type 'New Game'` });
+    return;
+  }
+  if (game.getGameState() !== GameState.WaitingForPlayers) {
+    await context.say({
+      text: `<@${context.userId}> :narp-brain: Nice try bud`,
+    });
+    return;
+  }
+
+  const selectedCardIndex = parseRevealSingleCardIndex(payload.text ?? "");
+  if (selectedCardIndex === null) {
+    await context.say({
+      text: `Invalid format! Use 'reveal dard 1' or 'reveal dard 2'`,
+    });
+    return;
+  }
+
+  game.showCards(context.userId!, true, true, true, selectedCardIndex);
+  await sendGameEventMessages(env, context, game);
 }
 
 export async function revealCards(
