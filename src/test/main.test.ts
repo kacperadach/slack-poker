@@ -389,7 +389,7 @@ describe("Poker Durable Object", () => {
     const payload = createGenericMessageEvent("1");
     await preDeal(env, context, payload);
     expect(sayFn).toHaveBeenCalledWith({
-      text: "No game exists! Type 'New Game'",
+      text: ":narp-brain: No game exists! Type 'New Game'",
     });
   });
 
@@ -406,7 +406,7 @@ describe("Poker Durable Object", () => {
     const payload = createGenericMessageEvent("1");
     await preNH(env, context, payload);
     expect(sayFn).toHaveBeenCalledWith({
-      text: "No game exists! Type 'New Game'",
+      text: ":narp-brain: No game exists! Type 'New Game'",
     });
   });
 
@@ -521,9 +521,9 @@ describe("Poker Durable Object", () => {
       [
         [
           {
-            "text": "<@user1> is being removed from the game for having no chips
+            "text": ":narp-brain: <@user1> is being removed from the game for having no chips
       <@user1> has left the table!
-      How about you get some friends first",
+      :narp-brain: How about you get some friends first",
           },
         ],
       ]
@@ -1703,7 +1703,7 @@ describe("Poker Durable Object", () => {
       [
         [
           {
-            "text": "<@trapper> Cannot check, not your turn!",
+            "text": ":narp-brain: <@trapper> Cannot check, not your turn!",
           },
         ],
       ]
@@ -2148,7 +2148,7 @@ describe("Poker Durable Object", () => {
       [
         [
           {
-            "text": "<@winner> No chips to cash out!",
+            "text": ":narp-brain: <@winner> No chips to cash out!",
           },
         ],
       ]
@@ -2412,7 +2412,7 @@ describe("Poker Durable Object", () => {
       [
         [
           {
-            "text": "<@player1> Cannot check, not your turn!",
+            "text": ":narp-brain: <@player1> Cannot check, not your turn!",
           },
         ],
       ]
@@ -2428,7 +2428,7 @@ describe("Poker Durable Object", () => {
       [
         [
           {
-            "text": "<@player1> Cannot bet, not your turn!",
+            "text": ":narp-brain: <@player1> Cannot bet, not your turn!",
           },
         ],
       ]
@@ -2440,7 +2440,7 @@ describe("Poker Durable Object", () => {
       [
         [
           {
-            "text": "<@player1> Cannot fold, not your turn!",
+            "text": ":narp-brain: <@player1> Cannot fold, not your turn!",
           },
         ],
       ]
@@ -2483,7 +2483,7 @@ describe("Poker Durable Object", () => {
       [
         [
           {
-            "text": "<@player1> Cannot check, there are active bets! (100 chips)",
+            "text": ":narp-brain: <@player1> Cannot check, there are active bets! (100 chips)",
           },
         ],
       ]
@@ -3489,7 +3489,7 @@ describe("Poker Durable Object", () => {
       [
         [
           {
-            "text": "No game exists! Type 'New Game'",
+            "text": ":narp-brain: No game exists! Type 'New Game'",
           },
         ],
       ]
@@ -3518,7 +3518,7 @@ describe("Poker Durable Object", () => {
       [
         [
           {
-            "text": "Game has not started yet! Who the hell am I going to nudge?",
+            "text": ":narp-brain: Game has not started yet! Who the hell am I going to nudge?",
           },
         ],
       ]
@@ -3851,7 +3851,7 @@ describe("Poker Durable Object", () => {
       [
         [
           {
-            "text": "We're not on the flop! Can't take her to the turn from here.",
+            "text": ":narp-brain: We're not on the flop! Can't take her to the turn from here.",
           },
         ],
       ]
@@ -3901,7 +3901,7 @@ describe("Poker Durable Object", () => {
       [
         [
           {
-            "text": "We're not in pre-flop! Can't take her to the flop from here.",
+            "text": ":narp-brain: We're not in pre-flop! Can't take her to the flop from here.",
           },
         ],
       ]
@@ -3940,7 +3940,7 @@ describe("Poker Durable Object", () => {
       [
         [
           {
-            "text": "We're not on the flop! Can't take her to the turn from here.",
+            "text": ":narp-brain: We're not on the flop! Can't take her to the turn from here.",
           },
         ],
       ]
@@ -3978,7 +3978,7 @@ describe("Poker Durable Object", () => {
       [
         [
           {
-            "text": "We're not on the turn! Can't take her to the river from here.",
+            "text": ":narp-brain: We're not on the turn! Can't take her to the river from here.",
           },
         ],
       ]
