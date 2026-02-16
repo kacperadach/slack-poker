@@ -192,15 +192,15 @@ function buildCardPlayerUrl(
     );
   });
 
-  communityCards.forEach((card) => {
-    const serialized = toApiCard(card);
-    url.searchParams.append("community_cards[]", serialized);
-    url.searchParams.append("board[]", serialized);
-    url.searchParams.append("board_cards[]", serialized);
-    url.searchParams.append("community[]", serialized);
-  });
+  // CardPlayer's calculator expects post-flop board cards as one
+  // space-delimited `board` query parameter (e.g. "2C 7D 9H").
+  if (communityCards.length >= 3) {
+    url.searchParams.append(
+      "board",
+      communityCards.map((card) => toApiCard(card)).join(" ")
+    );
+  }
 
-  url.searchParams.append("dead_cards", "");
   return url;
 }
 

@@ -4364,7 +4364,13 @@ describe("Poker Durable Object", () => {
             ? input.toString()
             : input.url;
       const url = new URL(requestUrl);
-      const communityCount = url.searchParams.getAll("community_cards[]").length;
+      const board = url.searchParams.get("board");
+      const communityCount = board
+        ? board
+            .trim()
+            .split(/\s+/)
+            .filter((value) => value.length > 0).length
+        : 0;
       const payload = winPctByCommunityCount[communityCount] ?? { seats: [] };
       return new Response(JSON.stringify(payload), {
         status: 200,
@@ -4409,6 +4415,27 @@ describe("Poker Durable Object", () => {
     );
 
     expect(mockFetch).toHaveBeenCalledTimes(4);
+    const requestUrls = mockFetch.mock.calls.map(([input]) =>
+      typeof input === "string"
+        ? input
+        : input instanceof URL
+          ? input.toString()
+          : input.url
+    );
+    const boardByCall = requestUrls.map(
+      (requestUrl) => new URL(requestUrl).searchParams.get("board")
+    );
+    expect(boardByCall).toEqual([
+      null,
+      "2C 7D 9H",
+      "2C 7D 9H QC",
+      "2C 7D 9H QC AS",
+    ]);
+    requestUrls.forEach((requestUrl) => {
+      const parsedUrl = new URL(requestUrl);
+      expect(parsedUrl.searchParams.has("dead_cards")).toBe(false);
+      expect(parsedUrl.searchParams.getAll("community_cards[]")).toHaveLength(0);
+    });
     expect(message).toContain("*Showdown Win Percentage*");
     expect(message).toContain(
       "<@player1> - Pre-flop: 60.00% | Flop: 65.00% | Turn: 72.00% | River: 100.00%"
@@ -4481,6 +4508,18 @@ describe("Poker Durable Object", () => {
     const seatCards = parsedUrl.searchParams.getAll("seats[0][hand][]");
     expect(seatCards).toContain("TH");
     expect(seatCards).not.toContain("10H");
+
+    // River request should serialize board cards as one space-delimited value.
+    const riverCallInput = mockFetch.mock.calls[3][0];
+    const riverRequestUrl =
+      typeof riverCallInput === "string"
+        ? riverCallInput
+        : riverCallInput instanceof URL
+          ? riverCallInput.toString()
+          : riverCallInput.url;
+    const parsedRiverUrl = new URL(riverRequestUrl);
+    expect(parsedRiverUrl.searchParams.get("board")).toBe("2C 7D 9H QC AS");
+    expect(parsedRiverUrl.searchParams.has("dead_cards")).toBe(false);
   });
 
   it("returns null for non-showdown event sets", async () => {
