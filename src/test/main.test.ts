@@ -521,7 +521,7 @@ describe("Poker Durable Object", () => {
       [
         [
           {
-            "text": ":narp-brain: <@user1> is being removed from the game for having no chips
+            "text": "<@user1> :narp-brain: is being removed from the game for having no chips
       <@user1> has left the table!
       :narp-brain: How about you get some friends first",
           },
@@ -1703,7 +1703,7 @@ describe("Poker Durable Object", () => {
       [
         [
           {
-            "text": ":narp-brain: <@trapper> Cannot check, not your turn!",
+            "text": "<@trapper> :narp-brain: Cannot check, not your turn!",
           },
         ],
       ]
@@ -2148,7 +2148,7 @@ describe("Poker Durable Object", () => {
       [
         [
           {
-            "text": ":narp-brain: <@winner> No chips to cash out!",
+            "text": "<@winner> :narp-brain: No chips to cash out!",
           },
         ],
       ]
@@ -2412,7 +2412,7 @@ describe("Poker Durable Object", () => {
       [
         [
           {
-            "text": ":narp-brain: <@player1> Cannot check, not your turn!",
+            "text": "<@player1> :narp-brain: Cannot check, not your turn!",
           },
         ],
       ]
@@ -2428,7 +2428,7 @@ describe("Poker Durable Object", () => {
       [
         [
           {
-            "text": ":narp-brain: <@player1> Cannot bet, not your turn!",
+            "text": "<@player1> :narp-brain: Cannot bet, not your turn!",
           },
         ],
       ]
@@ -2440,7 +2440,7 @@ describe("Poker Durable Object", () => {
       [
         [
           {
-            "text": ":narp-brain: <@player1> Cannot fold, not your turn!",
+            "text": "<@player1> :narp-brain: Cannot fold, not your turn!",
           },
         ],
       ]
@@ -2483,7 +2483,7 @@ describe("Poker Durable Object", () => {
       [
         [
           {
-            "text": ":narp-brain: <@player1> Cannot check, there are active bets! (100 chips)",
+            "text": "<@player1> :narp-brain: Cannot check, there are active bets! (100 chips)",
           },
         ],
       ]
