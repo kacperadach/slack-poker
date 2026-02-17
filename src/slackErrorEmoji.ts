@@ -42,7 +42,9 @@ function addEmojiAfterLeadingUserTag(message: string): string | null {
 
   const leadingTagBlock = leadingTagsMatch[1].replace(/\s+$/, "");
   const remainingMessage = message.slice(leadingTagsMatch[1].length);
-  return `${leadingTagBlock} ${NARP_BRAIN_EMOJI}${remainingMessage}`;
+  const separator =
+    remainingMessage.length > 0 && !/^\s/.test(remainingMessage) ? " " : "";
+  return `${leadingTagBlock} ${NARP_BRAIN_EMOJI}${separator}${remainingMessage}`;
 }
 
 export function ensureNarpBrainOnError(message: string): string {
