@@ -19,7 +19,7 @@ import type {
   NewGameActionV1,
   RoundStartActionV1,
 } from "./ActionLog";
-import { getHubsStockPriceMessage } from "./StockPrice";
+import { getHubsStockPriceMessage, getStockPriceMessage } from "./StockPrice";
 import { buildShowdownWinPercentageMessage } from "./ShowdownWinPercentage";
 import { ensureNarpBrainOnError } from "./slackErrorEmoji";
 
@@ -1835,6 +1835,23 @@ async function handleMessage(
 
   if (messageText.includes("algo")) {
     await context.say({ text: ALGO_MESSAGE });
+    return;
+  }
+
+  // Check for $SYMBOL pattern (e.g., $FIG, $HUBS, $GOOG)
+  const stockSymbolMatch = messageText.match(/^\$([a-z]{1,5})$/i);
+  if (stockSymbolMatch) {
+    const symbol = stockSymbolMatch[1].toUpperCase();
+    const stockPriceMessage = await getStockPriceMessage(symbol);
+    if (stockPriceMessage) {
+      await context.say({ text: stockPriceMessage });
+    } else {
+      await context.say({
+        text: ensureNarpBrainOnError(
+          `Unable to fetch ${symbol} stock price at this time.`
+        ),
+      });
+    }
     return;
   }
 
