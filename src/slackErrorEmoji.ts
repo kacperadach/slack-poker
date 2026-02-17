@@ -34,6 +34,17 @@ export function isSlackErrorMessage(message: string): boolean {
   );
 }
 
+function addEmojiAfterLeadingUserTag(message: string): string | null {
+  const leadingTagsMatch = message.match(/^(\s*(?:<@[^>]+>\s*)+)/);
+  if (!leadingTagsMatch) {
+    return null;
+  }
+
+  const leadingTagBlock = leadingTagsMatch[1].replace(/\s+$/, "");
+  const remainingMessage = message.slice(leadingTagsMatch[1].length);
+  return `${leadingTagBlock} ${NARP_BRAIN_EMOJI}${remainingMessage}`;
+}
+
 export function ensureNarpBrainOnError(message: string): string {
   if (!message || message.includes(NARP_BRAIN_EMOJI)) {
     return message;
@@ -41,6 +52,11 @@ export function ensureNarpBrainOnError(message: string): string {
 
   if (!isSlackErrorMessage(message)) {
     return message;
+  }
+
+  const taggedMessageWithEmoji = addEmojiAfterLeadingUserTag(message);
+  if (taggedMessageWithEmoji) {
+    return taggedMessageWithEmoji;
   }
 
   return `${NARP_BRAIN_EMOJI} ${message}`;
