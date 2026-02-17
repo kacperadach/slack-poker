@@ -1838,7 +1838,16 @@ async function handleMessage(
     return;
   }
 
+  // Check if "hubs only" mode is enabled for this channel
+  // When enabled, only allow: stock commands, hubs only, all commands
+  const stub = getDurableObject(env, context);
+  const hubsOnlyMode = await stub.isHubsOnlyMode(context.teamId!, context.channelId);
+
+  // Commands allowed when in "hubs only" mode
+  const HUBS_ONLY_WHITELIST = ["hubs", "hubs only", "all commands", "gyvs"];
+
   // Check for $SYMBOL pattern (e.g., $FIG, $HUBS, $GOOG)
+  // Stock commands are always allowed, including in "hubs only" mode
   const stockSymbolMatch = messageText.match(/^\$([a-z]{1,5})$/i);
   if (stockSymbolMatch) {
     const symbol = stockSymbolMatch[1].toUpperCase();
@@ -1855,13 +1864,8 @@ async function handleMessage(
     return;
   }
 
-  // Check if "hubs only" mode is enabled for this channel
-  // When enabled, only allow: hubs, hubs only, all commands
-  const stub = getDurableObject(env, context);
-  const hubsOnlyMode = await stub.isHubsOnlyMode(context.teamId!, context.channelId);
-
-  // Commands allowed when in "hubs only" mode
-  const HUBS_ONLY_WHITELIST = ["hubs", "hubs only", "all commands", "gyvs"];
+  // In "hubs only" mode, block non-whitelisted commands early
+  // (stock commands handled above are always allowed)
 
   for (const [key, handler] of Object.entries(MESSAGE_HANDLERS)) {
     if (messageText.startsWith(key)) {
