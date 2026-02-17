@@ -11,6 +11,9 @@ vi.mock("../StockPrice", () => ({
   }),
   formatStockPrice: vi.fn().mockReturnValue(":chart_with_upwards_trend: $HUBS: $1,000.00 (+10.00, +1.00%)"),
   getHubsStockPriceMessage: vi.fn().mockResolvedValue(":chart_with_upwards_trend: $HUBS: $1,000.00 (+10.00, +1.00%)"),
+  getStockPriceMessage: vi.fn().mockImplementation((symbol: string) => 
+    Promise.resolve(`:chart_with_upwards_trend: $${symbol.toUpperCase()}: $1,000.00 (+10.00, +1.00%)`)
+  ),
 }));
 import { GameState, TexasHoldem } from "../Game";
 import { Card } from "../Card";

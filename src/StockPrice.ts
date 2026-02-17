@@ -125,3 +125,18 @@ export async function getHubsStockPriceMessage(): Promise<string | null> {
   }
   return formatStockPrice(result);
 }
+
+/**
+ * Fetches and formats the stock price for any given symbol.
+ * Returns null if the price cannot be fetched.
+ *
+ * @param symbol - The stock symbol (e.g., "FIG", "HUBS", "GOOG")
+ * @returns Formatted string or null
+ */
+export async function getStockPriceMessage(symbol: string): Promise<string | null> {
+  const result = await fetchStockPrice(symbol);
+  if (!result) {
+    return null;
+  }
+  return formatStockPrice(result);
+}
