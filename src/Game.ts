@@ -333,7 +333,9 @@ export class TexasHoldem {
 
     const currentPlayer = this.getCurrentPlayer();
     if (currentPlayer) {
-      this.events.push(new GameEvent(`${currentPlayer.getId()}'s turn!`));
+      this.events.push(
+        new GameEvent(`${currentPlayer.getId()}'s turn`, [], false, "", true)
+      );
     }
     return Success;
   }
