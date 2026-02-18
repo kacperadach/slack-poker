@@ -9,48 +9,6 @@ export interface StockPriceResult {
   price: number;
   change: number;
   changePercent: number;
-  session: "regular" | "pre" | "post";
-}
-
-interface TradingPeriod {
-  start?: number;
-  end?: number;
-}
-
-function isWithinTradingPeriod(period: TradingPeriod | undefined, now: number): boolean {
-  if (typeof period?.start !== "number" || typeof period?.end !== "number") {
-    return false;
-  }
-  return now >= period.start && now < period.end;
-}
-
-function getLatestCloseInTradingPeriod(
-  timestamps: number[] | undefined,
-  closes: Array<number | null> | undefined,
-  period: TradingPeriod | undefined
-): number | null {
-  if (
-    typeof period?.start !== "number" ||
-    typeof period?.end !== "number" ||
-    !timestamps ||
-    !closes
-  ) {
-    return null;
-  }
-
-  for (let i = Math.min(timestamps.length, closes.length) - 1; i >= 0; i--) {
-    const timestamp = timestamps[i];
-    if (timestamp < period.start || timestamp >= period.end) {
-      continue;
-    }
-
-    const close = closes[i];
-    if (typeof close === "number") {
-      return close;
-    }
-  }
-
-  return null;
 }
 
 /**
@@ -69,7 +27,7 @@ export async function fetchStockPrice(
     const controller = new AbortController();
     const timeoutId = setTimeout(() => controller.abort(), timeoutMs);
 
-    const url = `https://query1.finance.yahoo.com/v8/finance/chart/${encodeURIComponent(symbol)}?interval=1m&range=1d&includePrePost=true`;
+    const url = `https://query1.finance.yahoo.com/v8/finance/chart/${encodeURIComponent(symbol)}?interval=1d&range=1d`;
 
     const response = await fetch(url, {
       signal: controller.signal,
@@ -91,17 +49,6 @@ export async function fetchStockPrice(
             regularMarketPrice?: number;
             chartPreviousClose?: number;
             previousClose?: number;
-            currentTradingPeriod?: {
-              pre?: TradingPeriod;
-              regular?: TradingPeriod;
-              post?: TradingPeriod;
-            };
-          };
-          timestamp?: number[];
-          indicators?: {
-            quote?: Array<{
-              close?: Array<number | null>;
-            }>;
           };
         }>;
       };
@@ -118,41 +65,7 @@ export async function fetchStockPrice(
       return null;
     }
 
-    const timestamps = result.timestamp;
-    const closes = result.indicators?.quote?.[0]?.close;
-    const preMarketPrice = getLatestCloseInTradingPeriod(
-      timestamps,
-      closes,
-      meta.currentTradingPeriod?.pre
-    );
-    const postMarketPrice = getLatestCloseInTradingPeriod(
-      timestamps,
-      closes,
-      meta.currentTradingPeriod?.post
-    );
-
-    const now = Math.floor(Date.now() / 1000);
-    const isRegularMarketOpen = isWithinTradingPeriod(
-      meta.currentTradingPeriod?.regular,
-      now
-    );
-    const isMorningPreMarket = isWithinTradingPeriod(
-      meta.currentTradingPeriod?.pre,
-      now
-    );
-
-    let session: StockPriceResult["session"] = "regular";
-    let currentPrice = meta.regularMarketPrice;
-    if (isMorningPreMarket) {
-      if (typeof preMarketPrice === "number") {
-        session = "pre";
-        currentPrice = preMarketPrice;
-      }
-    } else if (!isRegularMarketOpen && typeof postMarketPrice === "number") {
-      session = "post";
-      currentPrice = postMarketPrice;
-    }
-
+    const currentPrice = meta.regularMarketPrice;
     const previousClose = meta.chartPreviousClose ?? meta.previousClose;
 
     if (typeof currentPrice !== "number") {
@@ -171,7 +84,6 @@ export async function fetchStockPrice(
       price: currentPrice,
       change: Math.round(change * 100) / 100,
       changePercent: Math.round(changePercent * 100) / 100,
-      session,
     };
   } catch {
     // Any error (network, timeout, parsing, etc.) - return null
@@ -196,14 +108,8 @@ export function formatStockPrice(result: StockPriceResult): string {
   const changePercentStr = `${changeSign}${result.changePercent.toFixed(2)}%`;
 
   const emoji = result.change >= 0 ? ":chart_with_upwards_trend:" : ":chart_with_downwards_trend:";
-  const sessionLabel =
-    result.session === "pre"
-      ? " [pre-market]"
-      : result.session === "post"
-        ? " [post-market]"
-        : "";
 
-  return `${emoji} $${result.symbol}: ${priceStr}${sessionLabel} (${changeStr}, ${changePercentStr})`;
+  return `${emoji} $${result.symbol}: ${priceStr} (${changeStr}, ${changePercentStr})`;
 }
 
 /**
