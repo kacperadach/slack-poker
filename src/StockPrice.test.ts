@@ -52,6 +52,49 @@ describe("fetchStockPrice", () => {
     });
   });
 
+  it("does not fall back to post-market during pre-market hours", async () => {
+    const nowSeconds = 150;
+    vi.spyOn(Date, "now").mockReturnValue(nowSeconds * 1000);
+
+    vi.stubGlobal(
+      "fetch",
+      vi.fn().mockResolvedValue({
+        ok: true,
+        json: async () => ({
+          chart: {
+            result: [
+              {
+                meta: {
+                  regularMarketPrice: 100,
+                  chartPreviousClose: 95,
+                  currentTradingPeriod: {
+                    pre: { start: 100, end: 200 },
+                    regular: { start: 200, end: 300 },
+                    post: { start: 300, end: 400 },
+                  },
+                },
+                timestamp: [110, 150, 220, 310, 330],
+                indicators: {
+                  quote: [{ close: [null, null, 101, 102, 103] }],
+                },
+              },
+            ],
+          },
+        }),
+      })
+    );
+
+    const result = await fetchStockPrice("aapl");
+
+    expect(result).toEqual({
+      symbol: "AAPL",
+      price: 100,
+      change: 5,
+      changePercent: 5.26,
+      session: "regular",
+    });
+  });
+
   it("uses post-market price when regular market is closed", async () => {
     const nowSeconds = 450;
     vi.spyOn(Date, "now").mockReturnValue(nowSeconds * 1000);

@@ -143,9 +143,11 @@ export async function fetchStockPrice(
 
     let session: StockPriceResult["session"] = "regular";
     let currentPrice = meta.regularMarketPrice;
-    if (isMorningPreMarket && typeof preMarketPrice === "number") {
-      session = "pre";
-      currentPrice = preMarketPrice;
+    if (isMorningPreMarket) {
+      if (typeof preMarketPrice === "number") {
+        session = "pre";
+        currentPrice = preMarketPrice;
+      }
     } else if (!isRegularMarketOpen && typeof postMarketPrice === "number") {
       session = "post";
       currentPrice = postMarketPrice;
