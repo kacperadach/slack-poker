@@ -2041,7 +2041,7 @@ export async function context(
       const playerObj = activePlayers.find((ap) => ap.getId() === p.playerId);
       const chipCount = playerObj ? playerObj.getChips() : 0;
 
-      let line = displayName;
+      let line = `*${displayName}*`;
       // Add chip count
       line += ` [${chipCount}]`;
       // Add position label if present
@@ -2067,7 +2067,7 @@ export async function context(
     const nonFoldedPlayers = game.getNonFoldedPlayersInOrder();
     if (nonFoldedPlayers.length > 0 && nonFoldedPlayers.length < playersInOrder.length) {
       const nonFoldedNames = nonFoldedPlayers.map(
-        (id) => userIdToName[id as keyof typeof userIdToName] || `<@${id}>`
+        (id) => `*${userIdToName[id as keyof typeof userIdToName] || `<@${id}>`}*`
       );
       message += `*Still in hand:* ${nonFoldedNames.join(", ")}\n\n`;
     }
@@ -2302,7 +2302,7 @@ export async function silentNudgePlayer(
   const displayName = userIdToName[playerId as keyof typeof userIdToName] || playerId;
   
   await context.say({
-    text: `^${displayName.toLowerCase()}^ ... ᶦᵗ'ˢ ʸᵒᵘʳ ᵗᵘʳⁿ`,
+    text: `^*${displayName.toLowerCase()}*^ ... ᶦᵗ'ˢ ʸᵒᵘʳ ᵗᵘʳⁿ`,
   });
 }
 
@@ -3110,7 +3110,7 @@ export async function showStacks(
       numActivePlayers > 0
         ? Math.round(chips / orbitCost)
         : 0;
-    message += `${name}: ${chips} (${bbMultiple}xBB, ${orbitsLeft} orbits) Active\n`;
+    message += `*${name}*: ${chips} (${bbMultiple}xBB, ${orbitsLeft} orbits) Active\n`;
   });
 
   game.getInactivePlayers().forEach((player) => {
@@ -3123,7 +3123,7 @@ export async function showStacks(
       numActivePlayers > 0
         ? Math.round(chips / orbitCost)
         : 0;
-    message += `${name}: ${chips} (${bbMultiple}xBB, ${orbitsLeft} orbits) Inactive\n`;
+    message += `*${name}*: ${chips} (${bbMultiple}xBB, ${orbitsLeft} orbits) Inactive\n`;
   });
 
   await context.say({ text: message });
@@ -3491,7 +3491,7 @@ function replacePlayerIdsWithDisplayNames(
   playerIds.forEach((playerId) => {
     const displayName =
       userIdToName[playerId as keyof typeof userIdToName] || playerId;
-    result = result.replace(new RegExp(playerId, "g"), displayName);
+    result = result.replace(new RegExp(playerId, "g"), `*${displayName}*`);
   });
   return result;
 }
