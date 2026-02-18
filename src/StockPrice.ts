@@ -9,6 +9,10 @@ export interface StockPriceResult {
   price: number;
   change: number;
   changePercent: number;
+  marketState?: string;
+  postMarketPrice?: number;
+  postMarketChange?: number;
+  postMarketChangePercent?: number;
 }
 
 /**
@@ -49,18 +53,22 @@ export async function fetchStockPrice(
             regularMarketPrice?: number;
             chartPreviousClose?: number;
             previousClose?: number;
+            marketState?: string;
+            postMarketPrice?: number;
+            postMarketChange?: number;
+            postMarketChangePercent?: number;
           };
         }>;
       };
     };
 
     // Extract price data from Yahoo Finance response
-    const result = data?.chart?.result?.[0];
-    if (!result) {
+    const chartResult = data?.chart?.result?.[0];
+    if (!chartResult) {
       return null;
     }
 
-    const meta = result.meta;
+    const meta = chartResult.meta;
     if (!meta) {
       return null;
     }
@@ -79,12 +87,28 @@ export async function fetchStockPrice(
         ? (change / previousClose) * 100
         : 0;
 
-    return {
+    const stockResult: StockPriceResult = {
       symbol: symbol.toUpperCase(),
       price: currentPrice,
       change: Math.round(change * 100) / 100,
       changePercent: Math.round(changePercent * 100) / 100,
     };
+
+    // Add after-hours data if available
+    if (meta.marketState) {
+      stockResult.marketState = meta.marketState;
+    }
+    if (typeof meta.postMarketPrice === "number") {
+      stockResult.postMarketPrice = meta.postMarketPrice;
+    }
+    if (typeof meta.postMarketChange === "number") {
+      stockResult.postMarketChange = Math.round(meta.postMarketChange * 100) / 100;
+    }
+    if (typeof meta.postMarketChangePercent === "number") {
+      stockResult.postMarketChangePercent = Math.round(meta.postMarketChangePercent * 100) / 100;
+    }
+
+    return stockResult;
   } catch {
     // Any error (network, timeout, parsing, etc.) - return null
     return null;
@@ -93,9 +117,11 @@ export async function fetchStockPrice(
 
 /**
  * Formats a stock price result into a display string for Slack.
+ * When the market is closed and after-hours data is available,
+ * shows both the closing price and after-hours price.
  *
  * @param result - The stock price result
- * @returns Formatted string like "$HUBS: $650.23 (+2.15, +0.33%)"
+ * @returns Formatted string like "$HUBS: $650.23 (+2.15, +0.33%)" or with after-hours info
  */
 export function formatStockPrice(result: StockPriceResult): string {
   const priceStr = result.price.toLocaleString("en-US", {
@@ -109,7 +135,34 @@ export function formatStockPrice(result: StockPriceResult): string {
 
   const emoji = result.change >= 0 ? ":chart_with_upwards_trend:" : ":chart_with_downwards_trend:";
 
-  return `${emoji} $${result.symbol}: ${priceStr} (${changeStr}, ${changePercentStr})`;
+  let message = `${emoji} $${result.symbol}: ${priceStr} (${changeStr}, ${changePercentStr})`;
+
+  // Add after-hours info if market is closed/post-market and after-hours data is available
+  const isAfterHours = result.marketState === "POST" || result.marketState === "POSTPOST" || result.marketState === "CLOSED";
+  
+  if (isAfterHours && typeof result.postMarketPrice === "number") {
+    const postPriceStr = result.postMarketPrice.toLocaleString("en-US", {
+      style: "currency",
+      currency: "USD",
+    });
+    
+    const postChangeSign = (result.postMarketChange ?? 0) >= 0 ? "+" : "";
+    const postChangeStr = typeof result.postMarketChange === "number" 
+      ? `${postChangeSign}${result.postMarketChange.toFixed(2)}` 
+      : "";
+    const postChangePercentStr = typeof result.postMarketChangePercent === "number"
+      ? `${postChangeSign}${result.postMarketChangePercent.toFixed(2)}%`
+      : "";
+    
+    const postEmoji = (result.postMarketChange ?? 0) >= 0 ? ":chart_with_upwards_trend:" : ":chart_with_downwards_trend:";
+    
+    message += `\n${postEmoji} After-hours: ${postPriceStr}`;
+    if (postChangeStr && postChangePercentStr) {
+      message += ` (${postChangeStr}, ${postChangePercentStr})`;
+    }
+  }
+
+  return message;
 }
 
 /**
