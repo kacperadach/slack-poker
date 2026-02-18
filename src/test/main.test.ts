@@ -506,7 +506,7 @@ describe("Poker Durable Object", () => {
       [
         [
           {
-            "text": "user1 Welcome to the table!",
+            "text": "*user1* Welcome to the table!",
           },
         ],
       ]
@@ -524,8 +524,8 @@ describe("Poker Durable Object", () => {
       [
         [
           {
-            "text": ":narp-brain: user1 is being removed from the game for having no chips
-      user1 has left the table!
+            "text": ":narp-brain: *user1* is being removed from the game for having no chips
+      *user1* has left the table!
       :narp-brain: How about you get some friends first",
           },
         ],
@@ -543,7 +543,7 @@ describe("Poker Durable Object", () => {
       [
         [
           {
-            "text": "user2 Welcome to the table!",
+            "text": "*user2* Welcome to the table!",
           },
         ],
       ]
@@ -564,7 +564,7 @@ describe("Poker Durable Object", () => {
       [
         [
           {
-            "text": "user1 Bought-in for 1000 chips",
+            "text": "*user1* Bought-in for 1000 chips",
           },
         ],
       ]
@@ -586,7 +586,7 @@ describe("Poker Durable Object", () => {
       [
         [
           {
-            "text": "user2 Bought-in for 1000 chips",
+            "text": "*user2* Bought-in for 1000 chips",
           },
         ],
       ]
@@ -601,7 +601,7 @@ describe("Poker Durable Object", () => {
       [
         [
           {
-            "text": "user1 Welcome to the table!",
+            "text": "*user1* Welcome to the table!",
           },
         ],
       ]
@@ -624,13 +624,13 @@ describe("Poker Durable Object", () => {
         [
           {
             "text": "Starting round with players: 
-      user2 1000 chips
-      user1 1000 chips
+      *user2* 1000 chips
+      *user1* 1000 chips
 
-      user2 has the dealer button
-      user1 posted small blind of 40
-      user2 posted big blind of 80
-      user1's turn!",
+      *user2* has the dealer button
+      *user1* posted small blind of 40
+      *user2* posted big blind of 80
+      *user1*'s turn!",
           },
         ],
       ]
@@ -640,7 +640,7 @@ describe("Poker Durable Object", () => {
         [
           {
             "channel": "test-channel",
-            "text": "user2 your cards:
+            "text": "*user2* your cards:
       7:clubs: K:spades:",
             "user": "user2",
           },
@@ -648,7 +648,7 @@ describe("Poker Durable Object", () => {
         [
           {
             "channel": "test-channel",
-            "text": "user1 your cards:
+            "text": "*user1* your cards:
       6:clubs: 5:clubs:",
             "user": "user1",
           },
@@ -668,7 +668,7 @@ describe("Poker Durable Object", () => {
       [
         [
           {
-            "text": "user1 called 80 chips! Total Pot: 160
+            "text": "*user1* called 80 chips! Total Pot: 160
       <@user2>'s turn",
           },
         ],
@@ -686,7 +686,7 @@ describe("Poker Durable Object", () => {
       [
         [
           {
-            "text": "user2 checked!
+            "text": "*user2* checked!
       *NEW* Flop:
       1 flops discovered (0.00%), 22,099 remain
       10:spades: 3:clubs: 8:spades:
@@ -708,7 +708,7 @@ describe("Poker Durable Object", () => {
       [
         [
           {
-            "text": "user1 checked!
+            "text": "*user1* checked!
       <@user2>'s turn",
           },
         ],
@@ -726,7 +726,7 @@ describe("Poker Durable Object", () => {
       [
         [
           {
-            "text": "user2 checked!
+            "text": "*user2* checked!
       Turn:
       10:spades: 3:clubs: 8:spades: A:diamonds:
       <@user1>'s turn",
@@ -745,7 +745,7 @@ describe("Poker Durable Object", () => {
       [
         [
           {
-            "text": "user1 checked!
+            "text": "*user1* checked!
       <@user2>'s turn",
           },
         ],
@@ -763,7 +763,7 @@ describe("Poker Durable Object", () => {
       [
         [
           {
-            "text": "user2 checked!
+            "text": "*user2* checked!
       River:
       10:spades: 3:clubs: 8:spades: A:diamonds: K:diamonds:
       <@user1>'s turn",
@@ -782,7 +782,7 @@ describe("Poker Durable Object", () => {
       [
         [
           {
-            "text": "user1 checked!
+            "text": "*user1* checked!
       <@user2>'s turn",
           },
         ],
@@ -799,15 +799,15 @@ describe("Poker Durable Object", () => {
       [
         [
           {
-            "text": "user2 checked!
+            "text": "*user2* checked!
       <@user1>'s turn
       Community Cards:
       10:spades: 3:clubs: 8:spades: A:diamonds: K:diamonds:
-      user2 had One Pair
+      *user2* had One Pair
       7:clubs: K:spades:
-      user1 had High Card
+      *user1* had High Card
       6:clubs: 5:clubs:
-      Main pot of 160 won by: user2",
+      Main pot of 160 won by: *user2*",
           },
         ],
       ]
@@ -833,13 +833,13 @@ describe("Poker Durable Object", () => {
         [
           {
             "text": "Starting round with players: 
-      user2 1080 chips
-      user1 920 chips
+      *user2* 1080 chips
+      *user1* 920 chips
 
-      user1 has the dealer button
-      user2 posted small blind of 40
-      user1 posted big blind of 80
-      user2's turn!",
+      *user1* has the dealer button
+      *user2* posted small blind of 40
+      *user1* posted big blind of 80
+      *user2*'s turn!",
           },
         ],
       ]
@@ -855,9 +855,9 @@ describe("Poker Durable Object", () => {
       [
         [
           {
-            "text": "user2 folded!
+            "text": "*user2* folded!
       <@user1>'s turn
-      user1 wins 120 chips!
+      *user1* wins 120 chips!
       Community Cards would have been:
       10:spades: 3:clubs: 8:spades: A:diamonds: K:diamonds:",
           },
@@ -963,13 +963,13 @@ describe("Poker Durable Object", () => {
         [
           {
             "text": "Starting round with players: 
-      alice 500 chips
-      bob 500 chips
+      *alice* 500 chips
+      *bob* 500 chips
 
-      alice has the dealer button
-      bob posted small blind of 40
-      alice posted big blind of 80
-      bob's turn!",
+      *alice* has the dealer button
+      *bob* posted small blind of 40
+      *alice* posted big blind of 80
+      *bob*'s turn!",
           },
         ],
       ]
@@ -992,7 +992,7 @@ describe("Poker Durable Object", () => {
         [
           {
             "text": "<@alice>'s turn
-      bob raised 160 chips! Total Pot: 240",
+      *bob* raised 160 chips! Total Pot: 240",
           },
         ],
       ]
@@ -1011,7 +1011,7 @@ describe("Poker Durable Object", () => {
       [
         [
           {
-            "text": "alice called 160 chips! Total Pot: 320
+            "text": "*alice* called 160 chips! Total Pot: 320
       *NEW* Flop:
       1 flops discovered (0.00%), 22,099 remain
       Q:diamonds: 9:spades: J:diamonds:
@@ -1039,7 +1039,7 @@ describe("Poker Durable Object", () => {
         [
           {
             "text": "<@alice>'s turn
-      bob bet 100 chips! Total Pot: 420",
+      *bob* bet 100 chips! Total Pot: 420",
           },
         ],
       ]
@@ -1062,7 +1062,7 @@ describe("Poker Durable Object", () => {
       [
         [
           {
-            "text": "alice called 100 chips! Total Pot: 520
+            "text": "*alice* called 100 chips! Total Pot: 520
       Turn:
       Q:diamonds: 9:spades: J:diamonds: 10:diamonds:
       <@bob>'s turn",
@@ -1089,7 +1089,7 @@ describe("Poker Durable Object", () => {
         [
           {
             "text": "<@alice>'s turn
-      bob bet 150 chips! Total Pot: 670",
+      *bob* bet 150 chips! Total Pot: 670",
           },
         ],
       ]
@@ -1105,9 +1105,9 @@ describe("Poker Durable Object", () => {
       [
         [
           {
-            "text": "alice folded!
+            "text": "*alice* folded!
       <@bob>'s turn
-      bob wins 670 chips!
+      *bob* wins 670 chips!
       Community Cards would have been:
       Q:diamonds: 9:spades: J:diamonds: 10:diamonds: 9:diamonds:",
           },
@@ -1320,13 +1320,13 @@ describe("Poker Durable Object", () => {
         [
           {
             "text": "Starting round with players: 
-      player1 300 chips
-      player2 300 chips
+      *player1* 300 chips
+      *player2* 300 chips
 
-      player1 has the dealer button
-      player2 posted small blind of 40
-      player1 posted big blind of 80
-      player2's turn!",
+      *player1* has the dealer button
+      *player2* posted small blind of 40
+      *player1* posted big blind of 80
+      *player2*'s turn!",
           },
         ],
       ]
@@ -1348,7 +1348,7 @@ describe("Poker Durable Object", () => {
         [
           {
             "text": "<@player1>'s turn
-      player2 raised 300 chips! *:rotating_light: ALL-IN :rotating_light:* Total Pot: 380",
+      *player2* raised 300 chips! *:rotating_light: ALL-IN :rotating_light:* Total Pot: 380",
           },
         ],
       ]
@@ -1368,7 +1368,7 @@ describe("Poker Durable Object", () => {
       [
         [
           {
-            "text": "player1 called 300 chips *:rotating_light: ALL-IN :rotating_light:* Total Pot: 600
+            "text": "*player1* called 300 chips *:rotating_light: ALL-IN :rotating_light:* Total Pot: 600
       Flop:
       10:spades: 2:diamonds: 8:spades: A:hearts: 4:spades:
       Turn:
@@ -1378,11 +1378,11 @@ describe("Poker Durable Object", () => {
       <@player2>'s turn
       Community Cards:
       10:spades: 2:diamonds: 8:spades: A:hearts: 4:spades:
-      player1 had One Pair
+      *player1* had One Pair
       4:diamonds: K:spades:
-      player2 had One Pair
+      *player2* had One Pair
       A:spades: 3:diamonds:
-      Main pot of 600 won by: player2",
+      Main pot of 600 won by: *player2*",
           },
         ],
       ]
@@ -1482,14 +1482,14 @@ describe("Poker Durable Object", () => {
         [
           {
             "text": "Starting round with players: 
-      alice 1000 chips
-      bob 1000 chips
-      charlie 1000 chips
+      *alice* 1000 chips
+      *bob* 1000 chips
+      *charlie* 1000 chips
 
-      alice has the dealer button
-      bob posted small blind of 40
-      charlie posted big blind of 80
-      alice's turn!",
+      *alice* has the dealer button
+      *bob* posted small blind of 40
+      *charlie* posted big blind of 80
+      *alice*'s turn!",
           },
         ],
       ]
@@ -1503,7 +1503,7 @@ describe("Poker Durable Object", () => {
       [
         [
           {
-            "text": "alice called 80 chips! Total Pot: 200
+            "text": "*alice* called 80 chips! Total Pot: 200
       <@bob>'s turn",
           },
         ],
@@ -1517,7 +1517,7 @@ describe("Poker Durable Object", () => {
       [
         [
           {
-            "text": "bob folded!
+            "text": "*bob* folded!
       <@charlie>'s turn",
           },
         ],
@@ -1534,7 +1534,7 @@ describe("Poker Durable Object", () => {
       [
         [
           {
-            "text": "charlie checked!
+            "text": "*charlie* checked!
       *NEW* Flop:
       1 flops discovered (0.00%), 22,099 remain
       7:clubs: 6:clubs: 6:spades:
@@ -1561,7 +1561,7 @@ describe("Poker Durable Object", () => {
         [
           {
             "text": "<@alice>'s turn
-      charlie bet 100 chips! Total Pot: 300",
+      *charlie* bet 100 chips! Total Pot: 300",
           },
         ],
       ]
@@ -1576,7 +1576,7 @@ describe("Poker Durable Object", () => {
       [
         [
           {
-            "text": "alice called 100 chips! Total Pot: 400
+            "text": "*alice* called 100 chips! Total Pot: 400
       Turn:
       7:clubs: 6:clubs: 6:spades: 4:clubs:
       <@charlie>'s turn",
@@ -1610,15 +1610,15 @@ describe("Poker Durable Object", () => {
       [
         [
           {
-            "text": "alice checked!
+            "text": "*alice* checked!
       <@charlie>'s turn
       Community Cards:
       7:clubs: 6:clubs: 6:spades: 4:clubs: 3:clubs:
-      alice had Flush
+      *alice* had Flush
       Q:clubs: 10:clubs:
-      charlie had Flush
+      *charlie* had Flush
       K:spades: 8:clubs:
-      Main pot of 400 won by: alice",
+      Main pot of 400 won by: *alice*",
           },
         ],
       ]
@@ -1706,7 +1706,7 @@ describe("Poker Durable Object", () => {
       [
         [
           {
-            "text": ":narp-brain: trapper Cannot check, not your turn!",
+            "text": ":narp-brain: *trapper* Cannot check, not your turn!",
           },
         ],
       ]
@@ -1726,7 +1726,7 @@ describe("Poker Durable Object", () => {
         [
           {
             "text": "<@trapper>'s turn
-      victim bet 100 chips! Total Pot: 260",
+      *victim* bet 100 chips! Total Pot: 260",
           },
         ],
       ]
@@ -1751,7 +1751,7 @@ describe("Poker Durable Object", () => {
         [
           {
             "text": "<@victim>'s turn
-      trapper raised 300 chips! Total Pot: 560",
+      *trapper* raised 300 chips! Total Pot: 560",
           },
         ],
       ]
@@ -1766,9 +1766,9 @@ describe("Poker Durable Object", () => {
       [
         [
           {
-            "text": "victim folded!
+            "text": "*victim* folded!
       <@trapper>'s turn
-      trapper wins 560 chips!
+      *trapper* wins 560 chips!
       Community Cards would have been:
       7:diamonds: 9:spades: 8:spades: 6:spades: 4:spades:",
           },
@@ -1860,7 +1860,7 @@ describe("Poker Durable Object", () => {
       [
         [
           {
-            "text": "charlie pre-checked!",
+            "text": "*charlie* pre-checked!",
           },
         ],
       ]
@@ -1873,7 +1873,7 @@ describe("Poker Durable Object", () => {
       [
         [
           {
-            "text": "alice called 80 chips! Total Pot: 200
+            "text": "*alice* called 80 chips! Total Pot: 200
       <@bob>'s turn",
           },
         ],
@@ -1893,9 +1893,9 @@ describe("Poker Durable Object", () => {
       [
         [
           {
-            "text": "bob called 80 chips! Total Pot: 240
-      charlie is pre-moving!
-      charlie checked!
+            "text": "*bob* called 80 chips! Total Pot: 240
+      *charlie* is pre-moving!
+      *charlie* checked!
       *NEW* Flop:
       1 flops discovered (0.00%), 22,099 remain
       8:spades: 10:hearts: 6:spades:
@@ -1914,7 +1914,7 @@ describe("Poker Durable Object", () => {
       [
         [
           {
-            "text": "charlie pre-folded!",
+            "text": "*charlie* pre-folded!",
           },
         ],
       ]
@@ -1931,7 +1931,7 @@ describe("Poker Durable Object", () => {
       [
         [
           {
-            "text": "alice called 100 chips! Total Pot: 440
+            "text": "*alice* called 100 chips! Total Pot: 440
       Turn:
       8:spades: 10:hearts: 6:spades: 4:spades:
       <@bob>'s turn",
@@ -1963,7 +1963,7 @@ describe("Poker Durable Object", () => {
       [
         [
           {
-            "text": "alice called 100 chips! Total Pot: 640
+            "text": "*alice* called 100 chips! Total Pot: 640
       River:
       8:spades: 10:hearts: 6:spades: 4:spades: 9:hearts:
       <@bob>'s turn",
@@ -2129,7 +2129,7 @@ describe("Poker Durable Object", () => {
       [
         [
           {
-            "text": "winner Cashed out 540 chips",
+            "text": "*winner* Cashed out 540 chips",
           },
         ],
       ]
@@ -2151,7 +2151,7 @@ describe("Poker Durable Object", () => {
       [
         [
           {
-            "text": ":narp-brain: winner No chips to cash out!",
+            "text": ":narp-brain: *winner* No chips to cash out!",
           },
         ],
       ]
@@ -2222,7 +2222,7 @@ describe("Poker Durable Object", () => {
       [
         [
           {
-            "text": "leaver will leave once the round is over!",
+            "text": "*leaver* will leave once the round is over!",
           },
         ],
       ]
@@ -2415,7 +2415,7 @@ describe("Poker Durable Object", () => {
       [
         [
           {
-            "text": ":narp-brain: player1 Cannot check, not your turn!",
+            "text": ":narp-brain: *player1* Cannot check, not your turn!",
           },
         ],
       ]
@@ -2431,7 +2431,7 @@ describe("Poker Durable Object", () => {
       [
         [
           {
-            "text": ":narp-brain: player1 Cannot bet, not your turn!",
+            "text": ":narp-brain: *player1* Cannot bet, not your turn!",
           },
         ],
       ]
@@ -2443,7 +2443,7 @@ describe("Poker Durable Object", () => {
       [
         [
           {
-            "text": ":narp-brain: player1 Cannot fold, not your turn!",
+            "text": ":narp-brain: *player1* Cannot fold, not your turn!",
           },
         ],
       ]
@@ -2473,7 +2473,7 @@ describe("Poker Durable Object", () => {
         [
           {
             "text": "<@player1>'s turn
-      player2 bet 100 chips! Total Pot: 260",
+      *player2* bet 100 chips! Total Pot: 260",
           },
         ],
       ]
@@ -2486,7 +2486,7 @@ describe("Poker Durable Object", () => {
       [
         [
           {
-            "text": ":narp-brain: player1 Cannot check, there are active bets! (100 chips)",
+            "text": ":narp-brain: *player1* Cannot check, there are active bets! (100 chips)",
           },
         ],
       ]
@@ -2552,7 +2552,7 @@ describe("Poker Durable Object", () => {
       [
         [
           {
-            "text": "dealer is pre-dealing!",
+            "text": "*dealer* is pre-dealing!",
           },
         ],
       ]
@@ -2627,7 +2627,7 @@ describe("Poker Durable Object", () => {
       [
         [
           {
-            "text": "polite pre-nh!",
+            "text": "*polite* pre-nh!",
           },
         ],
       ]
@@ -2639,7 +2639,7 @@ describe("Poker Durable Object", () => {
 
     // Check that :nh: message appeared (uses display name, not tag)
     const endMessages = sayFn.mock.calls[0][0].text;
-    expect(endMessages).toContain("polite says :nh:");
+    expect(endMessages).toContain("*polite* says :nh:");
   });
 
   /**
@@ -3206,7 +3206,7 @@ describe("Poker Durable Object", () => {
       [
         [
           {
-            "text": "charlie pre-bet 200!",
+            "text": "*charlie* pre-bet 200!",
           },
         ],
       ]
@@ -3232,10 +3232,10 @@ describe("Poker Durable Object", () => {
       [
         [
           {
-            "text": "bob called 80 chips! Total Pot: 240
-      charlie is pre-moving!
+            "text": "*bob* called 80 chips! Total Pot: 240
+      *charlie* is pre-moving!
       <@alice>'s turn
-      charlie raised 200 chips! Total Pot: 360",
+      *charlie* raised 200 chips! Total Pot: 360",
           },
         ],
       ]
@@ -3311,7 +3311,7 @@ describe("Poker Durable Object", () => {
       [
         [
           {
-            "text": "salty pre-ah!",
+            "text": "*salty* pre-ah!",
           },
         ],
       ]
@@ -3323,7 +3323,7 @@ describe("Poker Durable Object", () => {
 
     // Check that :ah: message appeared (uses display name, not tag)
     const endMessages = sayFn.mock.calls[0][0].text;
-    expect(endMessages).toContain("salty says :ah:");
+    expect(endMessages).toContain("*salty* says :ah:");
   });
 
   /**
@@ -3782,9 +3782,9 @@ describe("Poker Durable Object", () => {
     expect(stacksMessage).toContain("orbits");
 
     // Verify Marcus and Yuvi are active, Camden is inactive (with BB and orbit info)
-    expect(stacksMessage).toMatch(/Marcus: 500 \(\d+xBB, \d+ orbits\) Active/);
-    expect(stacksMessage).toMatch(/Yuvi: 400 \(\d+xBB, \d+ orbits\) Active/);
-    expect(stacksMessage).toMatch(/Camden: 300 \(\d+xBB, \d+ orbits\) Inactive/);
+    expect(stacksMessage).toMatch(/\*Marcus\*: 500 \(\d+xBB, \d+ orbits\) Active/);
+    expect(stacksMessage).toMatch(/\*Yuvi\*: 400 \(\d+xBB, \d+ orbits\) Active/);
+    expect(stacksMessage).toMatch(/\*Camden\*: 300 \(\d+xBB, \d+ orbits\) Inactive/);
   });
 
   /**
@@ -3872,7 +3872,7 @@ describe("Poker Durable Object", () => {
       [
         [
           {
-            "text": "player2 called 80 chips! Total Pot: 160
+            "text": "*player2* called 80 chips! Total Pot: 160
       <@player1>'s turn",
           },
         ],
@@ -4065,7 +4065,7 @@ describe("Poker Durable Object", () => {
       [
         [
           {
-            "text": "charlie pre-called!",
+            "text": "*charlie* pre-called!",
           },
         ],
       ]
@@ -4075,7 +4075,7 @@ describe("Poker Durable Object", () => {
     // === ALICE CALLS (action to bob) ===
     await call(env, contextAlice, createGenericMessageEvent("alice"));
     // Non-turn messages use display names, not tags
-    expect(sayFn.mock.calls[0][0].text).toContain("alice called");
+    expect(sayFn.mock.calls[0][0].text).toContain("*alice* called");
     sayFn.mockClear();
 
     // === BOB RAISES to 200 (this should invalidate charlie's pre-call!) ===
@@ -4083,8 +4083,8 @@ describe("Poker Durable Object", () => {
     // Charlie's pre-call should FAIL because the bet amount changed from 80 to 200
     await bet(env, contextBob, createGenericMessageEvent("bob", "bet 200"));
     // Non-turn messages use display names, not tags
-    expect(sayFn.mock.calls[0][0].text).toContain("bob raised 200");
-    expect(sayFn.mock.calls[0][0].text).toContain("charlie is pre-moving");
+    expect(sayFn.mock.calls[0][0].text).toContain("*bob* raised 200");
+    expect(sayFn.mock.calls[0][0].text).toContain("*charlie* is pre-moving");
     expect(sayFn.mock.calls[0][0].text).toContain(
       "not pre-calling, bet amount has changed"
     );
@@ -4102,7 +4102,7 @@ describe("Poker Durable Object", () => {
     await call(env, contextCharlie, createGenericMessageEvent("charlie"));
     // After charlie calls, alice also needs to call the raise (she only called 80 before)
     // Non-turn messages use display names, not tags
-    expect(sayFn.mock.calls[0][0].text).toContain("charlie called");
+    expect(sayFn.mock.calls[0][0].text).toContain("*charlie* called");
     sayFn.mockClear();
 
     // === ALICE MUST ALSO CALL THE RAISE ===
@@ -4115,7 +4115,7 @@ describe("Poker Durable Object", () => {
     // Now should advance to flop since all have called the 200
     expect(gameStateAfterAllCalls.gameState).toBe(GameState.Flop);
     // Non-turn messages use display names, not tags
-    expect(sayFn.mock.calls[0][0].text).toContain("alice called");
+    expect(sayFn.mock.calls[0][0].text).toContain("*alice* called");
     expect(sayFn.mock.calls[0][0].text).toContain("Flop");
     sayFn.mockClear();
 
@@ -4247,9 +4247,9 @@ describe("Poker Durable Object", () => {
       *Action:* You must call 80 chips (current bet: 80)
 
       *Players (table order):*
-      <@alice> [1000] (D) ⬅️
-      <@bob> [960] (SB)
-      <@charlie> [920] (BB)
+      *<@alice>* [1000] (D) ⬅️
+      *<@bob>* [960] (SB)
+      *<@charlie>* [920] (BB)
 
       *Your Cards:*
       7:clubs: 5:clubs:
@@ -4290,9 +4290,9 @@ describe("Poker Durable Object", () => {
       *Action:* You can check
 
       *Players (table order):*
-      <@bob> [920] (SB) - checked
-      <@charlie> [920] (BB) ⬅️
-      <@alice> [920] (D)
+      *<@bob>* [920] (SB) - checked
+      *<@charlie>* [920] (BB) ⬅️
+      *<@alice>* [920] (D)
 
       *You have Ass:*
       K:spades: 10:spades:
@@ -4320,9 +4320,9 @@ describe("Poker Durable Object", () => {
       *Action:* You must call 100 chips (current bet: 100)
 
       *Players (table order):*
-      <@bob> [920] (SB) - checked
-      <@charlie> [820] (BB) - raised to 100
-      <@alice> [920] (D) ⬅️
+      *<@bob>* [920] (SB) - checked
+      *<@charlie>* [820] (BB) - raised to 100
+      *<@alice>* [920] (D) ⬅️
 
       *You have Ass:*
       7:clubs: 5:clubs:
@@ -4347,11 +4347,11 @@ describe("Poker Durable Object", () => {
       *Action:* You must call 100 chips (current bet: 100)
 
       *Players (table order):*
-      <@bob> [920] (SB) - checked ⬅️
-      <@charlie> [820] (BB) - raised to 100
-      <@alice> [920] (D) - folded
+      *<@bob>* [920] (SB) - checked ⬅️
+      *<@charlie>* [820] (BB) - raised to 100
+      *<@alice>* [920] (D) - folded
 
-      *Still in hand:* <@bob>, <@charlie>
+      *Still in hand:* *<@bob>*, *<@charlie>*
 
       *You have Ass:*
       6:clubs: 4:clubs:
@@ -4412,8 +4412,8 @@ describe("Poker Durable Object", () => {
       *Action:* Game has not started yet
 
       *Players (table order):*
-      <@bob> [500] (BB)
-      <@alice> [500] (D+SB)
+      *<@bob>* [500] (BB)
+      *<@alice>* [500] (D+SB)
 
       *Your Cards:* No cards yet
 
@@ -4494,10 +4494,10 @@ describe("Poker Durable Object", () => {
     expect(message).toContain("*Showdown Win Percentage*");
     // Showdown messages use display names, not tags
     expect(message).toContain(
-      "player1 - Pre-flop: 60.00% | Flop: 65.00% | Turn: 72.00% | River: 100.00%"
+      "*player1* - Pre-flop: 60.00% | Flop: 65.00% | Turn: 72.00% | River: 100.00%"
     );
     expect(message).toContain(
-      "player2 - Pre-flop: 40.00% | Flop: 35.00% | Turn: 28.00% | River: 0.00%"
+      "*player2* - Pre-flop: 40.00% | Flop: 35.00% | Turn: 28.00% | River: 0.00%"
     );
   });
 
@@ -4538,8 +4538,8 @@ describe("Poker Durable Object", () => {
 
     expect(message).toContain("*Showdown Win Percentage*");
     // Showdown messages use display names, not tags
-    expect(message).toContain("player1 - Pre-flop:");
-    expect(message).toContain("player2 - Pre-flop:");
+    expect(message).toContain("*player1* - Pre-flop:");
+    expect(message).toContain("*player2* - Pre-flop:");
     expect(message).not.toContain("N/A");
     const percentMatches = message?.match(/\d+\.\d{2}%/g) ?? [];
     expect(percentMatches.length).toBeGreaterThanOrEqual(8);
