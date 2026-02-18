@@ -3415,9 +3415,13 @@ async function sendEventsWithPlayerIds(
       message += `\n${cardStrings.join(" ")}`;
     }
 
-    playerIds.forEach((playerId) => {
-      message = message.replace(new RegExp(playerId, "g"), `<@${playerId}>`);
-    });
+    // Only tag users (with <@userId>) for turn notifications to reduce excessive pinging
+    // For all other messages, use display names from the user name map
+    if (event.isTurnMessage) {
+      message = replacePlayerIdsWithTags(message, playerIds);
+    } else {
+      message = replacePlayerIdsWithDisplayNames(message, playerIds);
+    }
     const slackMessage = ensureNarpBrainOnError(message);
 
     if (event.ephemeral) {
@@ -3473,6 +3477,38 @@ function isVitestRuntime(): boolean {
 
   // @cloudflare/vitest-pool-workers exposes this global in worker runtime.
   return typeof (globalThis as { __vitest_worker__?: unknown }).__vitest_worker__ !== "undefined";
+}
+
+/**
+ * Replaces player IDs in a message with display names (not Slack tags).
+ * This is used for most messages to avoid excessive user pinging.
+ */
+function replacePlayerIdsWithDisplayNames(
+  message: string,
+  playerIds: string[]
+): string {
+  let result = message;
+  playerIds.forEach((playerId) => {
+    const displayName =
+      userIdToName[playerId as keyof typeof userIdToName] || playerId;
+    result = result.replace(new RegExp(playerId, "g"), displayName);
+  });
+  return result;
+}
+
+/**
+ * Replaces player IDs in a message with Slack tags (<@userId>).
+ * This should only be used for turn notifications to ping the user.
+ */
+function replacePlayerIdsWithTags(
+  message: string,
+  playerIds: string[]
+): string {
+  let result = message;
+  playerIds.forEach((playerId) => {
+    result = result.replace(new RegExp(playerId, "g"), `<@${playerId}>`);
+  });
+  return result;
 }
 
 function getDurableObject(env: Env, context: SlackAppContextWithChannelId) {
@@ -3575,11 +3611,13 @@ async function sendGameEventMessages(
       .getInactivePlayers()
       .map((player) => player.getId());
     playerIds.push(...inactivePlayerIds);
-    // Replace all player IDs in message with @mentions
-    // TODO: maybe do it without replacement
-    playerIds.forEach((playerId) => {
-      message = message.replace(new RegExp(playerId, "g"), `<@${playerId}>`);
-    });
+    // Only tag users (with <@userId>) for turn notifications to reduce excessive pinging
+    // For all other messages, use display names from the user name map
+    if (event.getIsTurnMessage()) {
+      message = replacePlayerIdsWithTags(message, playerIds);
+    } else {
+      message = replacePlayerIdsWithDisplayNames(message, playerIds);
+    }
     const slackMessage = ensureNarpBrainOnError(message);
 
     if (event.isEphemeral()) {

@@ -1,4 +1,5 @@
 import { TexasHoldem } from "poker-odds-calc";
+import { userIdToName } from "./users";
 
 type CardSnapshot = {
   rank: string;
@@ -108,7 +109,10 @@ export async function buildShowdownWinPercentageMessage(
       ({ label, results }) =>
         `${label}: ${formatPercent(results.get(player.playerId))}`
     );
-    lines.push(`<@${player.playerId}> - ${streetSummary.join(" | ")}`);
+    const displayName =
+      userIdToName[player.playerId as keyof typeof userIdToName] ||
+      player.playerId;
+    lines.push(`${displayName} - ${streetSummary.join(" | ")}`);
   }
 
   console.info(
