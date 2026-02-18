@@ -1787,6 +1787,7 @@ function cleanMessageText(messageText: string) {
     .replace(/oh+\s*buddy\s*/g, "")
     .replace(/shi+/g, "")
     .replace(/fu+ck/g, "")
+    .replace(/yeah+/g, "")
     .trim();
 }
 
