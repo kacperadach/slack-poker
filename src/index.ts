@@ -3480,7 +3480,7 @@ function isVitestRuntime(): boolean {
 }
 
 /**
- * Replaces player IDs in a message with display names (not Slack tags).
+ * Replaces player IDs in a message with bold display names (not Slack tags).
  * This is used for most messages to avoid excessive user pinging.
  */
 function replacePlayerIdsWithDisplayNames(
@@ -3491,7 +3491,7 @@ function replacePlayerIdsWithDisplayNames(
   playerIds.forEach((playerId) => {
     const displayName =
       userIdToName[playerId as keyof typeof userIdToName] || playerId;
-    result = result.replace(new RegExp(playerId, "g"), displayName);
+    result = result.replace(new RegExp(playerId, "g"), `*${displayName}*`);
   });
   return result;
 }

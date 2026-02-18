@@ -112,7 +112,7 @@ export async function buildShowdownWinPercentageMessage(
     const displayName =
       userIdToName[player.playerId as keyof typeof userIdToName] ||
       player.playerId;
-    lines.push(`${displayName} - ${streetSummary.join(" | ")}`);
+    lines.push(`*${displayName}* - ${streetSummary.join(" | ")}`);
   }
 
   console.info(
