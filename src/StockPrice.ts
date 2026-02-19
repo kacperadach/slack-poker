@@ -10,6 +10,9 @@ export interface StockPriceResult {
   change: number;
   changePercent: number;
   marketState?: string;
+  preMarketPrice?: number;
+  preMarketChange?: number;
+  preMarketChangePercent?: number;
   postMarketPrice?: number;
   postMarketChange?: number;
   postMarketChangePercent?: number;
@@ -54,6 +57,9 @@ export async function fetchStockPrice(
             chartPreviousClose?: number;
             previousClose?: number;
             marketState?: string;
+            preMarketPrice?: number;
+            preMarketChange?: number;
+            preMarketChangePercent?: number;
             postMarketPrice?: number;
             postMarketChange?: number;
             postMarketChangePercent?: number;
@@ -94,10 +100,23 @@ export async function fetchStockPrice(
       changePercent: Math.round(changePercent * 100) / 100,
     };
 
-    // Add after-hours data if available
+    // Add market state if available
     if (meta.marketState) {
       stockResult.marketState = meta.marketState;
     }
+
+    // Add pre-market data if available
+    if (typeof meta.preMarketPrice === "number") {
+      stockResult.preMarketPrice = meta.preMarketPrice;
+    }
+    if (typeof meta.preMarketChange === "number") {
+      stockResult.preMarketChange = Math.round(meta.preMarketChange * 100) / 100;
+    }
+    if (typeof meta.preMarketChangePercent === "number") {
+      stockResult.preMarketChangePercent = Math.round(meta.preMarketChangePercent * 100) / 100;
+    }
+
+    // Add post-market data if available
     if (typeof meta.postMarketPrice === "number") {
       stockResult.postMarketPrice = meta.postMarketPrice;
     }
@@ -117,11 +136,11 @@ export async function fetchStockPrice(
 
 /**
  * Formats a stock price result into a display string for Slack.
- * When the market is closed and after-hours data is available,
- * shows both the closing price and after-hours price.
+ * When the market is in pre-market hours, shows pre-market price changes.
+ * When the market is closed/post-market, shows after-hours price changes.
  *
  * @param result - The stock price result
- * @returns Formatted string like "$HUBS: $650.23 (+2.15, +0.33%)" or with after-hours info
+ * @returns Formatted string like "$HUBS: $650.23 (+2.15, +0.33%)" with pre-market or after-hours info
  */
 export function formatStockPrice(result: StockPriceResult): string {
   const priceStr = result.price.toLocaleString("en-US", {
@@ -137,7 +156,32 @@ export function formatStockPrice(result: StockPriceResult): string {
 
   let message = `${emoji} $${result.symbol}: ${priceStr} (${changeStr}, ${changePercentStr})`;
 
-  // Add after-hours info if market is closed/post-market and after-hours data is available
+  // Add pre-market info if market is in pre-market state and pre-market data is available
+  const isPreMarket = result.marketState === "PRE";
+  
+  if (isPreMarket && typeof result.preMarketPrice === "number") {
+    const prePriceStr = result.preMarketPrice.toLocaleString("en-US", {
+      style: "currency",
+      currency: "USD",
+    });
+    
+    const preChangeSign = (result.preMarketChange ?? 0) >= 0 ? "+" : "";
+    const preChangeStr = typeof result.preMarketChange === "number" 
+      ? `${preChangeSign}${result.preMarketChange.toFixed(2)}` 
+      : "";
+    const preChangePercentStr = typeof result.preMarketChangePercent === "number"
+      ? `${preChangeSign}${result.preMarketChangePercent.toFixed(2)}%`
+      : "";
+    
+    const preEmoji = (result.preMarketChange ?? 0) >= 0 ? ":chart_with_upwards_trend:" : ":chart_with_downwards_trend:";
+    
+    message += `\n${preEmoji} Pre-market: ${prePriceStr}`;
+    if (preChangeStr && preChangePercentStr) {
+      message += ` (${preChangeStr}, ${preChangePercentStr})`;
+    }
+  }
+
+  // Add post-market info if market is closed/post-market and post-market data is available
   const isAfterHours = result.marketState === "POST" || result.marketState === "POSTPOST" || result.marketState === "CLOSED";
   
   if (isAfterHours && typeof result.postMarketPrice === "number") {
