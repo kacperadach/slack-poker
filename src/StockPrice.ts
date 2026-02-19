@@ -34,7 +34,8 @@ export async function fetchStockPrice(
     const controller = new AbortController();
     const timeoutId = setTimeout(() => controller.abort(), timeoutMs);
 
-    const url = `https://query1.finance.yahoo.com/v8/finance/chart/${encodeURIComponent(symbol)}?interval=1d&range=1d`;
+    // Use 1m interval with includePrePost=true to get extended hours data
+    const url = `https://query1.finance.yahoo.com/v8/finance/chart/${encodeURIComponent(symbol)}?interval=1m&range=1d&includePrePost=true`;
 
     const response = await fetch(url, {
       signal: controller.signal,
@@ -54,6 +55,7 @@ export async function fetchStockPrice(
         result?: Array<{
           meta?: {
             regularMarketPrice?: number;
+            regularMarketTime?: number;
             chartPreviousClose?: number;
             previousClose?: number;
             marketState?: string;
@@ -63,6 +65,17 @@ export async function fetchStockPrice(
             postMarketPrice?: number;
             postMarketChange?: number;
             postMarketChangePercent?: number;
+            currentTradingPeriod?: {
+              pre?: { start?: number; end?: number };
+              regular?: { start?: number; end?: number };
+              post?: { start?: number; end?: number };
+            };
+          };
+          timestamp?: number[];
+          indicators?: {
+            quote?: Array<{
+              close?: (number | null)[];
+            }>;
           };
         }>;
       };
@@ -100,12 +113,35 @@ export async function fetchStockPrice(
       changePercent: Math.round(changePercent * 100) / 100,
     };
 
-    // Add market state if available
-    if (meta.marketState) {
-      stockResult.marketState = meta.marketState;
+    // Determine market state from trading periods if not provided directly
+    const nowSeconds = Math.floor(Date.now() / 1000);
+    const tradingPeriod = meta.currentTradingPeriod;
+    
+    let marketState = meta.marketState;
+    if (!marketState && tradingPeriod) {
+      const preStart = tradingPeriod.pre?.start ?? 0;
+      const preEnd = tradingPeriod.pre?.end ?? 0;
+      const regularStart = tradingPeriod.regular?.start ?? 0;
+      const regularEnd = tradingPeriod.regular?.end ?? 0;
+      const postStart = tradingPeriod.post?.start ?? 0;
+      const postEnd = tradingPeriod.post?.end ?? 0;
+      
+      if (nowSeconds >= preStart && nowSeconds < preEnd) {
+        marketState = "PRE";
+      } else if (nowSeconds >= regularStart && nowSeconds < regularEnd) {
+        marketState = "REGULAR";
+      } else if (nowSeconds >= postStart && nowSeconds < postEnd) {
+        marketState = "POST";
+      } else {
+        marketState = "CLOSED";
+      }
     }
 
-    // Add pre-market data if available
+    if (marketState) {
+      stockResult.marketState = marketState;
+    }
+
+    // Add pre-market data if available from meta
     if (typeof meta.preMarketPrice === "number") {
       stockResult.preMarketPrice = meta.preMarketPrice;
     }
@@ -116,7 +152,7 @@ export async function fetchStockPrice(
       stockResult.preMarketChangePercent = Math.round(meta.preMarketChangePercent * 100) / 100;
     }
 
-    // Add post-market data if available
+    // Add post-market data if available from meta
     if (typeof meta.postMarketPrice === "number") {
       stockResult.postMarketPrice = meta.postMarketPrice;
     }
@@ -125,6 +161,67 @@ export async function fetchStockPrice(
     }
     if (typeof meta.postMarketChangePercent === "number") {
       stockResult.postMarketChangePercent = Math.round(meta.postMarketChangePercent * 100) / 100;
+    }
+
+    // If we're in post-market/closed state and don't have postMarketPrice from meta,
+    // try to extract it from the latest quote data (which includes extended hours with includePrePost=true)
+    const isAfterHours = marketState === "POST" || marketState === "POSTPOST" || marketState === "CLOSED";
+    if (isAfterHours && typeof stockResult.postMarketPrice !== "number") {
+      const timestamps = chartResult.timestamp ?? [];
+      const closes = chartResult.indicators?.quote?.[0]?.close ?? [];
+      const regularMarketTime = meta.regularMarketTime ?? 0;
+      
+      // Find the last valid close price after regular market time
+      let lastPostMarketPrice: number | null = null;
+      for (let i = timestamps.length - 1; i >= 0; i--) {
+        if (timestamps[i] > regularMarketTime && typeof closes[i] === "number" && closes[i] !== null) {
+          lastPostMarketPrice = closes[i];
+          break;
+        }
+      }
+      
+      if (lastPostMarketPrice !== null) {
+        stockResult.postMarketPrice = lastPostMarketPrice;
+        stockResult.postMarketChange = Math.round((lastPostMarketPrice - currentPrice) * 100) / 100;
+        stockResult.postMarketChangePercent = currentPrice !== 0 
+          ? Math.round(((lastPostMarketPrice - currentPrice) / currentPrice) * 10000) / 100
+          : 0;
+      }
+    }
+
+    // Similarly for pre-market - extract from quote data if not in meta
+    const isPreMarket = marketState === "PRE";
+    if (isPreMarket && typeof stockResult.preMarketPrice !== "number") {
+      const timestamps = chartResult.timestamp ?? [];
+      const closes = chartResult.indicators?.quote?.[0]?.close ?? [];
+      const regularStart = tradingPeriod?.regular?.start ?? 0;
+      
+      // Find the last valid close price before regular market start (i.e., pre-market price)
+      let lastPreMarketPrice: number | null = null;
+      for (let i = timestamps.length - 1; i >= 0; i--) {
+        if (timestamps[i] < regularStart && typeof closes[i] === "number" && closes[i] !== null) {
+          lastPreMarketPrice = closes[i];
+          break;
+        }
+      }
+      
+      // Or if we're in pre-market, the last price IS the pre-market price
+      if (lastPreMarketPrice === null) {
+        for (let i = timestamps.length - 1; i >= 0; i--) {
+          if (typeof closes[i] === "number" && closes[i] !== null) {
+            lastPreMarketPrice = closes[i];
+            break;
+          }
+        }
+      }
+      
+      if (lastPreMarketPrice !== null && typeof previousClose === "number") {
+        stockResult.preMarketPrice = lastPreMarketPrice;
+        stockResult.preMarketChange = Math.round((lastPreMarketPrice - previousClose) * 100) / 100;
+        stockResult.preMarketChangePercent = previousClose !== 0 
+          ? Math.round(((lastPreMarketPrice - previousClose) / previousClose) * 10000) / 100
+          : 0;
+      }
     }
 
     return stockResult;
