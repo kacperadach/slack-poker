@@ -19,7 +19,7 @@ import type {
   NewGameActionV1,
   RoundStartActionV1,
 } from "./ActionLog";
-import { getHubsStockPriceMessage, getStockPriceMessage } from "./StockPrice";
+import { fetchStockPrice, getHubsStockPriceMessage, getStockPriceMessage } from "./StockPrice";
 import { buildShowdownWinPercentageMessage } from "./ShowdownWinPercentage";
 import { ensureNarpBrainOnError } from "./slackErrorEmoji";
 
@@ -111,6 +111,22 @@ export class PokerDurableObject extends DurableObject<Env> {
 				hubsOnlyMode INTEGER NOT NULL DEFAULT 0,
 				PRIMARY KEY (workspaceId, channelId)
 			);
+		`);
+
+    // Table to store daily closing prices for HUBS stock
+    this.sql.exec(`
+			CREATE TABLE IF NOT EXISTS closingPrices (
+				date TEXT NOT NULL PRIMARY KEY,
+				symbol TEXT NOT NULL,
+				price REAL NOT NULL,
+				collectedAt INTEGER NOT NULL
+			);
+		`);
+
+    // Seed initial closing price for Feb 18, 2026 if not exists
+    this.sql.exec(`
+			INSERT OR IGNORE INTO closingPrices (date, symbol, price, collectedAt)
+			VALUES ('2026-02-18', 'HUBS', 250.16, ${Date.now()})
 		`);
   }
 
@@ -222,6 +238,69 @@ export class PokerDurableObject extends DurableObject<Env> {
       channelId,
       enabled ? 1 : 0
     );
+  }
+
+  /**
+   * Save a closing price for a given date.
+   * Uses INSERT OR REPLACE to update if the date already exists.
+   */
+  saveClosingPrice(
+    date: string,
+    symbol: string,
+    price: number
+  ): void {
+    this.sql.exec(
+      `
+			INSERT OR REPLACE INTO closingPrices (date, symbol, price, collectedAt)
+			VALUES (?, ?, ?, ?)
+		`,
+      date,
+      symbol,
+      price,
+      Date.now()
+    );
+  }
+
+  /**
+   * Get all closing prices for a given symbol, ordered by date.
+   */
+  getClosingPrices(symbol: string): Array<{ date: string; price: number }> {
+    const result = this.sql.exec(
+      `
+			SELECT date, price FROM closingPrices
+			WHERE symbol = ?
+			ORDER BY date ASC
+		`,
+      symbol
+    );
+
+    const prices: Array<{ date: string; price: number }> = [];
+    for (const row of result) {
+      prices.push({
+        date: row.date as string,
+        price: row.price as number,
+      });
+    }
+    return prices;
+  }
+
+  /**
+   * Calculate the trailing average of closing prices for a given symbol.
+   * Returns null if no prices are available.
+   */
+  getTrailingAverage(symbol: string): { average: number; count: number } | null {
+    const prices = this.getClosingPrices(symbol);
+    if (prices.length === 0) {
+      return null;
+    }
+
+    const sum = prices.reduce((acc, p) => acc + p.price, 0);
+    const average = sum / prices.length;
+
+    return {
+      average: Math.round(average * 100) / 100,
+      count: prices.length,
+    };
   }
 
   addFlop(
@@ -1646,7 +1725,64 @@ export default {
     );
     return await app.run(request, ctx);
   },
+
+  async scheduled(
+    _controller: ScheduledController,
+    env: Env,
+    _ctx: ExecutionContext
+  ): Promise<void> {
+    await collectHubsClosingPrice(env);
+  },
 } satisfies ExportedHandler<Env>;
+
+/**
+ * Get the global Durable Object for storing closing prices.
+ * Uses a fixed ID to ensure all scheduled tasks use the same instance.
+ */
+function getGlobalDurableObject(env: Env) {
+  const id = env.POKER_DURABLE_OBJECT.idFromName("global-stock-prices");
+  return env.POKER_DURABLE_OBJECT.get(id);
+}
+
+/**
+ * Collect and store the HUBS closing price.
+ * Called by the scheduled handler at 4:30 PM ET daily.
+ * Only collects prices from Feb 18, 2026 to March 31, 2026 (not inclusive of April 1).
+ */
+async function collectHubsClosingPrice(env: Env): Promise<void> {
+  const now = new Date();
+  
+  // Get date in Eastern Time (America/New_York) format
+  const etOptions: Intl.DateTimeFormatOptions = {
+    timeZone: "America/New_York",
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+  };
+  const etDateStr = now.toLocaleDateString("en-CA", { ...etOptions }); // en-CA gives YYYY-MM-DD format
+  
+  // Check if date is within range: Feb 18, 2026 to March 31, 2026
+  const startDate = "2026-02-18";
+  const endDate = "2026-04-01"; // Not inclusive
+  
+  if (etDateStr < startDate || etDateStr >= endDate) {
+    console.log(`Skipping price collection: ${etDateStr} is outside the allowed range`);
+    return;
+  }
+
+  // Fetch the current HUBS stock price
+  const result = await fetchStockPrice("HUBS");
+  if (!result) {
+    console.log(`Failed to fetch HUBS stock price on ${etDateStr}`);
+    return;
+  }
+
+  // Save to the global Durable Object
+  const stub = getGlobalDurableObject(env);
+  await stub.saveClosingPrice(etDateStr, "HUBS", result.price);
+  
+  console.log(`Saved HUBS closing price: $${result.price} for ${etDateStr}`);
+}
 
 const ALGO_MESSAGE =
   "Complaining about the algo? How about you try tightening up ranges, punishing leaks, and owning your position. Cut trash hands, widen late, and 3-bet light when stacks and image align. Always clock SPR, ICM, and blocker dynamics. Dont just run hot—range merge, polarize, and balance frequencies. Table select like a shark, exploit the fish, and never bleed chips OOP. To level up: study solvers, drill GTO, then weaponize exploit when villains deviate.";
@@ -2197,13 +2333,26 @@ async function drillGto(
 }
 
 async function hubsStockPrice(
-  _env: Env,
+  env: Env,
   context: SlackAppContextWithChannelId,
   _payload: PostedMessage
 ) {
   const stockPriceMessage = await getHubsStockPriceMessage();
   if (stockPriceMessage) {
-    await context.say({ text: stockPriceMessage });
+    // Get the trailing average from the global Durable Object
+    const stub = getGlobalDurableObject(env);
+    const trailingAvg = await stub.getTrailingAverage("HUBS");
+    
+    let message = stockPriceMessage;
+    if (trailingAvg) {
+      const avgFormatted = trailingAvg.average.toLocaleString("en-US", {
+        style: "currency",
+        currency: "USD",
+      });
+      message += `\n:bar_chart: Trailing Avg (${trailingAvg.count} day${trailingAvg.count === 1 ? "" : "s"}): ${avgFormatted}`;
+    }
+    
+    await context.say({ text: message });
   } else {
     await context.say({
       text: ensureNarpBrainOnError(
