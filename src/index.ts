@@ -1751,7 +1751,7 @@ function getGlobalDurableObject(env: Env) {
 
 /**
  * Collect and store the HUBS closing price.
- * Called by the scheduled handler at 4:30 PM ET daily.
+ * Called by the scheduled handler at 4:30 PM ET on weekdays (Mon-Fri).
  * Only collects prices from Feb 18, 2026 to March 31, 2026 (not inclusive of April 1).
  */
 async function collectHubsClosingPrice(env: Env): Promise<void> {
