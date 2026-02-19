@@ -126,7 +126,7 @@ export class PokerDurableObject extends DurableObject<Env> {
     // Seed initial closing price for Feb 18, 2026 if not exists
     this.sql.exec(`
 			INSERT OR IGNORE INTO closingPrices (date, symbol, price, collectedAt)
-			VALUES ('2026-02-18', 'HUBS', 250.16, ${Date.now()})
+			VALUES ('2026-02-18', 'HUBS', 250.14, ${Date.now()})
 		`);
   }
 
