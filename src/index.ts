@@ -2414,8 +2414,12 @@ export async function nudgePlayer(
     return;
   }
 
+  // Check if user is poking themselves
+  const isSelfPoke = context.userId === currentPlayer.getId();
+  const selfPokePrefix = isSelfPoke ? ":narp-brain: " : "";
+
   await context.say({
-    text: `<@${currentPlayer.getId()}> it's your turn and you need to roll!`,
+    text: `${selfPokePrefix}<@${currentPlayer.getId()}> it's your turn and you need to roll!`,
   });
 }
 
@@ -2451,8 +2455,12 @@ export async function silentNudgePlayer(
   const playerId = currentPlayer.getId();
   const displayName = userIdToName[playerId as keyof typeof userIdToName] || playerId;
   
+  // Check if user is poking themselves
+  const isSelfPoke = context.userId === playerId;
+  const selfPokePrefix = isSelfPoke ? ":narp-brain: " : "";
+
   await context.say({
-    text: `^*${displayName.toLowerCase()}*^ ... ᶦᵗ'ˢ ʸᵒᵘʳ ᵗᵘʳⁿ`,
+    text: `${selfPokePrefix}^*${displayName.toLowerCase()}*^ ... ᶦᵗ'ˢ ʸᵒᵘʳ ᵗᵘʳⁿ`,
   });
 }
 
@@ -2486,8 +2494,12 @@ export async function loudNudgePlayer(
     return;
   }
 
+  // Check if user is poking themselves
+  const isSelfPoke = context.userId === currentPlayer.getId();
+  const selfPokePrefix = isSelfPoke ? ":narp-brain: " : "";
+
   await context.say({
-    text: `:rotating_light::rotating_light::rotating_light: <@${currentPlayer.getId()}> :rotating_light::rotating_light::rotating_light:\n:mega::mega::mega: *IT'S YOUR TURN AND YOU NEED TO ROLL RIGHT NOW!!!* :mega::mega::mega:\n:alarm_clock: HELLO??? WE'RE ALL WAITING!!! :alarm_clock:`,
+    text: `${selfPokePrefix}:rotating_light::rotating_light::rotating_light: <@${currentPlayer.getId()}> :rotating_light::rotating_light::rotating_light:\n:mega::mega::mega: *IT'S YOUR TURN AND YOU NEED TO ROLL RIGHT NOW!!!* :mega::mega::mega:\n:alarm_clock: HELLO??? WE'RE ALL WAITING!!! :alarm_clock:`,
   });
 }
 

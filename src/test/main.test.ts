@@ -630,7 +630,7 @@ describe("Poker Durable Object", () => {
       *user2* has the dealer button
       *user1* posted small blind of 40
       *user2* posted big blind of 80
-      *user1*'s turn!",
+      <@user1>'s turn",
           },
         ],
       ]
@@ -839,7 +839,7 @@ describe("Poker Durable Object", () => {
       *user1* has the dealer button
       *user2* posted small blind of 40
       *user1* posted big blind of 80
-      *user2*'s turn!",
+      <@user2>'s turn",
           },
         ],
       ]
@@ -969,7 +969,7 @@ describe("Poker Durable Object", () => {
       *alice* has the dealer button
       *bob* posted small blind of 40
       *alice* posted big blind of 80
-      *bob*'s turn!",
+      <@bob>'s turn",
           },
         ],
       ]
@@ -1326,7 +1326,7 @@ describe("Poker Durable Object", () => {
       *player1* has the dealer button
       *player2* posted small blind of 40
       *player1* posted big blind of 80
-      *player2*'s turn!",
+      <@player2>'s turn",
           },
         ],
       ]
@@ -1489,7 +1489,7 @@ describe("Poker Durable Object", () => {
       *alice* has the dealer button
       *bob* posted small blind of 40
       *charlie* posted big blind of 80
-      *alice*'s turn!",
+      <@alice>'s turn",
           },
         ],
       ]
@@ -3541,6 +3541,20 @@ describe("Poker Durable Object", () => {
         [
           {
             "text": "<@slowpoke> it's your turn and you need to roll!",
+          },
+        ],
+      ]
+    `);
+    sayFn.mockClear();
+
+    // === TEST: Self-poke (current player nudges themselves) ===
+    await nudgePlayer(env, contextUser2, createGenericMessageEvent("slowpoke"));
+    // Should show narp-brain emoji when poking yourself
+    expect(sayFn.mock.calls).toMatchInlineSnapshot(`
+      [
+        [
+          {
+            "text": ":narp-brain: <@slowpoke> it's your turn and you need to roll!",
           },
         ],
       ]
