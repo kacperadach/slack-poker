@@ -1751,9 +1751,8 @@ function getGlobalDurableObject(env: Env) {
 
 /**
  * Collect and store the HUBS closing price.
- * Called by the scheduled handler at 4:30 PM ET daily.
+ * Called by the scheduled handler at 4:30 PM ET on weekdays (Mon-Fri).
  * Only collects prices from Feb 18, 2026 to March 31, 2026 (not inclusive of April 1).
- * Skips weekends (Saturday and Sunday) when the stock market is closed.
  */
 async function collectHubsClosingPrice(env: Env): Promise<void> {
   const now = new Date();
@@ -1766,19 +1765,6 @@ async function collectHubsClosingPrice(env: Env): Promise<void> {
     day: "2-digit",
   };
   const etDateStr = now.toLocaleDateString("en-CA", { ...etOptions }); // en-CA gives YYYY-MM-DD format
-  
-  // Get the day of the week in Eastern Time
-  const etWeekday = now.toLocaleDateString("en-US", { 
-    timeZone: "America/New_York", 
-    weekday: "long" 
-  });
-  
-  // Skip weekends - stock market is closed on Saturday and Sunday
-  const isWeekend = etWeekday === "Saturday" || etWeekday === "Sunday";
-  if (isWeekend) {
-    console.log(`Skipping price collection: ${etDateStr} is a ${etWeekday}`);
-    return;
-  }
   
   // Check if date is within range: Feb 18, 2026 to March 31, 2026
   const startDate = "2026-02-18";
