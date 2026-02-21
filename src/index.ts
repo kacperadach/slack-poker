@@ -19,7 +19,11 @@ import type {
   NewGameActionV1,
   RoundStartActionV1,
 } from "./ActionLog";
-import { fetchStockPrice, getHubsStockPriceMessage, getStockPriceMessage } from "./StockPrice";
+import {
+  fetchStockPrice,
+  getHubsStockPriceMessage,
+  getStockPriceMessage,
+} from "./StockPrice";
 import { buildShowdownWinPercentageMessage } from "./ShowdownWinPercentage";
 import { ensureNarpBrainOnError } from "./slackErrorEmoji";
 
@@ -249,11 +253,7 @@ export class PokerDurableObject extends DurableObject<Env> {
    * Save a closing price for a given date.
    * Uses INSERT OR REPLACE to update if the date already exists.
    */
-  saveClosingPrice(
-    date: string,
-    symbol: string,
-    price: number
-  ): void {
+  saveClosingPrice(date: string, symbol: string, price: number): void {
     this.sql.exec(
       `
 			INSERT OR REPLACE INTO closingPrices (date, symbol, price, collectedAt)
@@ -293,7 +293,9 @@ export class PokerDurableObject extends DurableObject<Env> {
    * Calculate the trailing average of closing prices for a given symbol.
    * Returns null if no prices are available.
    */
-  getTrailingAverage(symbol: string): { average: number; count: number } | null {
+  getTrailingAverage(
+    symbol: string
+  ): { average: number; count: number } | null {
     const prices = this.getClosingPrices(symbol);
     if (prices.length === 0) {
       return null;
@@ -573,8 +575,12 @@ export class PokerDurableObject extends DurableObject<Env> {
     const game = TexasHoldem.fromJson(existing);
 
     // Check if player needs to be auto-joined (not in active or inactive players)
-    const isInActive = game.getActivePlayers().some((p) => p.getId() === data.playerId);
-    const isInInactive = game.getInactivePlayers().some((p) => p.getId() === data.playerId);
+    const isInActive = game
+      .getActivePlayers()
+      .some((p) => p.getId() === data.playerId);
+    const isInInactive = game
+      .getInactivePlayers()
+      .some((p) => p.getId() === data.playerId);
     const needsAutoJoin = !isInActive && !isInInactive;
 
     game.buyIn(data.playerId, data.amount);
@@ -1705,6 +1711,69 @@ export class PokerDurableObject extends DurableObject<Env> {
 
     return logs;
   }
+
+  /**
+   * Get the database size in bytes using SQLite pragma.
+   */
+  getDatabaseSize(): {
+    totalBytes: number;
+    pageSize: number;
+    pageCount: number;
+  } {
+    const pageSizeResult = this.sql.exec(`PRAGMA page_size`);
+    const pageCountResult = this.sql.exec(`PRAGMA page_count`);
+
+    const pageSize = pageSizeResult.one()?.page_size as number;
+    const pageCount = pageCountResult.one()?.page_count as number;
+
+    return {
+      totalBytes: pageSize * pageCount,
+      pageSize,
+      pageCount,
+    };
+  }
+
+  /**
+   * Get all action logs across all workspaces/channels for analytics.
+   * Only returns logs older than 24 hours to prevent live game snooping.
+   * Returns an array of all logs for streaming.
+   */
+  getAllActionLogs(): Array<{
+    id: number;
+    workspaceId: string;
+    channelId: string;
+    timestamp: number;
+    data: ActionLogEntry;
+  }> {
+    const oneDayAgo = Date.now() - 24 * 60 * 60 * 1000;
+    const result = this.sql.exec(
+      `
+      SELECT id, workspaceId, channelId, timestamp, data
+      FROM ActionLog
+      WHERE timestamp < ?
+      ORDER BY id ASC
+    `,
+      oneDayAgo
+    );
+
+    const logs: Array<{
+      id: number;
+      workspaceId: string;
+      channelId: string;
+      timestamp: number;
+      data: ActionLogEntry;
+    }> = [];
+    for (const row of result) {
+      logs.push({
+        id: row.id as number,
+        workspaceId: row.workspaceId as string,
+        channelId: row.channelId as string,
+        timestamp: row.timestamp as number,
+        data: JSON.parse(row.data as string) as ActionLogEntry,
+      });
+    }
+    return logs;
+  }
 }
 
 type PostedMessage = typeof isPostedMessageEvent extends (
@@ -1719,6 +1788,62 @@ export default {
     env: Env,
     ctx: ExecutionContext
   ): Promise<Response> {
+    const url = new URL(request.url);
+
+    // Analytics endpoints: /_analytics/db_size or /_analytics/logs
+    if (url.pathname.startsWith("/_analytics/")) {
+      const workspace = url.searchParams.get("workspace");
+      const channel = url.searchParams.get("channel");
+
+      if (!workspace || !channel) {
+        return new Response(
+          JSON.stringify({ error: "Missing workspace or channel query param" }),
+          { status: 400, headers: { "Content-Type": "application/json" } }
+        );
+      }
+
+      const id = env.POKER_DURABLE_OBJECT.idFromName(`${workspace}-${channel}`);
+      const stub = env.POKER_DURABLE_OBJECT.get(id);
+
+      // /_analytics/db_size?workspace=X&channel=Y
+      if (url.pathname === "/_analytics/db_size") {
+        const dbSize = await stub.getDatabaseSize();
+        return new Response(JSON.stringify(dbSize, null, 2), {
+          headers: { "Content-Type": "application/json" },
+        });
+      }
+
+      // /_analytics/logs?workspace=X&channel=Y
+      if (url.pathname === "/_analytics/logs") {
+        const logs = await stub.getAllActionLogs();
+
+        const { readable, writable } = new TransformStream();
+        const writer = writable.getWriter();
+        const encoder = new TextEncoder();
+
+        ctx.waitUntil(
+          (async () => {
+            try {
+              for (const log of logs) {
+                await writer.write(encoder.encode(JSON.stringify(log) + "\n"));
+              }
+            } finally {
+              await writer.close();
+            }
+          })()
+        );
+
+        return new Response(readable, {
+          headers: {
+            "Content-Type": "application/x-ndjson",
+            "Transfer-Encoding": "chunked",
+          },
+        });
+      }
+
+      return new Response("Not found", { status: 404 });
+    }
+
     const app = new SlackApp({ env }).event(
       "message",
       async ({ context, payload }) => {
@@ -1756,7 +1881,7 @@ function getGlobalDurableObject(env: Env) {
  */
 async function collectHubsClosingPrice(env: Env): Promise<void> {
   const now = new Date();
-  
+
   // Get date in Eastern Time (America/New_York) format
   const etOptions: Intl.DateTimeFormatOptions = {
     timeZone: "America/New_York",
@@ -1765,13 +1890,15 @@ async function collectHubsClosingPrice(env: Env): Promise<void> {
     day: "2-digit",
   };
   const etDateStr = now.toLocaleDateString("en-CA", { ...etOptions }); // en-CA gives YYYY-MM-DD format
-  
+
   // Check if date is within range: Feb 18, 2026 to March 31, 2026
   const startDate = "2026-02-18";
   const endDate = "2026-04-01"; // Not inclusive
-  
+
   if (etDateStr < startDate || etDateStr >= endDate) {
-    console.log(`Skipping price collection: ${etDateStr} is outside the allowed range`);
+    console.log(
+      `Skipping price collection: ${etDateStr} is outside the allowed range`
+    );
     return;
   }
 
@@ -1785,7 +1912,7 @@ async function collectHubsClosingPrice(env: Env): Promise<void> {
   // Save to the global Durable Object
   const stub = getGlobalDurableObject(env);
   await stub.saveClosingPrice(etDateStr, "HUBS", result.price);
-  
+
   console.log(`Saved HUBS closing price: $${result.price} for ${etDateStr}`);
 }
 
@@ -1983,7 +2110,10 @@ async function handleMessage(
   // Check if "hubs only" mode is enabled for this channel
   // When enabled, only allow: stock commands, hubs only, all commands
   const stub = getDurableObject(env, context);
-  const hubsOnlyMode = await stub.isHubsOnlyMode(context.teamId!, context.channelId);
+  const hubsOnlyMode = await stub.isHubsOnlyMode(
+    context.teamId!,
+    context.channelId
+  );
 
   // Commands allowed when in "hubs only" mode
   const HUBS_ONLY_WHITELIST = ["hubs", "hubs only", "all commands", "gyvs"];
@@ -2120,7 +2250,9 @@ export async function context(
     await context.client.chat.postEphemeral({
       channel: context.channelId,
       user: context.userId!,
-      text: ensureNarpBrainOnError("You are inactive. You are not at the table."),
+      text: ensureNarpBrainOnError(
+        "You are inactive. You are not at the table."
+      ),
     });
     return;
   }
@@ -2207,9 +2339,13 @@ export async function context(
 
     // Add non-folded players section
     const nonFoldedPlayers = game.getNonFoldedPlayersInOrder();
-    if (nonFoldedPlayers.length > 0 && nonFoldedPlayers.length < playersInOrder.length) {
+    if (
+      nonFoldedPlayers.length > 0 &&
+      nonFoldedPlayers.length < playersInOrder.length
+    ) {
       const nonFoldedNames = nonFoldedPlayers.map(
-        (id) => `*${userIdToName[id as keyof typeof userIdToName] || `<@${id}>`}*`
+        (id) =>
+          `*${userIdToName[id as keyof typeof userIdToName] || `<@${id}>`}*`
       );
       message += `*Still in hand:* ${nonFoldedNames.join(", ")}\n\n`;
     }
@@ -2347,7 +2483,7 @@ async function hubsStockPrice(
     // Get the trailing average from the global Durable Object
     const stub = getGlobalDurableObject(env);
     const trailingAvg = await stub.getTrailingAverage("HUBS");
-    
+
     let message = stockPriceMessage;
     if (trailingAvg) {
       const avgFormatted = trailingAvg.average.toLocaleString("en-US", {
@@ -2356,7 +2492,7 @@ async function hubsStockPrice(
       });
       message += `\n:bar_chart: Trailing Avg (${trailingAvg.count} day${trailingAvg.count === 1 ? "" : "s"}): ${avgFormatted}`;
     }
-    
+
     await context.say({ text: message });
   } else {
     await context.say({
@@ -2414,7 +2550,9 @@ export async function nudgePlayer(
   const currentPlayer = game.getCurrentPlayer();
   if (!currentPlayer) {
     await context.say({
-      text: ensureNarpBrainOnError("No current player which means the code is ASS"),
+      text: ensureNarpBrainOnError(
+        "No current player which means the code is ASS"
+      ),
     });
     return;
   }
@@ -2451,15 +2589,18 @@ export async function silentNudgePlayer(
   const currentPlayer = game.getCurrentPlayer();
   if (!currentPlayer) {
     await context.say({
-      text: ensureNarpBrainOnError("No current player which means the code is ASS"),
+      text: ensureNarpBrainOnError(
+        "No current player which means the code is ASS"
+      ),
     });
     return;
   }
 
   // Get display name without tagging - very very quietly
   const playerId = currentPlayer.getId();
-  const displayName = userIdToName[playerId as keyof typeof userIdToName] || playerId;
-  
+  const displayName =
+    userIdToName[playerId as keyof typeof userIdToName] || playerId;
+
   // Check if user is poking themselves
   const isSelfPoke = context.userId === playerId;
   const selfPokePrefix = isSelfPoke ? ":narp-brain: " : "";
@@ -3273,10 +3414,7 @@ export async function showStacks(
       player.getId();
     const chips = player.getChips();
     const bbMultiple = Math.round(chips / bigBlind);
-    const orbitsLeft =
-      numActivePlayers > 0
-        ? Math.round(chips / orbitCost)
-        : 0;
+    const orbitsLeft = numActivePlayers > 0 ? Math.round(chips / orbitCost) : 0;
     message += `*${name}*: ${chips} (${bbMultiple}xBB, ${orbitsLeft} orbits) Active\n`;
   });
 
@@ -3286,10 +3424,7 @@ export async function showStacks(
       player.getId();
     const chips = player.getChips();
     const bbMultiple = Math.round(chips / bigBlind);
-    const orbitsLeft =
-      numActivePlayers > 0
-        ? Math.round(chips / orbitCost)
-        : 0;
+    const orbitsLeft = numActivePlayers > 0 ? Math.round(chips / orbitCost) : 0;
     message += `*${name}*: ${chips} (${bbMultiple}xBB, ${orbitsLeft} orbits) Inactive\n`;
   });
 
@@ -3643,7 +3778,10 @@ function isVitestRuntime(): boolean {
   }
 
   // @cloudflare/vitest-pool-workers exposes this global in worker runtime.
-  return typeof (globalThis as { __vitest_worker__?: unknown }).__vitest_worker__ !== "undefined";
+  return (
+    typeof (globalThis as { __vitest_worker__?: unknown }).__vitest_worker__ !==
+    "undefined"
+  );
 }
 
 /**
