@@ -2,7 +2,6 @@ import { Card } from "./Card";
 import { Deck } from "./Deck";
 import { Player } from "./Player";
 import { GameEvent } from "./GameEvent";
-import { BettingHistory, BettingAction } from "./BettingHistory";
 
 const { rankDescription, evaluateCards, rankCards } = require("phe");
 
@@ -15,6 +14,26 @@ export enum GameState {
 }
 
 export const Success = "Success";
+
+export type BettingStreet = "preflop" | "flop" | "turn" | "river";
+
+export type BettingActionType =
+  | "small_blind"
+  | "big_blind"
+  | "bet"
+  | "raise"
+  | "call"
+  | "check"
+  | "fold"
+  | "all_in";
+
+export interface BettingAction {
+  street: BettingStreet;
+  playerId: string;
+  actionType: BettingActionType;
+  amount: number;
+  timestamp: number;
+}
 
 export class TexasHoldem {
   private gameState: GameState;
@@ -33,7 +52,7 @@ export class TexasHoldem {
   private playerPositions: Map<string, number>;
   private preDealId: string | undefined = undefined;
   private events: GameEvent[];
-  private bettingHistory: BettingHistory;
+  private bettingHistory: BettingAction[];
 
   constructor(
     gameState: GameState = GameState.WaitingForPlayers,
@@ -51,7 +70,7 @@ export class TexasHoldem {
     lastRaiseAmount: number = 0,
     playerPositions: Map<string, number> = new Map(),
     preDealId: string | undefined = undefined,
-    bettingHistory: BettingHistory = new BettingHistory()
+    bettingHistory: BettingAction[] = []
   ) {
     this.gameState = gameState;
     this.deck = deck;
@@ -296,7 +315,7 @@ export class TexasHoldem {
     this.deck.reset();
     this.deck.shuffle();
     this.dealInitialCards();
-    this.bettingHistory.clear();
+    this.bettingHistory = [];
 
     this.smallBlind = this.getSmallBlindByDay();
     this.bigBlind = 2 * this.smallBlind;
@@ -320,12 +339,13 @@ export class TexasHoldem {
         }`
       )
     );
-    this.bettingHistory.addAction(
-      "preflop",
-      smallBlindPlayer.getId(),
-      "small_blind",
-      smallBlindAmount
-    );
+    this.bettingHistory.push({
+      street: "preflop",
+      playerId: smallBlindPlayer.getId(),
+      actionType: "small_blind",
+      amount: smallBlindAmount,
+      timestamp: Date.now(),
+    });
 
     // Handle big blind payment
     const bigBlindAmount = Math.min(this.bigBlind, bigBlindPlayer.getChips());
@@ -337,12 +357,13 @@ export class TexasHoldem {
         `${bigBlindPlayer.getId()} posted big blind of ${bigBlindAmount}${bigBlindPlayer.getChips() === 0 ? " *:rotating_light: ALL-IN :rotating_light:*" : ""}`
       )
     );
-    this.bettingHistory.addAction(
-      "preflop",
-      bigBlindPlayer.getId(),
-      "big_blind",
-      bigBlindAmount
-    );
+    this.bettingHistory.push({
+      street: "preflop",
+      playerId: bigBlindPlayer.getId(),
+      actionType: "big_blind",
+      amount: bigBlindAmount,
+      timestamp: Date.now(),
+    });
 
     this.currentPot += smallBlindAmount + bigBlindAmount;
     this.currentBetAmount = this.bigBlind;
@@ -831,12 +852,13 @@ export class TexasHoldem {
 
     this.foldedPlayers.add(playerId);
     player.setHadTurnThisRound(true);
-    this.bettingHistory.addAction(
-      BettingHistory.gameStateToStreet(this.gameState),
+    this.bettingHistory.push({
+      street: this.gameStateToStreet(this.gameState),
       playerId,
-      "fold",
-      0
-    );
+      actionType: "fold",
+      amount: 0,
+      timestamp: Date.now(),
+    });
 
     this.advanceToNextPlayer();
 
@@ -933,12 +955,13 @@ export class TexasHoldem {
     this.events.push(new GameEvent(`${playerId} checked!`));
 
     player.setHadTurnThisRound(true);
-    this.bettingHistory.addAction(
-      BettingHistory.gameStateToStreet(this.gameState),
+    this.bettingHistory.push({
+      street: this.gameStateToStreet(this.gameState),
       playerId,
-      "check",
-      0
-    );
+      actionType: "check",
+      amount: 0,
+      timestamp: Date.now(),
+    });
 
     this.advanceToNextPlayer();
     // if (this.isBettingRoundComplete()) {
@@ -1081,17 +1104,18 @@ export class TexasHoldem {
 
     this.addToPot(betAmount);
     
-    const actionType = player.getIsAllIn()
+    const actionType: BettingActionType = player.getIsAllIn()
       ? "all_in"
       : isRaise
         ? "raise"
         : "bet";
-    this.bettingHistory.addAction(
-      BettingHistory.gameStateToStreet(this.gameState),
+    this.bettingHistory.push({
+      street: this.gameStateToStreet(this.gameState),
       playerId,
       actionType,
-      roundedAmount
-    );
+      amount: roundedAmount,
+      timestamp: Date.now(),
+    });
     
     this.advanceToNextPlayer();
     this.progressGame();
@@ -1183,12 +1207,13 @@ export class TexasHoldem {
 
     this.addToPot(callAmount);
     
-    this.bettingHistory.addAction(
-      BettingHistory.gameStateToStreet(this.gameState),
+    this.bettingHistory.push({
+      street: this.gameStateToStreet(this.gameState),
       playerId,
-      player.getIsAllIn() ? "all_in" : "call",
-      this.currentBetAmount
-    );
+      actionType: player.getIsAllIn() ? "all_in" : "call",
+      amount: this.currentBetAmount,
+      timestamp: Date.now(),
+    });
 
     const message = player.getIsAllIn()
       ? `${playerId} called ${this.currentBetAmount} chips *:rotating_light: ALL-IN :rotating_light:* Total Pot: ${this.currentPot}`
@@ -1592,8 +1617,43 @@ export class TexasHoldem {
     return [...this.events];
   }
 
-  public getBettingHistory(): BettingHistory {
-    return this.bettingHistory;
+  public getBettingHistory(): BettingAction[] {
+    return [...this.bettingHistory];
+  }
+
+  public getBettingHistoryByStreet(street: BettingStreet): BettingAction[] {
+    return this.bettingHistory.filter((action) => action.street === street);
+  }
+
+  public getPreflopBettingHistory(): BettingAction[] {
+    return this.getBettingHistoryByStreet("preflop");
+  }
+
+  public getFlopBettingHistory(): BettingAction[] {
+    return this.getBettingHistoryByStreet("flop");
+  }
+
+  public getTurnBettingHistory(): BettingAction[] {
+    return this.getBettingHistoryByStreet("turn");
+  }
+
+  public getRiverBettingHistory(): BettingAction[] {
+    return this.getBettingHistoryByStreet("river");
+  }
+
+  private gameStateToStreet(gameState: GameState): BettingStreet {
+    switch (gameState) {
+      case GameState.PreFlop:
+        return "preflop";
+      case GameState.Flop:
+        return "flop";
+      case GameState.Turn:
+        return "turn";
+      case GameState.River:
+        return "river";
+      default:
+        return "preflop";
+    }
   }
 
   public showCards(
@@ -1721,7 +1781,7 @@ export class TexasHoldem {
       lastRaiseAmount: this.lastRaiseAmount,
       playerPositions: Array.from(this.playerPositions.entries()),
       preDealId: this.preDealId,
-      bettingHistory: this.bettingHistory.toJson(),
+      bettingHistory: this.bettingHistory,
     } as const;
   }
 
@@ -1747,9 +1807,7 @@ export class TexasHoldem {
       data.lastRaiseAmount,
       new Map(data.playerPositions),
       data.preDealId,
-      data.bettingHistory
-        ? BettingHistory.fromJson(data.bettingHistory)
-        : new BettingHistory()
+      data.bettingHistory || []
     );
     return game;
   }
@@ -1821,7 +1879,7 @@ export class TexasHoldem {
         | number
       )[][],
       preDealId: this.preDealId,
-      bettingHistory: this.bettingHistory.toJson(),
+      bettingHistory: this.bettingHistory,
     } as const;
   }
 }

@@ -1,6 +1,5 @@
 import { strict as assert } from "assert";
 import { TexasHoldem, GameState, Success } from "./Game";
-import { BettingHistory } from "./BettingHistory";
 
 const PLAYER_1 = "player1";
 const PLAYER_2 = "player2";
@@ -26,8 +25,7 @@ test("Betting history tracks blinds at round start", () => {
 
   game.startRound(PLAYER_1);
 
-  const history = game.getBettingHistory();
-  const actions = history.getActions();
+  const actions = game.getBettingHistory();
 
   assert(actions.length >= 2, "Should have at least 2 actions (blinds)");
 
@@ -64,8 +62,7 @@ test("Betting history tracks check actions", () => {
 
   game.check(nextPlayer.getId());
 
-  const history = game.getBettingHistory();
-  const checkActions = history.getActions().filter((a) => a.actionType === "check");
+  const checkActions = game.getBettingHistory().filter((a) => a.actionType === "check");
 
   assert(checkActions.length >= 1, "Should have at least 1 check action");
   assert.equal(checkActions[0].street, "preflop", "Check should be preflop");
@@ -86,8 +83,7 @@ test("Betting history tracks call actions", () => {
 
   game.call(currentPlayer.getId());
 
-  const history = game.getBettingHistory();
-  const callActions = history.getActions().filter((a) => a.actionType === "call");
+  const callActions = game.getBettingHistory().filter((a) => a.actionType === "call");
 
   assert(callActions.length >= 1, "Should have at least 1 call action");
   assert.equal(callActions[0].street, "preflop", "Call should be preflop");
@@ -108,8 +104,7 @@ test("Betting history tracks fold actions", () => {
 
   game.fold(currentPlayer.getId());
 
-  const history = game.getBettingHistory();
-  const foldActions = history.getActions().filter((a) => a.actionType === "fold");
+  const foldActions = game.getBettingHistory().filter((a) => a.actionType === "fold");
 
   assert(foldActions.length >= 1, "Should have at least 1 fold action");
   assert.equal(foldActions[0].street, "preflop", "Fold should be preflop");
@@ -131,8 +126,7 @@ test("Betting history tracks bet/raise actions", () => {
 
   game.bet(currentPlayer.getId(), 100);
 
-  const history = game.getBettingHistory();
-  const betActions = history.getActions().filter(
+  const betActions = game.getBettingHistory().filter(
     (a) => a.actionType === "bet" || a.actionType === "raise"
   );
 
@@ -175,11 +169,9 @@ test("Betting history tracks actions across streets", () => {
   // Should be at turn now
   assert.equal(game.getGameState(), GameState.Turn, "Should be at turn");
 
-  const history = game.getBettingHistory();
-
-  const preflopActions = history.getPreflopActions();
-  const flopActions = history.getFlopActions();
-  const turnActions = history.getTurnActions();
+  const preflopActions = game.getPreflopBettingHistory();
+  const flopActions = game.getFlopBettingHistory();
+  const turnActions = game.getTurnBettingHistory();
 
   assert(preflopActions.length >= 2, "Should have preflop actions (blinds + actions)");
   assert(flopActions.length >= 2, "Should have flop actions");
@@ -195,8 +187,8 @@ test("Betting history tracks actions across streets", () => {
   // Should be at river now
   assert.equal(game.getGameState(), GameState.River, "Should be at river");
 
-  const updatedTurnActions = history.getTurnActions();
-  const riverActions = history.getRiverActions();
+  const updatedTurnActions = game.getTurnBettingHistory();
+  const riverActions = game.getRiverBettingHistory();
 
   assert(updatedTurnActions.length >= 2, "Should have turn actions");
   assert.equal(riverActions.length, 0, "Should have no river actions yet");
@@ -223,8 +215,7 @@ test("Betting history is cleared between rounds", () => {
   // Start another round
   game.startRound(PLAYER_1);
 
-  const history = game.getBettingHistory();
-  const actions = history.getActions();
+  const actions = game.getBettingHistory();
 
   // Should only have the blinds from the new round
   const smallBlindActions = actions.filter((a) => a.actionType === "small_blind");
@@ -252,8 +243,8 @@ test("Betting history serializes and deserializes correctly", () => {
   const json = game.toJson();
   const restoredGame = TexasHoldem.fromJson(json);
 
-  const originalHistory = game.getBettingHistory().getActions();
-  const restoredHistory = restoredGame.getBettingHistory().getActions();
+  const originalHistory = game.getBettingHistory();
+  const restoredHistory = restoredGame.getBettingHistory();
 
   assert.equal(restoredHistory.length, originalHistory.length, "History length should match");
 
@@ -265,7 +256,7 @@ test("Betting history serializes and deserializes correctly", () => {
   }
 });
 
-test("Betting history getActionsByPlayer works", () => {
+test("Betting history getBettingHistoryByStreet works", () => {
   const game = new TexasHoldem();
 
   game.addPlayer(PLAYER_1);
@@ -275,14 +266,11 @@ test("Betting history getActionsByPlayer works", () => {
 
   game.startRound(PLAYER_1);
 
-  const history = game.getBettingHistory();
+  const preflopActions = game.getBettingHistoryByStreet("preflop");
   
-  const player1Actions = history.getActionsByPlayer(PLAYER_1);
-  const player2Actions = history.getActionsByPlayer(PLAYER_2);
-
-  // At least one player should have the small blind, other should have big blind
-  const totalBlindActions = player1Actions.length + player2Actions.length;
-  assert(totalBlindActions >= 2, "Should have blind actions for players");
+  // Should have at least the blinds
+  assert(preflopActions.length >= 2, "Should have blind actions");
+  assert(preflopActions.every(a => a.street === "preflop"), "All actions should be preflop");
 });
 
 test("Betting history tracks all-in actions", () => {
@@ -301,20 +289,11 @@ test("Betting history tracks all-in actions", () => {
 
   game.bet(currentPlayer.getId(), 500);
 
-  const history = game.getBettingHistory();
-  const allInActions = history.getActions().filter(
+  const allInActions = game.getBettingHistory().filter(
     (a) => a.actionType === "all_in"
   );
 
   assert(allInActions.length >= 1, "Should have at least 1 all-in action");
-});
-
-test("BettingHistory.gameStateToStreet converts correctly", () => {
-  assert.equal(BettingHistory.gameStateToStreet(GameState.PreFlop), "preflop");
-  assert.equal(BettingHistory.gameStateToStreet(GameState.Flop), "flop");
-  assert.equal(BettingHistory.gameStateToStreet(GameState.Turn), "turn");
-  assert.equal(BettingHistory.gameStateToStreet(GameState.River), "river");
-  assert.equal(BettingHistory.gameStateToStreet(GameState.WaitingForPlayers), "preflop");
 });
 
 console.log("\nBetting History test suite complete");
