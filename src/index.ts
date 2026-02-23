@@ -1105,6 +1105,90 @@ export class PokerDurableObject extends DurableObject<Env> {
     return { ok: true, game: game.getState() };
   }
 
+  async thisPotAintBigEnoughWithAction(data: {
+    workspaceId: string;
+    channelId: string;
+    playerId: string;
+    messageText: string;
+    normalizedText: string;
+    handlerKey: string;
+    slackMessageTs: string;
+    timestamp: number;
+  }): Promise<
+    | { ok: true; game: ReturnType<TexasHoldem["getState"]> }
+    | { ok: false; reason: "no_game" | "not_river" }
+  > {
+    const existing = await this.fetchGame(data.workspaceId, data.channelId);
+    if (!existing) {
+      return { ok: false, reason: "no_game" };
+    }
+
+    const game = TexasHoldem.fromJson(existing);
+    const currentState = game.getGameState();
+
+    if (currentState !== GameState.River) {
+      return { ok: false, reason: "not_river" };
+    }
+
+    const currentBet = game.getCurrentBetAmount();
+    const playerBet = game.getCurrentPlayer()?.getCurrentBet() ?? 0;
+    const isCall = currentBet > playerBet;
+    const callAmount = currentBet - playerBet;
+
+    game.callOrCheck(data.playerId);
+
+    const messageReceivedAction: MessageReceivedActionV1 = {
+      schemaVersion: 1,
+      workspaceId: data.workspaceId,
+      channelId: data.channelId,
+      timestamp: data.timestamp,
+      actionType: "message_received",
+      messageText: data.messageText,
+      playerId: data.playerId,
+      slackMessageTs: data.slackMessageTs,
+      normalizedText: data.normalizedText,
+      handlerKey: data.handlerKey,
+    };
+    this.logAction(messageReceivedAction);
+
+    if (isCall) {
+      const callAction: CallActionV1 = {
+        schemaVersion: 1,
+        workspaceId: data.workspaceId,
+        channelId: data.channelId,
+        timestamp: Date.now(),
+        actionType: "call",
+        messageText: data.messageText,
+        playerId: data.playerId,
+        amount: callAmount,
+      };
+      this.saveGameWithAction(
+        data.workspaceId,
+        data.channelId,
+        JSON.stringify(game.toJson()),
+        callAction
+      );
+    } else {
+      const checkAction: CheckActionV1 = {
+        schemaVersion: 1,
+        workspaceId: data.workspaceId,
+        channelId: data.channelId,
+        timestamp: Date.now(),
+        actionType: "check",
+        messageText: data.messageText,
+        playerId: data.playerId,
+      };
+      this.saveGameWithAction(
+        data.workspaceId,
+        data.channelId,
+        JSON.stringify(game.toJson()),
+        checkAction
+      );
+    }
+
+    return { ok: true, game: game.getState() };
+  }
+
   async preDealWithAction(data: {
     workspaceId: string;
     channelId: string;
@@ -2042,6 +2126,7 @@ const MESSAGE_HANDLERS: Record<string, Function> = {
   "^lets take her to the flop": takeHerToThe,
   "^lets take her to the turn": takeHerToThe,
   "^lets take her to the river": takeHerToThe,
+  "^this pot aint big enough for the both of us": thisPotAintBigEnough,
   "^hubs only": enableHubsOnlyMode,
   "^all commands": disableHubsOnlyMode,
   "^hubs": hubsStockPrice,
@@ -3219,6 +3304,45 @@ export async function check(
   });
 
   if (!result.ok) {
+    await context.say({ text: NO_GAME_EXISTS_MESSAGE });
+    return;
+  }
+
+  await sendGameStateMessages(env, context, result.game);
+}
+
+export async function thisPotAintBigEnough(
+  env: Env,
+  context: SlackAppContextWithChannelId,
+  payload: PostedMessage,
+  meta?: HandlerMeta
+) {
+  const stub = getDurableObject(env, context);
+  const rawMessageText = meta?.messageText ?? payload.text ?? "";
+  const normalizedText =
+    meta?.normalizedText ?? cleanMessageText(rawMessageText);
+  const handlerKey = meta?.handlerKey ?? "thisPotAintBigEnough";
+  const slackMessageTs = meta?.slackMessageTs ?? payload.ts ?? "";
+  const timestamp = meta?.timestamp ?? Date.now();
+
+  const result = await stub.thisPotAintBigEnoughWithAction({
+    workspaceId: context.teamId!,
+    channelId: context.channelId,
+    playerId: context.userId!,
+    messageText: rawMessageText,
+    normalizedText,
+    handlerKey,
+    slackMessageTs,
+    timestamp,
+  });
+
+  if (!result.ok) {
+    if (result.reason === "not_river") {
+      await context.say({
+        text: "This command can only be used on the River, partner.",
+      });
+      return;
+    }
     await context.say({ text: NO_GAME_EXISTS_MESSAGE });
     return;
   }
