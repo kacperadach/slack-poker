@@ -2137,6 +2137,7 @@ const MESSAGE_HANDLERS: Record<string, Function> = {
   "^fsearch": searchFlops,
   "^context": context,
   "^stacks": showStacks,
+  "^set stacks": setStacks,
   "^lets take her to the flop": takeHerToThe,
   "^lets take her to the turn": takeHerToThe,
   "^lets take her to the river": takeHerToThe,
@@ -3527,6 +3528,86 @@ export async function showStacks(
   });
 
   await context.say({ text: message });
+}
+
+export async function setStacks(
+  env: Env,
+  context: SlackAppContextWithChannelId,
+  payload: PostedMessage
+) {
+  const messageText = payload.text.toLowerCase();
+  const targetAmount = parseFloat(
+    messageText.replace("set stacks", "").trim()
+  );
+
+  if (isNaN(targetAmount) || targetAmount < 0) {
+    await context.say({
+      text: ensureNarpBrainOnError(
+        'Invalid amount! Please use format: "set stacks {amount}"'
+      ),
+    });
+    return;
+  }
+
+  const game = await fetchGame(env, context);
+  if (!game) {
+    await context.say({ text: NO_GAME_EXISTS_MESSAGE });
+    return;
+  }
+
+  const allPlayers = [
+    ...game.getActivePlayers(),
+    ...game.getInactivePlayers(),
+  ];
+
+  if (allPlayers.length === 0) {
+    await context.say({
+      text: ensureNarpBrainOnError("No players in the game!"),
+    });
+    return;
+  }
+
+  let outputMessage = `*Equalize Stacks to ${targetAmount}*\n\n`;
+
+  const positiveCommands: string[] = [];
+  const negativeCommands: { playerName: string; command: string }[] = [];
+
+  allPlayers.forEach((player) => {
+    const playerId = player.getId();
+    const playerName =
+      userIdToName[playerId as keyof typeof userIdToName] || playerId;
+    const currentChips = player.getChips();
+    const difference = currentChips - targetAmount;
+
+    if (difference > 0) {
+      positiveCommands.push(
+        `/metacoins banker ${difference} @pokernado <@${playerId}>`
+      );
+    } else if (difference < 0) {
+      negativeCommands.push({
+        playerName,
+        command: `/metacoins ${Math.abs(difference)} @pokernado`,
+      });
+    }
+  });
+
+  if (positiveCommands.length > 0) {
+    outputMessage += "*Players paying to banker:*\n```\n";
+    outputMessage += positiveCommands.join("\n") + "\n```\n\n";
+  }
+
+  if (negativeCommands.length > 0) {
+    outputMessage += "*Players receiving from banker:*\n";
+    negativeCommands.forEach(({ playerName, command }) => {
+      outputMessage += `${playerName}: \`${command}\`\n`;
+    });
+  }
+
+  if (positiveCommands.length === 0 && negativeCommands.length === 0) {
+    outputMessage = `*Equalize Stacks to ${targetAmount}*\n\nAll players already have exactly the target amount!`;
+  }
+
+  await context.say({ text: outputMessage });
 }
 
 export async function cashOut(
