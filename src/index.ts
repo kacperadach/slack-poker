@@ -649,6 +649,99 @@ export class PokerDurableObject extends DurableObject<Env> {
     return { ok: true, game: game.getState() };
   }
 
+  async setStacksWithAction(data: {
+    workspaceId: string;
+    channelId: string;
+    playerId: string;
+    messageText: string;
+    normalizedText: string;
+    handlerKey: string;
+    slackMessageTs: string;
+    timestamp: number;
+    targetAmount: number;
+  }): Promise<
+    | {
+        ok: true;
+        game: ReturnType<TexasHoldem["getState"]>;
+        adjustments: Array<{
+          playerId: string;
+          previousChips: number;
+          newChips: number;
+          difference: number;
+        }>;
+      }
+    | { ok: false; reason: "no_game" | "round_in_progress" }
+  > {
+    const existing = await this.fetchGame(data.workspaceId, data.channelId);
+    if (!existing) {
+      return { ok: false, reason: "no_game" };
+    }
+
+    const game = TexasHoldem.fromJson(existing);
+
+    if (game.getGameState() !== GameState.WaitingForPlayers) {
+      return { ok: false, reason: "round_in_progress" };
+    }
+
+    const adjustments: Array<{
+      playerId: string;
+      previousChips: number;
+      newChips: number;
+      difference: number;
+    }> = [];
+
+    const allPlayers = [
+      ...game.getActivePlayers(),
+      ...game.getInactivePlayers(),
+    ];
+
+    allPlayers.forEach((player) => {
+      const previousChips = player.getChips();
+      const difference = previousChips - data.targetAmount;
+      player.setChips(data.targetAmount);
+      adjustments.push({
+        playerId: player.getId(),
+        previousChips,
+        newChips: data.targetAmount,
+        difference,
+      });
+    });
+
+    const messageReceivedAction: MessageReceivedActionV1 = {
+      schemaVersion: 1,
+      workspaceId: data.workspaceId,
+      channelId: data.channelId,
+      timestamp: data.timestamp,
+      actionType: "message_received",
+      messageText: data.messageText,
+      playerId: data.playerId,
+      slackMessageTs: data.slackMessageTs,
+      normalizedText: data.normalizedText,
+      handlerKey: data.handlerKey,
+    };
+    this.logAction(messageReceivedAction);
+
+    const setStacksAction: ActionLogEntry = {
+      schemaVersion: 1,
+      workspaceId: data.workspaceId,
+      channelId: data.channelId,
+      timestamp: Date.now(),
+      actionType: "set_stacks",
+      messageText: data.messageText,
+      playerId: data.playerId,
+      amount: data.targetAmount,
+    };
+
+    this.saveGameWithAction(
+      data.workspaceId,
+      data.channelId,
+      JSON.stringify(game.toJson()),
+      setStacksAction
+    );
+
+    return { ok: true, game: game.getState(), adjustments };
+  }
+
   async foldWithAction(data: {
     workspaceId: string;
     channelId: string;
@@ -3533,7 +3626,8 @@ export async function showStacks(
 export async function setStacks(
   env: Env,
   context: SlackAppContextWithChannelId,
-  payload: PostedMessage
+  payload: PostedMessage,
+  meta?: HandlerMeta
 ) {
   const messageText = payload.text.toLowerCase();
   const targetAmount = parseFloat(
@@ -3549,35 +3643,56 @@ export async function setStacks(
     return;
   }
 
-  const game = await fetchGame(env, context);
-  if (!game) {
-    await context.say({ text: NO_GAME_EXISTS_MESSAGE });
+  const stub = getDurableObject(env, context);
+  const rawMessageText = meta?.messageText ?? payload.text ?? "";
+  const normalizedText =
+    meta?.normalizedText ?? cleanMessageText(rawMessageText);
+  const handlerKey = meta?.handlerKey ?? "set stacks";
+  const slackMessageTs = meta?.slackMessageTs ?? payload.ts ?? "";
+  const timestamp = meta?.timestamp ?? Date.now();
+
+  const result = await stub.setStacksWithAction({
+    workspaceId: context.teamId!,
+    channelId: context.channelId,
+    playerId: context.userId!,
+    messageText: rawMessageText,
+    normalizedText,
+    handlerKey,
+    slackMessageTs,
+    timestamp,
+    targetAmount,
+  });
+
+  if (!result.ok) {
+    if (result.reason === "no_game") {
+      await context.say({ text: NO_GAME_EXISTS_MESSAGE });
+    } else if (result.reason === "round_in_progress") {
+      await context.say({
+        text: ensureNarpBrainOnError(
+          "Cannot set stacks while a round is in progress!"
+        ),
+      });
+    }
     return;
   }
 
-  const allPlayers = [
-    ...game.getActivePlayers(),
-    ...game.getInactivePlayers(),
-  ];
+  const { adjustments } = result;
 
-  if (allPlayers.length === 0) {
+  if (adjustments.length === 0) {
     await context.say({
       text: ensureNarpBrainOnError("No players in the game!"),
     });
     return;
   }
 
-  let outputMessage = `*Equalize Stacks to ${targetAmount}*\n\n`;
+  let outputMessage = `*Stacks equalized to ${targetAmount}*\n\n`;
 
   const positiveCommands: string[] = [];
   const negativeCommands: { playerName: string; command: string }[] = [];
 
-  allPlayers.forEach((player) => {
-    const playerId = player.getId();
+  adjustments.forEach(({ playerId, difference }) => {
     const playerName =
       userIdToName[playerId as keyof typeof userIdToName] || playerId;
-    const currentChips = player.getChips();
-    const difference = currentChips - targetAmount;
 
     if (difference > 0) {
       positiveCommands.push(
@@ -3604,7 +3719,7 @@ export async function setStacks(
   }
 
   if (positiveCommands.length === 0 && negativeCommands.length === 0) {
-    outputMessage = `*Equalize Stacks to ${targetAmount}*\n\nAll players already have exactly the target amount!`;
+    outputMessage = `*Stacks equalized to ${targetAmount}*\n\nAll players already had exactly the target amount!`;
   }
 
   await context.say({ text: outputMessage });

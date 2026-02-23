@@ -117,6 +117,12 @@ export class Player {
     }
   }
 
+  public setChips(amount: number): void {
+    if (amount >= 0) {
+      this.chips = amount;
+    }
+  }
+
   public setAllIn(status: boolean): void {
     this.isAllIn = status;
   }
