@@ -111,6 +111,7 @@ describe("Poker Durable Object", () => {
       expect(result).toContainEqual({ name: "PokerGames" });
       expect(result).toContainEqual({ name: "Flops" });
       expect(result).toContainEqual({ name: "ActionLog" });
+      expect(result).toContainEqual({ name: "CompletedPokerGames" });
     });
   });
 
@@ -457,6 +458,75 @@ describe("Poker Durable Object", () => {
     expect(gameState.activePlayers.length).toBe(1);
     expect(gameState.activePlayers[0].id).toBe("1");
     expect(gameState.activePlayers[0].chips).toBe(0);
+  });
+
+  it("persists a completed game when a round ends", async () => {
+    const workspaceId = "completed-game-workspace";
+    const channelId = "completed-game-channel";
+    const sayFn = vi.fn();
+    const postEphemeralFn = vi.fn();
+    const contextUser1 = createContext({
+      userId: "user1",
+      sayFn,
+      postEphemeralFn,
+      workspaceId,
+      channelId,
+    });
+    const contextUser2 = createContext({
+      userId: "user2",
+      sayFn,
+      postEphemeralFn,
+      workspaceId,
+      channelId,
+    });
+    const payloadUser1 = createGenericMessageEvent("user1");
+    const payloadUser2 = createGenericMessageEvent("user2");
+    const stub = getStub({ workspaceId, channelId });
+
+    await newGame(env, contextUser1, payloadUser1);
+    await joinGame(env, contextUser1, payloadUser1);
+    await joinGame(env, contextUser2, payloadUser2);
+    await buyIn(
+      env,
+      contextUser1,
+      createGenericMessageEvent("user1", "buy in 1000")
+    );
+    await buyIn(
+      env,
+      contextUser2,
+      createGenericMessageEvent("user2", "buy in 1000")
+    );
+    await startRound(env, contextUser1, payloadUser1);
+
+    const activeRoundState = await getGameState(stub, workspaceId, channelId);
+    const currentPlayer =
+      activeRoundState.activePlayers[activeRoundState.currentPlayerIndex]?.id;
+    const actingContext = currentPlayer === "user1" ? contextUser1 : contextUser2;
+    const actingPayload = currentPlayer === "user1" ? payloadUser1 : payloadUser2;
+
+    await fold(env, actingContext, actingPayload);
+
+    const postRoundState = await getGameState(stub, workspaceId, channelId);
+    expect(postRoundState.gameState).toBe(GameState.WaitingForPlayers);
+
+    const completedGames = await getCompletedGames(stub, workspaceId, channelId);
+    expect(completedGames).toHaveLength(1);
+    expect(completedGames[0].game.gameState).toBe(GameState.WaitingForPlayers);
+    expect(completedGames[0].game.bettingHistory.length).toBeGreaterThan(0);
+
+    // A non-terminal update should not create another completed snapshot.
+    await buyIn(
+      env,
+      contextUser1,
+      createGenericMessageEvent("user1", "buy in 25")
+    );
+
+    const completedGamesAfterBuyIn = await getCompletedGames(
+      stub,
+      workspaceId,
+      channelId
+    );
+    expect(completedGamesAfterBuyIn).toHaveLength(1);
   });
 
   it("game scenario 1", async () => {
@@ -4636,6 +4706,31 @@ function getGameState(
       )
       .one();
     return TexasHoldem.fromJson(JSON.parse(result.game as string)).getState();
+  });
+}
+
+function getCompletedGames(
+  stub: DurableObjectStub,
+  workspaceId: string,
+  channelId: string
+) {
+  return runInDurableObject(stub, async (_instance, state) => {
+    return state.storage.sql
+      .exec<{
+        id: number;
+        completedAt: number;
+        game: string;
+      }>(
+        "SELECT id, completedAt, game FROM CompletedPokerGames WHERE workspaceId = ? AND channelId = ? ORDER BY id",
+        workspaceId,
+        channelId
+      )
+      .toArray()
+      .map((row) => ({
+        id: row.id,
+        completedAt: row.completedAt,
+        game: JSON.parse(row.game),
+      }));
   });
 }
 
