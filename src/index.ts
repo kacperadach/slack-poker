@@ -89,21 +89,6 @@ export class PokerDurableObject extends DurableObject<Env> {
 			ON ActionLog (workspaceId, channelId, timestamp);
 		`);
 
-    this.sql.exec(`
-			CREATE TABLE IF NOT EXISTS CompletedPokerGames (
-				id INTEGER PRIMARY KEY AUTOINCREMENT,
-				workspaceId TEXT NOT NULL,
-				channelId TEXT NOT NULL,
-				completedAt INTEGER NOT NULL,
-				game JSON NOT NULL
-			);
-		`);
-
-    this.sql.exec(`
-			CREATE INDEX IF NOT EXISTS idx_completedpokergames_lookup
-			ON CompletedPokerGames (workspaceId, channelId, completedAt);
-		`);
-
     // Table to track processed messages for idempotency
     // This prevents duplicate processing when Slack retries message delivery
     this.sql.exec(`
@@ -1599,88 +1584,7 @@ export class PokerDurableObject extends DurableObject<Env> {
     return { ok: true, game: game.getState() };
   }
 
-  private getGameStateFromSerializedGame(game: unknown): GameState | null {
-    if (typeof game === "string") {
-      try {
-        const parsed = JSON.parse(game) as { gameState?: unknown };
-        if (typeof parsed.gameState !== "number") {
-          return null;
-        }
-        return parsed.gameState as GameState;
-      } catch {
-        return null;
-      }
-    }
-
-    if (typeof game === "object" && game !== null) {
-      const maybeGame = game as { gameState?: unknown };
-      if (typeof maybeGame.gameState === "number") {
-        return maybeGame.gameState as GameState;
-      }
-    }
-
-    return null;
-  }
-
-  private persistCompletedGame(
-    workspaceId: string,
-    channelId: string,
-    game: string
-  ): void {
-    this.sql.exec(
-      `
-			INSERT INTO CompletedPokerGames (workspaceId, channelId, completedAt, game)
-			VALUES (?, ?, ?, ?)
-		`,
-      workspaceId,
-      channelId,
-      Date.now(),
-      game
-    );
-  }
-
-  private maybePersistCompletedGame(
-    workspaceId: string,
-    channelId: string,
-    nextGame: unknown
-  ): void {
-    const previousGameRow = this.sql
-      .exec(
-        `
-			SELECT game FROM PokerGames
-			WHERE workspaceId = ? AND channelId = ?
-			LIMIT 1
-		`,
-        workspaceId,
-        channelId
-      )
-      .one() as { game?: string } | undefined;
-
-    if (!previousGameRow?.game) {
-      return;
-    }
-
-    const previousGameState = this.getGameStateFromSerializedGame(
-      previousGameRow.game
-    );
-    const nextGameState = this.getGameStateFromSerializedGame(nextGame);
-
-    if (
-      previousGameState === null ||
-      nextGameState === null ||
-      previousGameState === GameState.WaitingForPlayers ||
-      nextGameState !== GameState.WaitingForPlayers
-    ) {
-      return;
-    }
-
-    const completedGameJson =
-      typeof nextGame === "string" ? nextGame : JSON.stringify(nextGame);
-    this.persistCompletedGame(workspaceId, channelId, completedGameJson);
-  }
-
   saveGame(workspaceId: string, channelId: string, game: any): void {
-    this.maybePersistCompletedGame(workspaceId, channelId, game);
     this.sql.exec(
       `
 			UPDATE PokerGames
@@ -1703,8 +1607,6 @@ export class PokerDurableObject extends DurableObject<Env> {
     game: any,
     action: ActionLogEntry
   ): void {
-    this.maybePersistCompletedGame(workspaceId, channelId, game);
-
     // Save game state
     this.sql.exec(
       `
