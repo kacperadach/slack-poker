@@ -634,6 +634,99 @@ export class PokerDurableObject extends DurableObject<Env> {
     return { ok: true, game: game.getState() };
   }
 
+  async setStacksWithAction(data: {
+    workspaceId: string;
+    channelId: string;
+    playerId: string;
+    messageText: string;
+    normalizedText: string;
+    handlerKey: string;
+    slackMessageTs: string;
+    timestamp: number;
+    targetAmount: number;
+  }): Promise<
+    | {
+        ok: true;
+        game: ReturnType<TexasHoldem["getState"]>;
+        adjustments: Array<{
+          playerId: string;
+          previousChips: number;
+          newChips: number;
+          difference: number;
+        }>;
+      }
+    | { ok: false; reason: "no_game" | "round_in_progress" }
+  > {
+    const existing = await this.fetchGame(data.workspaceId, data.channelId);
+    if (!existing) {
+      return { ok: false, reason: "no_game" };
+    }
+
+    const game = TexasHoldem.fromJson(existing);
+
+    if (game.getGameState() !== GameState.WaitingForPlayers) {
+      return { ok: false, reason: "round_in_progress" };
+    }
+
+    const adjustments: Array<{
+      playerId: string;
+      previousChips: number;
+      newChips: number;
+      difference: number;
+    }> = [];
+
+    const allPlayers = [
+      ...game.getActivePlayers(),
+      ...game.getInactivePlayers(),
+    ];
+
+    allPlayers.forEach((player) => {
+      const previousChips = player.getChips();
+      const difference = previousChips - data.targetAmount;
+      player.setChips(data.targetAmount);
+      adjustments.push({
+        playerId: player.getId(),
+        previousChips,
+        newChips: data.targetAmount,
+        difference,
+      });
+    });
+
+    const messageReceivedAction: MessageReceivedActionV1 = {
+      schemaVersion: 1,
+      workspaceId: data.workspaceId,
+      channelId: data.channelId,
+      timestamp: data.timestamp,
+      actionType: "message_received",
+      messageText: data.messageText,
+      playerId: data.playerId,
+      slackMessageTs: data.slackMessageTs,
+      normalizedText: data.normalizedText,
+      handlerKey: data.handlerKey,
+    };
+    this.logAction(messageReceivedAction);
+
+    const setStacksAction: ActionLogEntry = {
+      schemaVersion: 1,
+      workspaceId: data.workspaceId,
+      channelId: data.channelId,
+      timestamp: Date.now(),
+      actionType: "set_stacks",
+      messageText: data.messageText,
+      playerId: data.playerId,
+      amount: data.targetAmount,
+    };
+
+    this.saveGameWithAction(
+      data.workspaceId,
+      data.channelId,
+      JSON.stringify(game.toJson()),
+      setStacksAction
+    );
+
+    return { ok: true, game: game.getState(), adjustments };
+  }
+
   async foldWithAction(data: {
     workspaceId: string;
     channelId: string;
@@ -2123,6 +2216,7 @@ const MESSAGE_HANDLERS: Record<string, Function> = {
   "^fsearch": searchFlops,
   "^context": context,
   "^stacks": showStacks,
+  "^set stacks": setStacks,
   "^lets take her to the flop": takeHerToThe,
   "^lets take her to the turn": takeHerToThe,
   "^lets take her to the river": takeHerToThe,
@@ -3553,6 +3647,108 @@ export async function showStacks(
   });
 
   await context.say({ text: message });
+}
+
+export async function setStacks(
+  env: Env,
+  context: SlackAppContextWithChannelId,
+  payload: PostedMessage,
+  meta?: HandlerMeta
+) {
+  const messageText = payload.text.toLowerCase();
+  const targetAmount = parseFloat(
+    messageText.replace("set stacks", "").trim()
+  );
+
+  if (isNaN(targetAmount) || targetAmount < 0) {
+    await context.say({
+      text: ensureNarpBrainOnError(
+        'Invalid amount! Please use format: "set stacks {amount}"'
+      ),
+    });
+    return;
+  }
+
+  const stub = getDurableObject(env, context);
+  const rawMessageText = meta?.messageText ?? payload.text ?? "";
+  const normalizedText =
+    meta?.normalizedText ?? cleanMessageText(rawMessageText);
+  const handlerKey = meta?.handlerKey ?? "set stacks";
+  const slackMessageTs = meta?.slackMessageTs ?? payload.ts ?? "";
+  const timestamp = meta?.timestamp ?? Date.now();
+
+  const result = await stub.setStacksWithAction({
+    workspaceId: context.teamId!,
+    channelId: context.channelId,
+    playerId: context.userId!,
+    messageText: rawMessageText,
+    normalizedText,
+    handlerKey,
+    slackMessageTs,
+    timestamp,
+    targetAmount,
+  });
+
+  if (!result.ok) {
+    if (result.reason === "no_game") {
+      await context.say({ text: NO_GAME_EXISTS_MESSAGE });
+    } else if (result.reason === "round_in_progress") {
+      await context.say({
+        text: ensureNarpBrainOnError(
+          "Cannot set stacks while a round is in progress!"
+        ),
+      });
+    }
+    return;
+  }
+
+  const { adjustments } = result;
+
+  if (adjustments.length === 0) {
+    await context.say({
+      text: ensureNarpBrainOnError("No players in the game!"),
+    });
+    return;
+  }
+
+  let outputMessage = `*Stacks equalized to ${targetAmount}*\n\n`;
+
+  const positiveCommands: string[] = [];
+  const negativeCommands: { playerName: string; command: string }[] = [];
+
+  adjustments.forEach(({ playerId, difference }) => {
+    const playerName =
+      userIdToName[playerId as keyof typeof userIdToName] || playerId;
+
+    if (difference > 0) {
+      positiveCommands.push(
+        `/metacoins banker ${difference} @pokernado <@${playerId}>`
+      );
+    } else if (difference < 0) {
+      negativeCommands.push({
+        playerName,
+        command: `/metacoins ${Math.abs(difference)} @pokernado`,
+      });
+    }
+  });
+
+  if (positiveCommands.length > 0) {
+    outputMessage += "*Players paying to banker:*\n```\n";
+    outputMessage += positiveCommands.join("\n") + "\n```\n\n";
+  }
+
+  if (negativeCommands.length > 0) {
+    outputMessage += "*Players receiving from banker:*\n";
+    negativeCommands.forEach(({ playerName, command }) => {
+      outputMessage += `${playerName}: \`${command}\`\n`;
+    });
+  }
+
+  if (positiveCommands.length === 0 && negativeCommands.length === 0) {
+    outputMessage = `*Stacks equalized to ${targetAmount}*\n\nAll players already had exactly the target amount!`;
+  }
+
+  await context.say({ text: outputMessage });
 }
 
 export async function cashOut(
