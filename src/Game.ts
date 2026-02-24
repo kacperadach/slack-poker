@@ -53,6 +53,7 @@ export class TexasHoldem {
   private preDealId: string | undefined = undefined;
   private events: GameEvent[];
   private bettingHistory: BettingAction[];
+  private currentTimePot: number = 0; // time pot in seconds
 
   constructor(
     gameState: GameState = GameState.WaitingForPlayers,
@@ -70,7 +71,8 @@ export class TexasHoldem {
     lastRaiseAmount: number = 0,
     playerPositions: Map<string, number> = new Map(),
     preDealId: string | undefined = undefined,
-    bettingHistory: BettingAction[] = []
+    bettingHistory: BettingAction[] = [],
+    currentTimePot: number = 0
   ) {
     this.gameState = gameState;
     this.deck = deck;
@@ -89,6 +91,7 @@ export class TexasHoldem {
     this.preDealId = preDealId;
     this.events = [];
     this.bettingHistory = bettingHistory;
+    this.currentTimePot = currentTimePot;
   }
 
   public progressGame(): void {
@@ -316,6 +319,7 @@ export class TexasHoldem {
     this.deck.shuffle();
     this.dealInitialCards();
     this.bettingHistory = [];
+    this.currentTimePot = 0;
 
     this.smallBlind = this.getSmallBlindByDay();
     this.bigBlind = 2 * this.smallBlind;
@@ -623,6 +627,117 @@ export class TexasHoldem {
     player.setAllIn(false);
     this.events.push(new GameEvent(`${playerId} Cashed out ${chips} chips`));
     return true;
+  }
+
+  public buyInTime(playerId: string, seconds: number): string {
+    const roundedSeconds = Math.round(seconds);
+
+    if (roundedSeconds <= 0) {
+      this.events.push(new GameEvent(`${playerId} Invalid time amount!`));
+      return "Buy in time amount must be positive";
+    }
+
+    let player = this.activePlayers.find((p) => p.getId() === playerId);
+    if (!player) {
+      player = this.inactivePlayers.find((p) => p.getId() === playerId);
+      if (!player) {
+        this.addPlayer(playerId);
+        player = this.activePlayers.find((p) => p.getId() === playerId);
+        if (!player) {
+          this.events.push(new GameEvent(`${playerId} Failed to join table!`));
+          return "Failed to join table";
+        }
+      }
+    }
+
+    player.addTimeBankSeconds(roundedSeconds);
+    const formattedTime = player.formatTimeBank();
+    this.events.push(
+      new GameEvent(`${playerId} Added ${this.formatSeconds(roundedSeconds)} to time bank (Total: ${formattedTime})`)
+    );
+    return Success;
+  }
+
+  public betTime(playerId: string, seconds: number): string {
+    if (this.gameState === GameState.WaitingForPlayers) {
+      this.events.push(
+        new GameEvent(`${playerId} Cannot bet time, game is not active!`)
+      );
+      return "Cannot bet time, game is not active";
+    }
+
+    const player = this.getCurrentPlayer();
+    if (!player || player.getId() !== playerId) {
+      this.events.push(new GameEvent(`${playerId} Cannot bet time, not your turn!`));
+      return "Not your turn to bet time";
+    }
+
+    const roundedSeconds = Math.round(seconds);
+
+    if (roundedSeconds <= 0) {
+      this.events.push(
+        new GameEvent(`${playerId} Cannot bet time, amount must be positive!`)
+      );
+      return "Time bet amount must be positive";
+    }
+
+    if (roundedSeconds > player.getTimeBankSeconds()) {
+      this.events.push(
+        new GameEvent(`${playerId} Cannot bet time, not enough time in bank! (${player.formatTimeBank()} available)`)
+      );
+      return "Not enough time in time bank";
+    }
+
+    player.removeTimeBankSeconds(roundedSeconds);
+    this.currentTimePot += roundedSeconds;
+
+    this.events.push(
+      new GameEvent(
+        `${playerId} bet ${this.formatSeconds(roundedSeconds)} of time! Time Pot: ${this.formatSeconds(this.currentTimePot)}`
+      )
+    );
+
+    return `Bet ${this.formatSeconds(roundedSeconds)} of time`;
+  }
+
+  public getTimeBanks(): void {
+    let message = "Time Banks:\n";
+    
+    const allPlayers = [
+      ...this.getActivePlayers(),
+      ...this.getInactivePlayers(),
+    ];
+
+    allPlayers.forEach((player) => {
+      const timeBank = player.getTimeBankSeconds();
+      if (timeBank > 0) {
+        message += `${player.getId()}: ${player.formatTimeBank()}\n`;
+      }
+    });
+
+    if (message === "Time Banks:\n") {
+      message = "No players have time in their time banks.";
+    }
+
+    this.events.push(new GameEvent(message));
+  }
+
+  public getCurrentTimePot(): number {
+    return this.currentTimePot;
+  }
+
+  public formatSeconds(seconds: number): string {
+    const hours = Math.floor(seconds / 3600);
+    const minutes = Math.floor((seconds % 3600) / 60);
+    const secs = seconds % 60;
+    
+    if (hours > 0) {
+      return `${hours}h ${minutes}m ${secs}s`;
+    } else if (minutes > 0) {
+      return `${minutes}m ${secs}s`;
+    } else {
+      return `${secs}s`;
+    }
   }
 
   public dealInitialCards(): void {
@@ -1295,6 +1410,15 @@ export class TexasHoldem {
         new GameEvent(`${winner.getId()} wins ${this.currentPot} chips!`)
       );
       winner.addChips(this.currentPot);
+      
+      // Also award time pot if any
+      if (this.currentTimePot > 0) {
+        winner.addTimeBankSeconds(this.currentTimePot);
+        this.events.push(
+          new GameEvent(`${winner.getId()} also wins ${this.formatSeconds(this.currentTimePot)} of time!`)
+        );
+        this.currentTimePot = 0;
+      }
       return;
     }
 
@@ -1406,6 +1530,18 @@ export class TexasHoldem {
           `Main pot of ${potSize} won by: ${winners.map((w) => w.player.getId()).join(", ")}`
         )
       );
+      
+      // Distribute time pot to main pot winners
+      if (this.currentTimePot > 0) {
+        const timeWinnings = Math.floor(this.currentTimePot / winners.length);
+        winners.forEach((winner) => winner.player.addTimeBankSeconds(timeWinnings));
+        this.events.push(
+          new GameEvent(
+            `Time pot of ${this.formatSeconds(this.currentTimePot)} won by: ${winners.map((w) => w.player.getId()).join(", ")}`
+          )
+        );
+        this.currentTimePot = 0;
+      }
     }
   }
 
@@ -1782,6 +1918,7 @@ export class TexasHoldem {
       playerPositions: Array.from(this.playerPositions.entries()),
       preDealId: this.preDealId,
       bettingHistory: this.bettingHistory,
+      currentTimePot: this.currentTimePot,
     } as const;
   }
 
@@ -1807,7 +1944,8 @@ export class TexasHoldem {
       data.lastRaiseAmount,
       new Map(data.playerPositions),
       data.preDealId,
-      data.bettingHistory || []
+      data.bettingHistory || [],
+      data.currentTimePot || 0
     );
     return game;
   }
@@ -1880,6 +2018,7 @@ export class TexasHoldem {
       )[][],
       preDealId: this.preDealId,
       bettingHistory: this.bettingHistory,
+      currentTimePot: this.currentTimePot,
     } as const;
   }
 }

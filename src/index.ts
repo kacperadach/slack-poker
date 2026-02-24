@@ -634,6 +634,180 @@ export class PokerDurableObject extends DurableObject<Env> {
     return { ok: true, game: game.getState() };
   }
 
+  async buyInTimeWithAction(data: {
+    workspaceId: string;
+    channelId: string;
+    playerId: string;
+    messageText: string;
+    normalizedText: string;
+    handlerKey: string;
+    slackMessageTs: string;
+    timestamp: number;
+    seconds: number;
+  }): Promise<
+    | { ok: true; game: ReturnType<TexasHoldem["getState"]> }
+    | { ok: false; reason: "no_game" }
+  > {
+    const existing = await this.fetchGame(data.workspaceId, data.channelId);
+    if (!existing) {
+      return { ok: false, reason: "no_game" };
+    }
+
+    const game = TexasHoldem.fromJson(existing);
+
+    const isInActive = game
+      .getActivePlayers()
+      .some((p) => p.getId() === data.playerId);
+    const isInInactive = game
+      .getInactivePlayers()
+      .some((p) => p.getId() === data.playerId);
+    const needsAutoJoin = !isInActive && !isInInactive;
+
+    game.buyInTime(data.playerId, data.seconds);
+
+    const messageReceivedAction: MessageReceivedActionV1 = {
+      schemaVersion: 1,
+      workspaceId: data.workspaceId,
+      channelId: data.channelId,
+      timestamp: data.timestamp,
+      actionType: "message_received",
+      messageText: data.messageText,
+      playerId: data.playerId,
+      slackMessageTs: data.slackMessageTs,
+      normalizedText: data.normalizedText,
+      handlerKey: data.handlerKey,
+    };
+    this.logAction(messageReceivedAction);
+
+    if (needsAutoJoin) {
+      const joinAction: ActionLogEntry = {
+        schemaVersion: 1,
+        workspaceId: data.workspaceId,
+        channelId: data.channelId,
+        timestamp: Date.now(),
+        actionType: "join",
+        messageText: data.messageText,
+        playerId: data.playerId,
+      };
+      this.logAction(joinAction);
+    }
+
+    const buyInTimeAction: ActionLogEntry = {
+      schemaVersion: 1,
+      workspaceId: data.workspaceId,
+      channelId: data.channelId,
+      timestamp: Date.now(),
+      actionType: "buy_in_time",
+      messageText: data.messageText,
+      playerId: data.playerId,
+      seconds: data.seconds,
+    };
+
+    this.saveGameWithAction(
+      data.workspaceId,
+      data.channelId,
+      JSON.stringify(game.toJson()),
+      buyInTimeAction
+    );
+
+    return { ok: true, game: game.getState() };
+  }
+
+  async betTimeWithAction(data: {
+    workspaceId: string;
+    channelId: string;
+    playerId: string;
+    messageText: string;
+    normalizedText: string;
+    handlerKey: string;
+    slackMessageTs: string;
+    timestamp: number;
+    seconds: number;
+  }): Promise<
+    | { ok: true; game: ReturnType<TexasHoldem["getState"]> }
+    | { ok: false; reason: "no_game" }
+  > {
+    const existing = await this.fetchGame(data.workspaceId, data.channelId);
+    if (!existing) {
+      return { ok: false, reason: "no_game" };
+    }
+
+    const game = TexasHoldem.fromJson(existing);
+    game.betTime(data.playerId, data.seconds);
+
+    const messageReceivedAction: MessageReceivedActionV1 = {
+      schemaVersion: 1,
+      workspaceId: data.workspaceId,
+      channelId: data.channelId,
+      timestamp: data.timestamp,
+      actionType: "message_received",
+      messageText: data.messageText,
+      playerId: data.playerId,
+      slackMessageTs: data.slackMessageTs,
+      normalizedText: data.normalizedText,
+      handlerKey: data.handlerKey,
+    };
+    this.logAction(messageReceivedAction);
+
+    const betTimeAction: ActionLogEntry = {
+      schemaVersion: 1,
+      workspaceId: data.workspaceId,
+      channelId: data.channelId,
+      timestamp: Date.now(),
+      actionType: "bet_time",
+      messageText: data.messageText,
+      playerId: data.playerId,
+      seconds: data.seconds,
+    };
+
+    this.saveGameWithAction(
+      data.workspaceId,
+      data.channelId,
+      JSON.stringify(game.toJson()),
+      betTimeAction
+    );
+
+    return { ok: true, game: game.getState() };
+  }
+
+  async getTimeBanksWithAction(data: {
+    workspaceId: string;
+    channelId: string;
+    playerId: string;
+    messageText: string;
+    normalizedText: string;
+    handlerKey: string;
+    slackMessageTs: string;
+    timestamp: number;
+  }): Promise<
+    | { ok: true; game: ReturnType<TexasHoldem["getState"]> }
+    | { ok: false; reason: "no_game" }
+  > {
+    const existing = await this.fetchGame(data.workspaceId, data.channelId);
+    if (!existing) {
+      return { ok: false, reason: "no_game" };
+    }
+
+    const game = TexasHoldem.fromJson(existing);
+    game.getTimeBanks();
+
+    const messageReceivedAction: MessageReceivedActionV1 = {
+      schemaVersion: 1,
+      workspaceId: data.workspaceId,
+      channelId: data.channelId,
+      timestamp: data.timestamp,
+      actionType: "message_received",
+      messageText: data.messageText,
+      playerId: data.playerId,
+      slackMessageTs: data.slackMessageTs,
+      normalizedText: data.normalizedText,
+      handlerKey: data.handlerKey,
+    };
+    this.logAction(messageReceivedAction);
+
+    return { ok: true, game: game.getState() };
+  }
+
   async foldWithAction(data: {
     workspaceId: string;
     channelId: string;
@@ -2010,7 +2184,11 @@ const MESSAGE_HANDLERS: Record<string, Function> = {
   "^new game": newGame,
   "^join table": joinGame,
   "^leave table": leaveGame,
+  "^buy in time": buyInTime,
   "^buy in": buyIn,
+  "^bet time": betTime,
+  "^time banks": showTimeBanks,
+  "^time bank": showTimeBanks,
   "^cash out": cashOut,
   "^chipnado": showChips,
   "^start round": startRound,
@@ -3624,6 +3802,166 @@ export async function buyIn(
     slackMessageTs,
     timestamp,
     amount: buyInAmount,
+  });
+
+  if (!result.ok) {
+    await context.say({ text: NO_GAME_EXISTS_MESSAGE });
+    return;
+  }
+
+  await sendGameStateMessages(env, context, result.game);
+}
+
+function parseTimeInput(timeStr: string): number | null {
+  const trimmed = timeStr.trim().toLowerCase();
+  
+  const hmsMatch = trimmed.match(/^(?:(\d+)h)?\s*(?:(\d+)m)?\s*(?:(\d+)s)?$/);
+  if (hmsMatch && (hmsMatch[1] || hmsMatch[2] || hmsMatch[3])) {
+    const hours = parseInt(hmsMatch[1] || "0", 10);
+    const minutes = parseInt(hmsMatch[2] || "0", 10);
+    const seconds = parseInt(hmsMatch[3] || "0", 10);
+    return hours * 3600 + minutes * 60 + seconds;
+  }
+  
+  const colonMatch = trimmed.match(/^(\d+):(\d+)(?::(\d+))?$/);
+  if (colonMatch) {
+    if (colonMatch[3]) {
+      const hours = parseInt(colonMatch[1], 10);
+      const minutes = parseInt(colonMatch[2], 10);
+      const seconds = parseInt(colonMatch[3], 10);
+      return hours * 3600 + minutes * 60 + seconds;
+    } else {
+      const minutes = parseInt(colonMatch[1], 10);
+      const seconds = parseInt(colonMatch[2], 10);
+      return minutes * 60 + seconds;
+    }
+  }
+  
+  const numMatch = trimmed.match(/^(\d+)$/);
+  if (numMatch) {
+    return parseInt(numMatch[1], 10);
+  }
+  
+  return null;
+}
+
+export async function buyInTime(
+  env: Env,
+  context: SlackAppContextWithChannelId,
+  payload: PostedMessage,
+  meta?: HandlerMeta
+) {
+  const messageText = payload.text.toLowerCase();
+  const timeStr = messageText.replace(/buy\s*in\s*time/i, "").trim();
+  const seconds = parseTimeInput(timeStr);
+
+  if (seconds === null || seconds <= 0) {
+    await context.say({
+      text: ensureNarpBrainOnError(
+        'Invalid time amount! Use format: "buy in time 5m 30s" or "buy in time 5:30" or "buy in time 330"'
+      ),
+    });
+    return;
+  }
+
+  const stub = getDurableObject(env, context);
+  const rawMessageText = meta?.messageText ?? payload.text ?? "";
+  const normalizedText =
+    meta?.normalizedText ?? cleanMessageText(rawMessageText);
+  const handlerKey = meta?.handlerKey ?? "buy in time";
+  const slackMessageTs = meta?.slackMessageTs ?? payload.ts ?? "";
+  const timestamp = meta?.timestamp ?? Date.now();
+
+  const result = await stub.buyInTimeWithAction({
+    workspaceId: context.teamId!,
+    channelId: context.channelId,
+    playerId: context.userId!,
+    messageText: rawMessageText,
+    normalizedText,
+    handlerKey,
+    slackMessageTs,
+    timestamp,
+    seconds,
+  });
+
+  if (!result.ok) {
+    await context.say({ text: NO_GAME_EXISTS_MESSAGE });
+    return;
+  }
+
+  await sendGameStateMessages(env, context, result.game);
+}
+
+export async function betTime(
+  env: Env,
+  context: SlackAppContextWithChannelId,
+  payload: PostedMessage,
+  meta?: HandlerMeta
+) {
+  const messageText = payload.text.toLowerCase();
+  const timeStr = messageText.replace(/bet\s*time/i, "").trim();
+  const seconds = parseTimeInput(timeStr);
+
+  if (seconds === null || seconds <= 0) {
+    await context.say({
+      text: ensureNarpBrainOnError(
+        'Invalid time amount! Use format: "bet time 30s" or "bet time 1m" or "bet time 90"'
+      ),
+    });
+    return;
+  }
+
+  const stub = getDurableObject(env, context);
+  const rawMessageText = meta?.messageText ?? payload.text ?? "";
+  const normalizedText =
+    meta?.normalizedText ?? cleanMessageText(rawMessageText);
+  const handlerKey = meta?.handlerKey ?? "bet time";
+  const slackMessageTs = meta?.slackMessageTs ?? payload.ts ?? "";
+  const timestamp = meta?.timestamp ?? Date.now();
+
+  const result = await stub.betTimeWithAction({
+    workspaceId: context.teamId!,
+    channelId: context.channelId,
+    playerId: context.userId!,
+    messageText: rawMessageText,
+    normalizedText,
+    handlerKey,
+    slackMessageTs,
+    timestamp,
+    seconds,
+  });
+
+  if (!result.ok) {
+    await context.say({ text: NO_GAME_EXISTS_MESSAGE });
+    return;
+  }
+
+  await sendGameStateMessages(env, context, result.game);
+}
+
+export async function showTimeBanks(
+  env: Env,
+  context: SlackAppContextWithChannelId,
+  payload: PostedMessage,
+  meta?: HandlerMeta
+) {
+  const stub = getDurableObject(env, context);
+  const rawMessageText = meta?.messageText ?? payload.text ?? "";
+  const normalizedText =
+    meta?.normalizedText ?? cleanMessageText(rawMessageText);
+  const handlerKey = meta?.handlerKey ?? "time banks";
+  const slackMessageTs = meta?.slackMessageTs ?? payload.ts ?? "";
+  const timestamp = meta?.timestamp ?? Date.now();
+
+  const result = await stub.getTimeBanksWithAction({
+    workspaceId: context.teamId!,
+    channelId: context.channelId,
+    playerId: context.userId!,
+    messageText: rawMessageText,
+    normalizedText,
+    handlerKey,
+    slackMessageTs,
+    timestamp,
   });
 
   if (!result.ok) {

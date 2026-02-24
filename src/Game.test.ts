@@ -949,4 +949,173 @@ test("allIn method returns error when not player's turn", () => {
   assert.equal(game.allIn(otherPlayerId), "Not your turn to go all-in");
 });
 
+// Time Betting Tests
+test("buyInTime adds time to player's time bank", () => {
+  const game = new TexasHoldem();
+
+  assert.equal(game.addPlayer(PLAYER_1), true);
+  
+  // Buy in 5 minutes (300 seconds) of time
+  assert.equal(game.buyInTime(PLAYER_1, 300), Success);
+  
+  const player = game.getActivePlayers().find((p) => p.getId() === PLAYER_1);
+  assert(player);
+  assert.equal(player.getTimeBankSeconds(), 300);
+  
+  // Add more time
+  assert.equal(game.buyInTime(PLAYER_1, 60), Success);
+  assert.equal(player.getTimeBankSeconds(), 360);
+});
+
+test("buyInTime auto-joins player if not already joined", () => {
+  const game = new TexasHoldem();
+
+  assert.equal(game.getActivePlayers().length, 0);
+  
+  // Buy in time without joining first
+  assert.equal(game.buyInTime(PLAYER_1, 120), Success);
+  
+  // Player should be auto-joined
+  assert.equal(game.getActivePlayers().length, 1);
+  const player = game.getActivePlayers().find((p) => p.getId() === PLAYER_1);
+  assert(player);
+  assert.equal(player.getTimeBankSeconds(), 120);
+});
+
+test("buyInTime rejects invalid amounts", () => {
+  const game = new TexasHoldem();
+
+  assert.equal(game.addPlayer(PLAYER_1), true);
+  
+  assert.equal(game.buyInTime(PLAYER_1, 0), "Buy in time amount must be positive");
+  assert.equal(game.buyInTime(PLAYER_1, -60), "Buy in time amount must be positive");
+  
+  const player = game.getActivePlayers().find((p) => p.getId() === PLAYER_1);
+  assert(player);
+  assert.equal(player.getTimeBankSeconds(), 0);
+});
+
+test("betTime removes time from player and adds to time pot", () => {
+  const game = new TexasHoldem();
+
+  assert.equal(game.addPlayer(PLAYER_1), true);
+  assert.equal(game.addPlayer(PLAYER_2), true);
+  assert.equal(game.buyIn(PLAYER_1, 1000), Success);
+  assert.equal(game.buyIn(PLAYER_2, 1000), Success);
+  
+  // Add time to player banks
+  assert.equal(game.buyInTime(PLAYER_1, 300), Success);
+  assert.equal(game.buyInTime(PLAYER_2, 300), Success);
+  
+  assert.equal(game.startRound(PLAYER_1), Success);
+  
+  // Time pot should start at 0
+  assert.equal(game.getCurrentTimePot(), 0);
+  
+  // Get current player and bet time
+  const currentPlayer = game.getCurrentPlayer();
+  assert(currentPlayer);
+  
+  const beforeTime = currentPlayer.getTimeBankSeconds();
+  assert.equal(game.betTime(currentPlayer.getId(), 60), "Bet 1m 0s of time");
+  
+  assert.equal(currentPlayer.getTimeBankSeconds(), beforeTime - 60);
+  assert.equal(game.getCurrentTimePot(), 60);
+});
+
+test("betTime rejects when not enough time in bank", () => {
+  const game = new TexasHoldem();
+
+  assert.equal(game.addPlayer(PLAYER_1), true);
+  assert.equal(game.addPlayer(PLAYER_2), true);
+  assert.equal(game.buyIn(PLAYER_1, 1000), Success);
+  assert.equal(game.buyIn(PLAYER_2, 1000), Success);
+  
+  // Only add 30 seconds to time bank
+  assert.equal(game.buyInTime(PLAYER_1, 30), Success);
+  assert.equal(game.buyInTime(PLAYER_2, 30), Success);
+  
+  assert.equal(game.startRound(PLAYER_1), Success);
+  
+  const currentPlayer = game.getCurrentPlayer();
+  assert(currentPlayer);
+  
+  // Try to bet more time than available
+  assert.equal(game.betTime(currentPlayer.getId(), 60), "Not enough time in time bank");
+  assert.equal(currentPlayer.getTimeBankSeconds(), 30);
+  assert.equal(game.getCurrentTimePot(), 0);
+});
+
+test("betTime rejects when game is not active", () => {
+  const game = new TexasHoldem();
+
+  assert.equal(game.addPlayer(PLAYER_1), true);
+  assert.equal(game.buyInTime(PLAYER_1, 300), Success);
+  
+  assert.equal(game.betTime(PLAYER_1, 60), "Cannot bet time, game is not active");
+});
+
+test("betTime rejects when not player's turn", () => {
+  const game = new TexasHoldem();
+
+  assert.equal(game.addPlayer(PLAYER_1), true);
+  assert.equal(game.addPlayer(PLAYER_2), true);
+  assert.equal(game.buyIn(PLAYER_1, 1000), Success);
+  assert.equal(game.buyIn(PLAYER_2, 1000), Success);
+  assert.equal(game.buyInTime(PLAYER_1, 300), Success);
+  assert.equal(game.buyInTime(PLAYER_2, 300), Success);
+  
+  assert.equal(game.startRound(PLAYER_1), Success);
+  
+  const currentPlayer = game.getCurrentPlayer();
+  assert(currentPlayer);
+  
+  const otherPlayerId = currentPlayer.getId() === PLAYER_1 ? PLAYER_2 : PLAYER_1;
+  assert.equal(game.betTime(otherPlayerId, 60), "Not your turn to bet time");
+});
+
+test("Player formatTimeBank displays time correctly", () => {
+  const game = new TexasHoldem();
+
+  assert.equal(game.addPlayer(PLAYER_1), true);
+  
+  const player = game.getActivePlayers().find((p) => p.getId() === PLAYER_1);
+  assert(player);
+  
+  // Test seconds only
+  player.setTimeBankSeconds(45);
+  assert.equal(player.formatTimeBank(), "45s");
+  
+  // Test minutes and seconds
+  player.setTimeBankSeconds(125); // 2m 5s
+  assert.equal(player.formatTimeBank(), "2m 5s");
+  
+  // Test hours, minutes, and seconds
+  player.setTimeBankSeconds(3725); // 1h 2m 5s
+  assert.equal(player.formatTimeBank(), "1h 2m 5s");
+});
+
+test("Time pot persists through game serialization", () => {
+  const game = new TexasHoldem();
+
+  assert.equal(game.addPlayer(PLAYER_1), true);
+  assert.equal(game.addPlayer(PLAYER_2), true);
+  assert.equal(game.buyIn(PLAYER_1, 1000), Success);
+  assert.equal(game.buyIn(PLAYER_2, 1000), Success);
+  assert.equal(game.buyInTime(PLAYER_1, 300), Success);
+  assert.equal(game.buyInTime(PLAYER_2, 300), Success);
+  
+  // Serialize and deserialize
+  const json = game.toJson();
+  const restoredGame = TexasHoldem.fromJson(json);
+  
+  // Check time banks are preserved
+  const p1 = restoredGame.getActivePlayers().find((p) => p.getId() === PLAYER_1);
+  const p2 = restoredGame.getActivePlayers().find((p) => p.getId() === PLAYER_2);
+  assert(p1);
+  assert(p2);
+  assert.equal(p1.getTimeBankSeconds(), 300);
+  assert.equal(p2.getTimeBankSeconds(), 300);
+});
+
 console.log("\nTest suite complete");
