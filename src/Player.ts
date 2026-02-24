@@ -20,6 +20,7 @@ export class Player {
   private preMove: PreMove | null;
   private preNH: boolean = false;
   private preAH: boolean = false;
+  private timeBankSeconds: number = 0; // time balance in seconds for time betting
 
   constructor(
     id: string,
@@ -35,7 +36,8 @@ export class Player {
     totalBuyIn: number = 0,
     preMove: PreMove | null = null,
     preNH: boolean = false,
-    preAH: boolean = false
+    preAH: boolean = false,
+    timeBankSeconds: number = 0
   ) {
     this.id = id;
     this.chips = chips;
@@ -51,6 +53,7 @@ export class Player {
     this.preMove = preMove;
     this.preNH = preNH;
     this.preAH = preAH;
+    this.timeBankSeconds = timeBankSeconds;
   }
 
   public getHadTurnThisRound(): boolean {
@@ -205,6 +208,40 @@ export class Player {
     this.preAH = preAH;
   }
 
+  public getTimeBankSeconds(): number {
+    return this.timeBankSeconds;
+  }
+
+  public setTimeBankSeconds(seconds: number): void {
+    this.timeBankSeconds = Math.max(0, seconds);
+  }
+
+  public addTimeBankSeconds(seconds: number): void {
+    if (seconds > 0) {
+      this.timeBankSeconds += seconds;
+    }
+  }
+
+  public removeTimeBankSeconds(seconds: number): number {
+    const secondsToRemove = Math.min(seconds, this.timeBankSeconds);
+    this.timeBankSeconds -= secondsToRemove;
+    return secondsToRemove;
+  }
+
+  public formatTimeBank(): string {
+    const hours = Math.floor(this.timeBankSeconds / 3600);
+    const minutes = Math.floor((this.timeBankSeconds % 3600) / 60);
+    const seconds = this.timeBankSeconds % 60;
+    
+    if (hours > 0) {
+      return `${hours}h ${minutes}m ${seconds}s`;
+    } else if (minutes > 0) {
+      return `${minutes}m ${seconds}s`;
+    } else {
+      return `${seconds}s`;
+    }
+  }
+
   public toJson() {
     return {
       id: this.id,
@@ -221,6 +258,7 @@ export class Player {
       preMove: this.preMove,
       preNH: this.preNH,
       preAH: this.preAH,
+      timeBankSeconds: this.timeBankSeconds,
     } as const;
   }
 
@@ -239,7 +277,8 @@ export class Player {
       data?.totalBuyIn || 0,
       data?.preMove || null,
       data?.preNH || false,
-      data?.preAH || false
+      data?.preAH || false,
+      data?.timeBankSeconds || 0
     );
   }
 

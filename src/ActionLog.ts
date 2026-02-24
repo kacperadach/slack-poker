@@ -85,6 +85,24 @@ export interface CashOutActionV1 extends ActionLogBase {
   amount: number;
 }
 
+export interface BuyInTimeActionV1 extends ActionLogBase {
+  actionType: "buy_in_time";
+  schemaVersion: 1;
+  /** Player who bought in time */
+  playerId: string;
+  /** Time amount in seconds */
+  seconds: number;
+}
+
+export interface BetTimeActionV1 extends ActionLogBase {
+  actionType: "bet_time";
+  schemaVersion: 1;
+  /** Player who bet time */
+  playerId: string;
+  /** Time amount in seconds */
+  seconds: number;
+}
+
 // =============================================================================
 // Round Management Actions
 // =============================================================================
@@ -187,6 +205,8 @@ export type ActionLogEntry =
   | LeaveActionV1
   | BuyInActionV1
   | CashOutActionV1
+  | BuyInTimeActionV1
+  | BetTimeActionV1
   // Round management
   | RoundStartActionV1
   // Player actions
@@ -213,8 +233,8 @@ export function isPlayerAction(
 
 export function isPlayerManagementAction(
   action: ActionLogEntry
-): action is JoinActionV1 | LeaveActionV1 | BuyInActionV1 | CashOutActionV1 {
-  return ["join", "leave", "buy_in", "cash_out"].includes(action.actionType);
+): action is JoinActionV1 | LeaveActionV1 | BuyInActionV1 | CashOutActionV1 | BuyInTimeActionV1 | BetTimeActionV1 {
+  return ["join", "leave", "buy_in", "cash_out", "buy_in_time", "bet_time"].includes(action.actionType);
 }
 
 // Individual type guards for each action type
@@ -239,6 +259,14 @@ export function isBuyIn(action: ActionLike): action is BuyInActionV1 {
 
 export function isCashOut(action: ActionLike): action is CashOutActionV1 {
   return action.actionType === "cash_out";
+}
+
+export function isBuyInTime(action: ActionLike): action is BuyInTimeActionV1 {
+  return action.actionType === "buy_in_time";
+}
+
+export function isBetTime(action: ActionLike): action is BetTimeActionV1 {
+  return action.actionType === "bet_time";
 }
 
 export function isRoundStart(action: ActionLike): action is RoundStartActionV1 {
@@ -373,6 +401,8 @@ export const ALL_ACTION_TYPES: ActionType[] = [
   "leave",
   "buy_in",
   "cash_out",
+  "buy_in_time",
+  "bet_time",
   "round_start",
   "bet",
   "call",
