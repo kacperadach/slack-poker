@@ -3733,12 +3733,15 @@ export async function setStacks(
   });
 
   if (positiveCommands.length > 0) {
-    outputMessage += "*Players paying to banker:*\n```\n";
-    outputMessage += positiveCommands.join("\n") + "\n```\n\n";
+    outputMessage += "*Players receiving from banker:*\n";
+    positiveCommands.forEach((command) => {
+      outputMessage += `\`${command}\`\n`;
+    });
+    outputMessage += "\n";
   }
 
   if (negativeCommands.length > 0) {
-    outputMessage += "*Players receiving from banker:*\n";
+    outputMessage += "*Players paying to banker:*\n";
     negativeCommands.forEach(({ playerName, command }) => {
       outputMessage += `${playerName}: \`${command}\`\n`;
     });
