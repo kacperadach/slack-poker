@@ -441,11 +441,12 @@ export class TexasHoldem {
       this.removePlayer(playerId);
     });
 
-    if (this.preDealId) {
-      const preDealPlayerId = this.preDealId;
-      this.preDealId = undefined;
-      this.startRound(preDealPlayerId);
-    }
+  }
+
+  public consumePreDealId(): string | undefined {
+    const id = this.preDealId;
+    this.preDealId = undefined;
+    return id;
   }
 
   // private reorderPlayers(): void {
