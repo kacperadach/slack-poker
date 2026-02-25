@@ -4062,13 +4062,15 @@ async function sendEventsWithPlayerIds(
 
   if (gameState && !isVitestRuntime()) {
     try {
-      const showdownSnapshot = gameState.lastShowdownSnapshot ?? {
-        activePlayers: gameState.activePlayers,
-        foldedPlayers: gameState.foldedPlayers,
-        communityCards: gameState.communityCards,
-      };
       const showdownWinPercentageMessage =
-        await buildShowdownWinPercentageMessage(showdownSnapshot, filteredEvents);
+        await buildShowdownWinPercentageMessage(
+          {
+            activePlayers: gameState.activePlayers,
+            foldedPlayers: gameState.foldedPlayers,
+            communityCards: gameState.communityCards,
+          },
+          filteredEvents
+        );
 
       if (showdownWinPercentageMessage) {
         publicMessages.push(showdownWinPercentageMessage);

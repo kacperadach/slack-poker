@@ -35,12 +35,6 @@ export interface BettingAction {
   timestamp: number;
 }
 
-export interface ShowdownSnapshot {
-  activePlayers: ReturnType<Player["toJson"]>[];
-  foldedPlayers: string[];
-  communityCards: ReturnType<Card["toJson"]>[];
-}
-
 export class TexasHoldem {
   private gameState: GameState;
   private deck: Deck;
@@ -59,7 +53,6 @@ export class TexasHoldem {
   private preDealId: string | undefined = undefined;
   private events: GameEvent[];
   private bettingHistory: BettingAction[];
-  private lastShowdownSnapshot: ShowdownSnapshot | undefined = undefined;
 
   constructor(
     gameState: GameState = GameState.WaitingForPlayers,
@@ -449,16 +442,9 @@ export class TexasHoldem {
     });
 
     if (this.preDealId) {
-      this.lastShowdownSnapshot = {
-        activePlayers: this.activePlayers.map((player) => player.toJson()),
-        foldedPlayers: Array.from(this.foldedPlayers),
-        communityCards: this.communityCards.map((card) => card.toJson()),
-      };
       const preDealPlayerId = this.preDealId;
       this.preDealId = undefined;
       this.startRound(preDealPlayerId);
-    } else {
-      this.lastShowdownSnapshot = undefined;
     }
   }
 
@@ -1894,7 +1880,6 @@ export class TexasHoldem {
       )[][],
       preDealId: this.preDealId,
       bettingHistory: this.bettingHistory,
-      lastShowdownSnapshot: this.lastShowdownSnapshot,
     } as const;
   }
 }
