@@ -1765,7 +1765,8 @@ export class PokerDurableObject extends DurableObject<Env> {
   async deletePlayerWithAction(data: {
     workspaceId: string;
     channelId: string;
-    playerId: string;
+    requestingPlayerId: string;
+    targetPlayerId: string;
     messageText: string;
     normalizedText: string;
     handlerKey: string;
@@ -1781,7 +1782,7 @@ export class PokerDurableObject extends DurableObject<Env> {
     }
 
     const game = TexasHoldem.fromJson(existing);
-    const result = game.deletePlayer(data.playerId);
+    const result = game.deletePlayer(data.targetPlayerId);
 
     if (result !== "Success") {
       return { ok: false, reason: "delete_failed", message: result };
@@ -1794,7 +1795,7 @@ export class PokerDurableObject extends DurableObject<Env> {
       timestamp: data.timestamp,
       actionType: "message_received",
       messageText: data.messageText,
-      playerId: data.playerId,
+      playerId: data.requestingPlayerId,
       slackMessageTs: data.slackMessageTs,
       normalizedText: data.normalizedText,
       handlerKey: data.handlerKey,
@@ -1808,7 +1809,7 @@ export class PokerDurableObject extends DurableObject<Env> {
       timestamp: Date.now(),
       actionType: "remove_player",
       messageText: data.messageText,
-      playerId: data.playerId,
+      playerId: data.targetPlayerId,
     };
 
     this.saveGameWithAction(
@@ -2165,8 +2166,7 @@ const MESSAGE_HANDLERS: Record<string, Function> = {
   "^leave table": leaveGame,
   "^buy in": buyIn,
   "^cash out": cashOut,
-  "^delete player": deletePlayer,
-  "^remove player": deletePlayer,
+  "^remove player": removePlayer,
   "^chipnado": showChips,
   "^start round": startRound,
   "^deal": startRound,
@@ -3928,24 +3928,41 @@ export async function leaveGame(
   await sendGameStateMessages(env, context, result.game);
 }
 
-export async function deletePlayer(
+function parseTaggedPlayerId(messageText: string): string | null {
+  const match = messageText.match(/<@([A-Z0-9]+)>/);
+  return match ? match[1] : null;
+}
+
+export async function removePlayer(
   env: Env,
   context: SlackAppContextWithChannelId,
   payload: PostedMessage,
   meta?: HandlerMeta
 ) {
-  const stub = getDurableObject(env, context);
   const rawMessageText = meta?.messageText ?? payload.text ?? "";
+  const targetPlayerId = parseTaggedPlayerId(rawMessageText);
+
+  if (!targetPlayerId) {
+    await context.say({
+      text: ensureNarpBrainOnError(
+        'Please tag the player you want to remove. Usage: "remove player @username"'
+      ),
+    });
+    return;
+  }
+
+  const stub = getDurableObject(env, context);
   const normalizedText =
     meta?.normalizedText ?? cleanMessageText(rawMessageText);
-  const handlerKey = meta?.handlerKey ?? "delete player";
+  const handlerKey = meta?.handlerKey ?? "remove player";
   const slackMessageTs = meta?.slackMessageTs ?? payload.ts ?? "";
   const timestamp = meta?.timestamp ?? Date.now();
 
   const result = await stub.deletePlayerWithAction({
     workspaceId: context.teamId!,
     channelId: context.channelId,
-    playerId: context.userId!,
+    requestingPlayerId: context.userId!,
+    targetPlayerId,
     messageText: rawMessageText,
     normalizedText,
     handlerKey,

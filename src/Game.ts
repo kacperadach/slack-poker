@@ -558,50 +558,51 @@ export class TexasHoldem {
     }
   }
 
-  public deletePlayer(playerId: string): string {
+  public deletePlayer(targetPlayerId: string): string {
     if (this.gameState !== GameState.WaitingForPlayers) {
       this.events.push(
-        new GameEvent(`${playerId} Cannot delete player during active round!`)
+        new GameEvent(`Cannot remove player during active round!`)
       );
-      return "Cannot delete player during active round";
+      return "Cannot remove player during active round";
     }
 
     const activePlayerIndex = this.activePlayers.findIndex(
-      (player) => player.getId() === playerId
+      (player) => player.getId() === targetPlayerId
     );
     const inactivePlayerIndex = this.inactivePlayers.findIndex(
-      (player) => player.getId() === playerId
+      (player) => player.getId() === targetPlayerId
     );
 
     if (activePlayerIndex === -1 && inactivePlayerIndex === -1) {
-      this.events.push(new GameEvent(`${playerId} Player not found!`));
+      this.events.push(new GameEvent(`${targetPlayerId} Player not found!`));
       return "Player not found";
     }
 
-    const player =
-      activePlayerIndex !== -1
-        ? this.activePlayers[activePlayerIndex]
-        : this.inactivePlayers[inactivePlayerIndex];
+    if (activePlayerIndex !== -1) {
+      this.events.push(
+        new GameEvent(
+          `${targetPlayerId} is still active at the table! Player must be inactive to be removed.`
+        )
+      );
+      return "Player is still active";
+    }
+
+    const player = this.inactivePlayers[inactivePlayerIndex];
 
     if (player.getChips() !== 0) {
       this.events.push(
         new GameEvent(
-          `${playerId} Cannot delete player with ${player.getChips()} chips! Player must have 0 chips.`
+          `${targetPlayerId} Cannot remove player with ${player.getChips()} chips! Player must have 0 chips.`
         )
       );
-      return "Cannot delete player with chips remaining";
+      return "Cannot remove player with chips remaining";
     }
 
-    if (activePlayerIndex !== -1) {
-      this.activePlayers.splice(activePlayerIndex, 1);
-    } else {
-      this.inactivePlayers.splice(inactivePlayerIndex, 1);
-    }
-
-    this.playerPositions.delete(playerId);
+    this.inactivePlayers.splice(inactivePlayerIndex, 1);
+    this.playerPositions.delete(targetPlayerId);
 
     this.events.push(
-      new GameEvent(`${playerId} has been permanently removed from the game!`)
+      new GameEvent(`${targetPlayerId} has been permanently removed from the game!`)
     );
     return Success;
   }
