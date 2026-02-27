@@ -85,6 +85,13 @@ export interface CashOutActionV1 extends ActionLogBase {
   amount: number;
 }
 
+export interface RemovePlayerActionV1 extends ActionLogBase {
+  actionType: "remove_player";
+  schemaVersion: 1;
+  /** Player who was removed */
+  playerId: string;
+}
+
 // =============================================================================
 // Round Management Actions
 // =============================================================================
@@ -187,6 +194,7 @@ export type ActionLogEntry =
   | LeaveActionV1
   | BuyInActionV1
   | CashOutActionV1
+  | RemovePlayerActionV1
   // Round management
   | RoundStartActionV1
   // Player actions
@@ -213,8 +221,8 @@ export function isPlayerAction(
 
 export function isPlayerManagementAction(
   action: ActionLogEntry
-): action is JoinActionV1 | LeaveActionV1 | BuyInActionV1 | CashOutActionV1 {
-  return ["join", "leave", "buy_in", "cash_out"].includes(action.actionType);
+): action is JoinActionV1 | LeaveActionV1 | BuyInActionV1 | CashOutActionV1 | RemovePlayerActionV1 {
+  return ["join", "leave", "buy_in", "cash_out", "remove_player"].includes(action.actionType);
 }
 
 // Individual type guards for each action type
@@ -239,6 +247,10 @@ export function isBuyIn(action: ActionLike): action is BuyInActionV1 {
 
 export function isCashOut(action: ActionLike): action is CashOutActionV1 {
   return action.actionType === "cash_out";
+}
+
+export function isRemovePlayer(action: ActionLike): action is RemovePlayerActionV1 {
+  return action.actionType === "remove_player";
 }
 
 export function isRoundStart(action: ActionLike): action is RoundStartActionV1 {
@@ -299,6 +311,12 @@ export function assertBuyIn(action: ActionLike): BuyInActionV1 {
 export function assertCashOut(action: ActionLike): CashOutActionV1 {
   if (!isCashOut(action))
     throw new Error(`Expected cash_out, got ${action.actionType}`);
+  return action;
+}
+
+export function assertRemovePlayer(action: ActionLike): RemovePlayerActionV1 {
+  if (!isRemovePlayer(action))
+    throw new Error(`Expected remove_player, got ${action.actionType}`);
   return action;
 }
 
@@ -373,6 +391,7 @@ export const ALL_ACTION_TYPES: ActionType[] = [
   "leave",
   "buy_in",
   "cash_out",
+  "remove_player",
   "round_start",
   "bet",
   "call",

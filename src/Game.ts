@@ -558,6 +558,55 @@ export class TexasHoldem {
     }
   }
 
+  public deletePlayer(targetPlayerId: string): string {
+    if (this.gameState !== GameState.WaitingForPlayers) {
+      this.events.push(
+        new GameEvent(`Cannot remove player during active round!`)
+      );
+      return "Cannot remove player during active round";
+    }
+
+    const activePlayerIndex = this.activePlayers.findIndex(
+      (player) => player.getId() === targetPlayerId
+    );
+    const inactivePlayerIndex = this.inactivePlayers.findIndex(
+      (player) => player.getId() === targetPlayerId
+    );
+
+    if (activePlayerIndex === -1 && inactivePlayerIndex === -1) {
+      this.events.push(new GameEvent(`${targetPlayerId} Player not found!`));
+      return "Player not found";
+    }
+
+    if (activePlayerIndex !== -1) {
+      this.events.push(
+        new GameEvent(
+          `${targetPlayerId} is still active at the table! Player must be inactive to be removed.`
+        )
+      );
+      return "Player is still active";
+    }
+
+    const player = this.inactivePlayers[inactivePlayerIndex];
+
+    if (player.getChips() !== 0) {
+      this.events.push(
+        new GameEvent(
+          `${targetPlayerId} Cannot remove player with ${player.getChips()} chips! Player must have 0 chips.`
+        )
+      );
+      return "Cannot remove player with chips remaining";
+    }
+
+    this.inactivePlayers.splice(inactivePlayerIndex, 1);
+    this.playerPositions.delete(targetPlayerId);
+
+    this.events.push(
+      new GameEvent(`${targetPlayerId} has been permanently removed from the game!`)
+    );
+    return Success;
+  }
+
   public buyIn(playerId: string, chips: number): string {
     const roundedChips = Math.round(chips);
 
