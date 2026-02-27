@@ -17,6 +17,7 @@ import type {
   CheckActionV1,
   MessageReceivedActionV1,
   NewGameActionV1,
+  RemovePlayerActionV1,
   RoundStartActionV1,
 } from "./ActionLog";
 import {
@@ -1761,6 +1762,65 @@ export class PokerDurableObject extends DurableObject<Env> {
     return { ok: true, game: game.getState() };
   }
 
+  async deletePlayerWithAction(data: {
+    workspaceId: string;
+    channelId: string;
+    playerId: string;
+    messageText: string;
+    normalizedText: string;
+    handlerKey: string;
+    slackMessageTs: string;
+    timestamp: number;
+  }): Promise<
+    | { ok: true; game: ReturnType<TexasHoldem["getState"]> }
+    | { ok: false; reason: "no_game" | "delete_failed"; message?: string }
+  > {
+    const existing = await this.fetchGame(data.workspaceId, data.channelId);
+    if (!existing) {
+      return { ok: false, reason: "no_game" };
+    }
+
+    const game = TexasHoldem.fromJson(existing);
+    const result = game.deletePlayer(data.playerId);
+
+    if (result !== "Success") {
+      return { ok: false, reason: "delete_failed", message: result };
+    }
+
+    const messageReceivedAction: MessageReceivedActionV1 = {
+      schemaVersion: 1,
+      workspaceId: data.workspaceId,
+      channelId: data.channelId,
+      timestamp: data.timestamp,
+      actionType: "message_received",
+      messageText: data.messageText,
+      playerId: data.playerId,
+      slackMessageTs: data.slackMessageTs,
+      normalizedText: data.normalizedText,
+      handlerKey: data.handlerKey,
+    };
+    this.logAction(messageReceivedAction);
+
+    const removePlayerAction: RemovePlayerActionV1 = {
+      schemaVersion: 1,
+      workspaceId: data.workspaceId,
+      channelId: data.channelId,
+      timestamp: Date.now(),
+      actionType: "remove_player",
+      messageText: data.messageText,
+      playerId: data.playerId,
+    };
+
+    this.saveGameWithAction(
+      data.workspaceId,
+      data.channelId,
+      JSON.stringify(game.toJson()),
+      removePlayerAction
+    );
+
+    return { ok: true, game: game.getState() };
+  }
+
   saveGame(workspaceId: string, channelId: string, game: any): void {
     this.sql.exec(
       `
@@ -2105,6 +2165,8 @@ const MESSAGE_HANDLERS: Record<string, Function> = {
   "^leave table": leaveGame,
   "^buy in": buyIn,
   "^cash out": cashOut,
+  "^delete player": deletePlayer,
+  "^remove player": deletePlayer,
   "^chipnado": showChips,
   "^start round": startRound,
   "^deal": startRound,
@@ -3860,6 +3922,41 @@ export async function leaveGame(
 
   if (!result.ok) {
     await context.say({ text: NO_GAME_EXISTS_MESSAGE });
+    return;
+  }
+
+  await sendGameStateMessages(env, context, result.game);
+}
+
+export async function deletePlayer(
+  env: Env,
+  context: SlackAppContextWithChannelId,
+  payload: PostedMessage,
+  meta?: HandlerMeta
+) {
+  const stub = getDurableObject(env, context);
+  const rawMessageText = meta?.messageText ?? payload.text ?? "";
+  const normalizedText =
+    meta?.normalizedText ?? cleanMessageText(rawMessageText);
+  const handlerKey = meta?.handlerKey ?? "delete player";
+  const slackMessageTs = meta?.slackMessageTs ?? payload.ts ?? "";
+  const timestamp = meta?.timestamp ?? Date.now();
+
+  const result = await stub.deletePlayerWithAction({
+    workspaceId: context.teamId!,
+    channelId: context.channelId,
+    playerId: context.userId!,
+    messageText: rawMessageText,
+    normalizedText,
+    handlerKey,
+    slackMessageTs,
+    timestamp,
+  });
+
+  if (!result.ok) {
+    if (result.reason === "no_game") {
+      await context.say({ text: NO_GAME_EXISTS_MESSAGE });
+    }
     return;
   }
 

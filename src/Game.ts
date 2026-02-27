@@ -558,6 +558,54 @@ export class TexasHoldem {
     }
   }
 
+  public deletePlayer(playerId: string): string {
+    if (this.gameState !== GameState.WaitingForPlayers) {
+      this.events.push(
+        new GameEvent(`${playerId} Cannot delete player during active round!`)
+      );
+      return "Cannot delete player during active round";
+    }
+
+    const activePlayerIndex = this.activePlayers.findIndex(
+      (player) => player.getId() === playerId
+    );
+    const inactivePlayerIndex = this.inactivePlayers.findIndex(
+      (player) => player.getId() === playerId
+    );
+
+    if (activePlayerIndex === -1 && inactivePlayerIndex === -1) {
+      this.events.push(new GameEvent(`${playerId} Player not found!`));
+      return "Player not found";
+    }
+
+    const player =
+      activePlayerIndex !== -1
+        ? this.activePlayers[activePlayerIndex]
+        : this.inactivePlayers[inactivePlayerIndex];
+
+    if (player.getChips() !== 0) {
+      this.events.push(
+        new GameEvent(
+          `${playerId} Cannot delete player with ${player.getChips()} chips! Player must have 0 chips.`
+        )
+      );
+      return "Cannot delete player with chips remaining";
+    }
+
+    if (activePlayerIndex !== -1) {
+      this.activePlayers.splice(activePlayerIndex, 1);
+    } else {
+      this.inactivePlayers.splice(inactivePlayerIndex, 1);
+    }
+
+    this.playerPositions.delete(playerId);
+
+    this.events.push(
+      new GameEvent(`${playerId} has been permanently removed from the game!`)
+    );
+    return Success;
+  }
+
   public buyIn(playerId: string, chips: number): string {
     const roundedChips = Math.round(chips);
 
