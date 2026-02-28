@@ -749,6 +749,12 @@ export class PokerDurableObject extends DurableObject<Env> {
     const game = TexasHoldem.fromJson(existing);
     game.fold(data.playerId);
 
+    const preDealId = game.consumePreDealId();
+    const showdownState = preDealId ? game.getState() : null;
+    if (preDealId) {
+      game.startRound(preDealId);
+    }
+
     const messageReceivedAction: MessageReceivedActionV1 = {
       schemaVersion: 1,
       workspaceId: data.workspaceId,
@@ -780,7 +786,14 @@ export class PokerDurableObject extends DurableObject<Env> {
       foldAction
     );
 
-    return { ok: true, game: game.getState() };
+    const finalState = game.getState();
+    return {
+      ok: true,
+      game: showdownState
+        ? { ...finalState, events: [...showdownState.events, ...finalState.events] }
+        : finalState,
+      showdownState: showdownState ?? undefined,
+    };
   }
 
   async checkWithAction(data: {
@@ -803,6 +816,12 @@ export class PokerDurableObject extends DurableObject<Env> {
 
     const game = TexasHoldem.fromJson(existing);
     game.check(data.playerId);
+
+    const preDealId = game.consumePreDealId();
+    const showdownState = preDealId ? game.getState() : null;
+    if (preDealId) {
+      game.startRound(preDealId);
+    }
 
     const messageReceivedAction: MessageReceivedActionV1 = {
       schemaVersion: 1,
@@ -835,7 +854,14 @@ export class PokerDurableObject extends DurableObject<Env> {
       checkAction
     );
 
-    return { ok: true, game: game.getState() };
+    const finalState = game.getState();
+    return {
+      ok: true,
+      game: showdownState
+        ? { ...finalState, events: [...showdownState.events, ...finalState.events] }
+        : finalState,
+      showdownState: showdownState ?? undefined,
+    };
   }
 
   async callWithAction(data: {
@@ -861,6 +887,12 @@ export class PokerDurableObject extends DurableObject<Env> {
       game.getCurrentBetAmount() -
       (game.getCurrentPlayer()?.getCurrentBet() ?? 0);
     game.call(data.playerId);
+
+    const preDealId = game.consumePreDealId();
+    const showdownState = preDealId ? game.getState() : null;
+    if (preDealId) {
+      game.startRound(preDealId);
+    }
 
     const messageReceivedAction: MessageReceivedActionV1 = {
       schemaVersion: 1,
@@ -894,7 +926,14 @@ export class PokerDurableObject extends DurableObject<Env> {
       callAction
     );
 
-    return { ok: true, game: game.getState() };
+    const finalState = game.getState();
+    return {
+      ok: true,
+      game: showdownState
+        ? { ...finalState, events: [...showdownState.events, ...finalState.events] }
+        : finalState,
+      showdownState: showdownState ?? undefined,
+    };
   }
 
   async betWithAction(data: {
@@ -918,6 +957,12 @@ export class PokerDurableObject extends DurableObject<Env> {
 
     const game = TexasHoldem.fromJson(existing);
     game.bet(data.playerId, data.amount);
+
+    const preDealId = game.consumePreDealId();
+    const showdownState = preDealId ? game.getState() : null;
+    if (preDealId) {
+      game.startRound(preDealId);
+    }
 
     const messageReceivedAction: MessageReceivedActionV1 = {
       schemaVersion: 1,
@@ -951,7 +996,14 @@ export class PokerDurableObject extends DurableObject<Env> {
       betAction
     );
 
-    return { ok: true, game: game.getState() };
+    const finalState = game.getState();
+    return {
+      ok: true,
+      game: showdownState
+        ? { ...finalState, events: [...showdownState.events, ...finalState.events] }
+        : finalState,
+      showdownState: showdownState ?? undefined,
+    };
   }
 
   async allInWithAction(data: {
@@ -976,6 +1028,12 @@ export class PokerDurableObject extends DurableObject<Env> {
     const player = game.getCurrentPlayer();
     const allInAmount = player ? player.getCurrentBet() + player.getChips() : 0;
     game.allIn(data.playerId);
+
+    const preDealId = game.consumePreDealId();
+    const showdownState = preDealId ? game.getState() : null;
+    if (preDealId) {
+      game.startRound(preDealId);
+    }
 
     const messageReceivedAction: MessageReceivedActionV1 = {
       schemaVersion: 1,
@@ -1009,7 +1067,14 @@ export class PokerDurableObject extends DurableObject<Env> {
       allInAction
     );
 
-    return { ok: true, game: game.getState() };
+    const finalState = game.getState();
+    return {
+      ok: true,
+      game: showdownState
+        ? { ...finalState, events: [...showdownState.events, ...finalState.events] }
+        : finalState,
+      showdownState: showdownState ?? undefined,
+    };
   }
 
   async startRoundWithAction(data: {
@@ -3365,7 +3430,7 @@ export async function bet(
     return;
   }
 
-  await sendGameStateMessages(env, context, result.game);
+  await sendGameStateMessages(env, context, result.game, result.showdownState);
 }
 
 export async function call(
@@ -3398,7 +3463,7 @@ export async function call(
     return;
   }
 
-  await sendGameStateMessages(env, context, result.game);
+  await sendGameStateMessages(env, context, result.game, result.showdownState);
 }
 
 export async function allIn(
@@ -3431,7 +3496,7 @@ export async function allIn(
     return;
   }
 
-  await sendGameStateMessages(env, context, result.game);
+  await sendGameStateMessages(env, context, result.game, result.showdownState);
 }
 
 export async function check(
@@ -3464,7 +3529,7 @@ export async function check(
     return;
   }
 
-  await sendGameStateMessages(env, context, result.game);
+  await sendGameStateMessages(env, context, result.game, result.showdownState);
 }
 
 export async function thisPotAintBigEnough(
@@ -3604,7 +3669,7 @@ export async function fold(
     return;
   }
 
-  await sendGameStateMessages(env, context, result.game);
+  await sendGameStateMessages(env, context, result.game, result.showdownState);
 }
 
 export async function startRound(
@@ -4064,14 +4129,15 @@ async function fetchGame(env: Env, context: SlackAppContextWithChannelId) {
 async function sendGameStateMessages(
   env: Env,
   context: SlackAppContextWithChannelId,
-  gameState: ReturnType<TexasHoldem["getState"]>
+  gameState: ReturnType<TexasHoldem["getState"]>,
+  showdownState?: ReturnType<TexasHoldem["getState"]>
 ) {
   const events = gameState.events;
   const playerIds = [
     ...gameState.activePlayers.map((p) => p.id),
     ...gameState.inactivePlayers.map((p) => p.id),
   ];
-  await sendEventsWithPlayerIds(env, context, events, playerIds, gameState);
+  await sendEventsWithPlayerIds(env, context, events, playerIds, showdownState ?? gameState);
 }
 
 async function sendEventsWithPlayerIds(
