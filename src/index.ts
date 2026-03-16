@@ -128,15 +128,9 @@ export class PokerDurableObject extends DurableObject<Env> {
 			);
 		`);
 
-    // Seed initial closing price for Feb 18, 2026 if not exists
+    // Clear any closing prices before the new start date (March 18, 2026)
     this.sql.exec(`
-			INSERT OR IGNORE INTO closingPrices (date, symbol, price, collectedAt)
-			VALUES ('2026-02-18', 'HUBS', 250.14, ${Date.now()})
-		`);
-
-    // Update existing closing price for Feb 18, 2026 to correct value
-    this.sql.exec(`
-			UPDATE closingPrices SET price = 250.14 WHERE date = '2026-02-18' AND symbol = 'HUBS'
+			DELETE FROM closingPrices WHERE date < '2026-03-18'
 		`);
   }
 
@@ -2129,8 +2123,8 @@ async function collectHubsClosingPrice(env: Env): Promise<void> {
   };
   const etDateStr = now.toLocaleDateString("en-CA", { ...etOptions }); // en-CA gives YYYY-MM-DD format
 
-  // Check if date is within range: Feb 18, 2026 to March 31, 2026
-  const startDate = "2026-02-18";
+  // Check if date is within range: March 18, 2026 to March 31, 2026
+  const startDate = "2026-03-18";
   const endDate = "2026-04-01"; // Not inclusive
 
   if (etDateStr < startDate || etDateStr >= endDate) {
