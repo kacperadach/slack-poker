@@ -2242,6 +2242,9 @@ const MESSAGE_HANDLERS: Record<string, Function> = {
   "^its going to be a fold for me": fold,
   "^itll be a fold for me": fold,
   "^its gonna be a fold for me": fold,
+  "^its going to be a bet": bet,
+  "^itll be a bet": bet,
+  "^its gonna be a bet": bet,
   "^im gonna go ahead and bet": bet,
   "^im gonna go ahead and check": check,
   "^im gonna go ahead and fold": fold,
@@ -3335,8 +3338,13 @@ export async function bet(
     messageText
       .replace("i choose to", "")
       .replace("im gonna go ahead and", "")
+      .replace("its going to be a", "")
+      .replace("itll be a", "")
+      .replace("its gonna be a", "")
       .replace("bet", "")
       .replace("donk", "")
+      .replace("for me", "")
+      .replace("from me", "")
       .trim()
   );
 
