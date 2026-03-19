@@ -2360,7 +2360,22 @@ async function handleMessage(
     const symbol = stockSymbolMatch[1].toUpperCase();
     const stockPriceMessage = await getStockPriceMessage(symbol);
     if (stockPriceMessage) {
-      await context.say({ text: stockPriceMessage });
+      let message = stockPriceMessage;
+
+      // Add trailing average for HUBS
+      if (symbol === "HUBS") {
+        const globalStub = getGlobalDurableObject(env);
+        const trailingAvg = await globalStub.getTrailingAverage("HUBS");
+        if (trailingAvg) {
+          const avgFormatted = trailingAvg.average.toLocaleString("en-US", {
+            style: "currency",
+            currency: "USD",
+          });
+          message += `\n:bar_chart: Trailing Avg (${trailingAvg.count} day${trailingAvg.count === 1 ? "" : "s"}): ${avgFormatted}`;
+        }
+      }
+
+      await context.say({ text: message });
     } else {
       await context.say({
         text: ensureNarpBrainOnError(
