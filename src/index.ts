@@ -132,6 +132,25 @@ export class PokerDurableObject extends DurableObject<Env> {
     this.sql.exec(`
 			DELETE FROM closingPrices WHERE date < '2026-03-18'
 		`);
+
+    // Table to track chip changes per player per hand for hot/cold status
+    this.sql.exec(`
+			CREATE TABLE IF NOT EXISTS PlayerChipHistory (
+				id INTEGER PRIMARY KEY AUTOINCREMENT,
+				workspaceId TEXT NOT NULL,
+				channelId TEXT NOT NULL,
+				playerId TEXT NOT NULL,
+				chipChange INTEGER NOT NULL,
+				chipsAfter INTEGER NOT NULL,
+				timestamp INTEGER NOT NULL
+			);
+		`);
+
+    // Index for efficient lookups of recent chip changes per player
+    this.sql.exec(`
+			CREATE INDEX IF NOT EXISTS idx_playerchiphistory_lookup
+			ON PlayerChipHistory (workspaceId, channelId, playerId, timestamp DESC);
+		`);
   }
 
   /**
@@ -303,6 +322,169 @@ export class PokerDurableObject extends DurableObject<Env> {
       average: Math.round(average * 100) / 100,
       count: prices.length,
     };
+  }
+
+  /**
+   * Record a chip change for a player after a hand.
+   * chipChange is positive for wins, negative for losses.
+   */
+  recordChipChange(
+    workspaceId: string,
+    channelId: string,
+    playerId: string,
+    chipChange: number,
+    chipsAfter: number
+  ): void {
+    this.sql.exec(
+      `
+			INSERT INTO PlayerChipHistory (workspaceId, channelId, playerId, chipChange, chipsAfter, timestamp)
+			VALUES (?, ?, ?, ?, ?, ?)
+		`,
+      workspaceId,
+      channelId,
+      playerId,
+      chipChange,
+      chipsAfter,
+      Date.now()
+    );
+  }
+
+  /**
+   * Get the recent chip changes for a player (last N hands).
+   * Returns chip changes ordered from most recent to oldest.
+   */
+  getRecentChipChanges(
+    workspaceId: string,
+    channelId: string,
+    playerId: string,
+    limit: number = 5
+  ): number[] {
+    const result = this.sql.exec(
+      `
+			SELECT chipChange FROM PlayerChipHistory
+			WHERE workspaceId = ? AND channelId = ? AND playerId = ?
+			ORDER BY timestamp DESC
+			LIMIT ?
+		`,
+      workspaceId,
+      channelId,
+      playerId,
+      limit
+    );
+
+    const changes: number[] = [];
+    for (const row of result) {
+      changes.push(row.chipChange as number);
+    }
+    return changes;
+  }
+
+  /**
+   * Calculate the player's "hotness" level based on recent chip changes.
+   * Returns a value from -3 (very cold) to +3 (very hot).
+   * The calculation weights recent hands more heavily.
+   */
+  getPlayerHotColdLevel(
+    workspaceId: string,
+    channelId: string,
+    playerId: string
+  ): number {
+    const recentChanges = this.getRecentChipChanges(
+      workspaceId,
+      channelId,
+      playerId,
+      5
+    );
+
+    if (recentChanges.length === 0) {
+      return 0;
+    }
+
+    // Count wins and losses, weighting recent hands more
+    let weightedScore = 0;
+    const weights = [3, 2.5, 2, 1.5, 1]; // Most recent hand has highest weight
+
+    for (let i = 0; i < recentChanges.length; i++) {
+      const change = recentChanges[i];
+      const weight = weights[i] || 1;
+
+      if (change > 0) {
+        weightedScore += weight;
+      } else if (change < 0) {
+        weightedScore -= weight;
+      }
+    }
+
+    // Normalize to -3 to +3 range
+    // Max possible score with 5 hands: 3+2.5+2+1.5+1 = 10
+    const maxScore = 10;
+    const normalizedScore = (weightedScore / maxScore) * 3;
+
+    // Round to nearest integer and clamp to -3 to +3
+    return Math.max(-3, Math.min(3, Math.round(normalizedScore)));
+  }
+
+  /**
+   * Get status emoji for a player based on their hot/cold level.
+   * Returns 0-3 :fire: for hot players, 0-3 :ice_cube: for cold players.
+   */
+  getPlayerStatusEmoji(
+    workspaceId: string,
+    channelId: string,
+    playerId: string
+  ): string {
+    const level = this.getPlayerHotColdLevel(workspaceId, channelId, playerId);
+
+    if (level > 0) {
+      return ":fire:".repeat(level);
+    } else if (level < 0) {
+      return ":ice_cube:".repeat(Math.abs(level));
+    }
+    return "";
+  }
+
+  /**
+   * Get status emojis for multiple players.
+   * Returns a map of playerId -> emoji string.
+   */
+  getPlayerStatusEmojis(
+    workspaceId: string,
+    channelId: string,
+    playerIds: string[]
+  ): Map<string, string> {
+    const result = new Map<string, string>();
+    for (const playerId of playerIds) {
+      result.set(
+        playerId,
+        this.getPlayerStatusEmoji(workspaceId, channelId, playerId)
+      );
+    }
+    return result;
+  }
+
+  /**
+   * Record chip changes for all players when a round ends.
+   * Called with chip counts from before and after the action.
+   */
+  recordRoundEndChipChanges(
+    workspaceId: string,
+    channelId: string,
+    chipsBefore: Map<string, number>,
+    chipsAfter: Map<string, number>
+  ): void {
+    for (const [playerId, beforeChips] of chipsBefore) {
+      const afterChips = chipsAfter.get(playerId);
+      if (afterChips !== undefined) {
+        const chipChange = afterChips - beforeChips;
+        this.recordChipChange(
+          workspaceId,
+          channelId,
+          playerId,
+          chipChange,
+          afterChips
+        );
+      }
+    }
   }
 
   addFlop(
@@ -741,7 +923,38 @@ export class PokerDurableObject extends DurableObject<Env> {
     }
 
     const game = TexasHoldem.fromJson(existing);
+
+    // Capture chip counts before the action for hot/cold tracking
+    const chipsBefore = new Map<string, number>();
+    const allPlayersBefore = [
+      ...game.getActivePlayers(),
+      ...game.getInactivePlayers(),
+    ];
+    for (const player of allPlayersBefore) {
+      chipsBefore.set(player.getId(), player.getChips());
+    }
+    const wasWaiting = game.getGameState() === GameState.WaitingForPlayers;
+
     game.fold(data.playerId);
+
+    // Check if round ended and record chip changes
+    const isNowWaiting = game.getGameState() === GameState.WaitingForPlayers;
+    if (!wasWaiting && isNowWaiting) {
+      const chipsAfter = new Map<string, number>();
+      const allPlayersAfter = [
+        ...game.getActivePlayers(),
+        ...game.getInactivePlayers(),
+      ];
+      for (const player of allPlayersAfter) {
+        chipsAfter.set(player.getId(), player.getChips());
+      }
+      this.recordRoundEndChipChanges(
+        data.workspaceId,
+        data.channelId,
+        chipsBefore,
+        chipsAfter
+      );
+    }
 
     const messageReceivedAction: MessageReceivedActionV1 = {
       schemaVersion: 1,
@@ -796,7 +1009,38 @@ export class PokerDurableObject extends DurableObject<Env> {
     }
 
     const game = TexasHoldem.fromJson(existing);
+
+    // Capture chip counts before the action for hot/cold tracking
+    const chipsBefore = new Map<string, number>();
+    const allPlayersBefore = [
+      ...game.getActivePlayers(),
+      ...game.getInactivePlayers(),
+    ];
+    for (const player of allPlayersBefore) {
+      chipsBefore.set(player.getId(), player.getChips());
+    }
+    const wasWaiting = game.getGameState() === GameState.WaitingForPlayers;
+
     game.check(data.playerId);
+
+    // Check if round ended and record chip changes
+    const isNowWaiting = game.getGameState() === GameState.WaitingForPlayers;
+    if (!wasWaiting && isNowWaiting) {
+      const chipsAfter = new Map<string, number>();
+      const allPlayersAfter = [
+        ...game.getActivePlayers(),
+        ...game.getInactivePlayers(),
+      ];
+      for (const player of allPlayersAfter) {
+        chipsAfter.set(player.getId(), player.getChips());
+      }
+      this.recordRoundEndChipChanges(
+        data.workspaceId,
+        data.channelId,
+        chipsBefore,
+        chipsAfter
+      );
+    }
 
     const messageReceivedAction: MessageReceivedActionV1 = {
       schemaVersion: 1,
@@ -851,10 +1095,41 @@ export class PokerDurableObject extends DurableObject<Env> {
     }
 
     const game = TexasHoldem.fromJson(existing);
+
+    // Capture chip counts before the action for hot/cold tracking
+    const chipsBefore = new Map<string, number>();
+    const allPlayersBefore = [
+      ...game.getActivePlayers(),
+      ...game.getInactivePlayers(),
+    ];
+    for (const player of allPlayersBefore) {
+      chipsBefore.set(player.getId(), player.getChips());
+    }
+    const wasWaiting = game.getGameState() === GameState.WaitingForPlayers;
+
     const callAmount =
       game.getCurrentBetAmount() -
       (game.getCurrentPlayer()?.getCurrentBet() ?? 0);
     game.call(data.playerId);
+
+    // Check if round ended and record chip changes
+    const isNowWaiting = game.getGameState() === GameState.WaitingForPlayers;
+    if (!wasWaiting && isNowWaiting) {
+      const chipsAfter = new Map<string, number>();
+      const allPlayersAfter = [
+        ...game.getActivePlayers(),
+        ...game.getInactivePlayers(),
+      ];
+      for (const player of allPlayersAfter) {
+        chipsAfter.set(player.getId(), player.getChips());
+      }
+      this.recordRoundEndChipChanges(
+        data.workspaceId,
+        data.channelId,
+        chipsBefore,
+        chipsAfter
+      );
+    }
 
     const messageReceivedAction: MessageReceivedActionV1 = {
       schemaVersion: 1,
@@ -911,7 +1186,38 @@ export class PokerDurableObject extends DurableObject<Env> {
     }
 
     const game = TexasHoldem.fromJson(existing);
+
+    // Capture chip counts before the action for hot/cold tracking
+    const chipsBefore = new Map<string, number>();
+    const allPlayersBefore = [
+      ...game.getActivePlayers(),
+      ...game.getInactivePlayers(),
+    ];
+    for (const player of allPlayersBefore) {
+      chipsBefore.set(player.getId(), player.getChips());
+    }
+    const wasWaiting = game.getGameState() === GameState.WaitingForPlayers;
+
     game.bet(data.playerId, data.amount);
+
+    // Check if round ended and record chip changes
+    const isNowWaiting = game.getGameState() === GameState.WaitingForPlayers;
+    if (!wasWaiting && isNowWaiting) {
+      const chipsAfter = new Map<string, number>();
+      const allPlayersAfter = [
+        ...game.getActivePlayers(),
+        ...game.getInactivePlayers(),
+      ];
+      for (const player of allPlayersAfter) {
+        chipsAfter.set(player.getId(), player.getChips());
+      }
+      this.recordRoundEndChipChanges(
+        data.workspaceId,
+        data.channelId,
+        chipsBefore,
+        chipsAfter
+      );
+    }
 
     const messageReceivedAction: MessageReceivedActionV1 = {
       schemaVersion: 1,
@@ -967,9 +1273,40 @@ export class PokerDurableObject extends DurableObject<Env> {
     }
 
     const game = TexasHoldem.fromJson(existing);
+
+    // Capture chip counts before the action for hot/cold tracking
+    const chipsBefore = new Map<string, number>();
+    const allPlayersBefore = [
+      ...game.getActivePlayers(),
+      ...game.getInactivePlayers(),
+    ];
+    for (const player of allPlayersBefore) {
+      chipsBefore.set(player.getId(), player.getChips());
+    }
+    const wasWaiting = game.getGameState() === GameState.WaitingForPlayers;
+
     const player = game.getCurrentPlayer();
     const allInAmount = player ? player.getCurrentBet() + player.getChips() : 0;
     game.allIn(data.playerId);
+
+    // Check if round ended and record chip changes
+    const isNowWaiting = game.getGameState() === GameState.WaitingForPlayers;
+    if (!wasWaiting && isNowWaiting) {
+      const chipsAfter = new Map<string, number>();
+      const allPlayersAfter = [
+        ...game.getActivePlayers(),
+        ...game.getInactivePlayers(),
+      ];
+      for (const playerAfter of allPlayersAfter) {
+        chipsAfter.set(playerAfter.getId(), playerAfter.getChips());
+      }
+      this.recordRoundEndChipChanges(
+        data.workspaceId,
+        data.channelId,
+        chipsBefore,
+        chipsAfter
+      );
+    }
 
     const messageReceivedAction: MessageReceivedActionV1 = {
       schemaVersion: 1,
@@ -2482,6 +2819,19 @@ export async function context(
   // Get current pot
   const potSize = game.getCurrentPot();
 
+  // Get status emojis for all players
+  const stub = getDurableObject(env, context);
+  const allPlayers = [
+    ...game.getActivePlayers(),
+    ...game.getInactivePlayers(),
+  ];
+  const allPlayerIds = allPlayers.map((p) => p.getId());
+  const statusEmojis = stub.getPlayerStatusEmojis(
+    context.teamId!,
+    context.channelId,
+    allPlayerIds
+  );
+
   // Find the player
   const activePlayers = game.getActivePlayers();
   const inactivePlayers = game.getInactivePlayers();
@@ -2568,7 +2918,11 @@ export async function context(
       const playerObj = activePlayers.find((ap) => ap.getId() === p.playerId);
       const chipCount = playerObj ? playerObj.getChips() : 0;
 
-      let line = `*${displayName}*`;
+      // Get status emoji (hot/cold indicator)
+      const emoji = statusEmojis.get(p.playerId) || "";
+      const emojiSuffix = emoji ? ` ${emoji}` : "";
+
+      let line = `*${displayName}*${emojiSuffix}`;
       // Add chip count
       line += ` [${chipCount}]`;
       // Add position label if present
@@ -2596,10 +2950,13 @@ export async function context(
       nonFoldedPlayers.length > 0 &&
       nonFoldedPlayers.length < playersInOrder.length
     ) {
-      const nonFoldedNames = nonFoldedPlayers.map(
-        (id) =>
-          `*${userIdToName[id as keyof typeof userIdToName] || `<@${id}>`}*`
-      );
+      const nonFoldedNames = nonFoldedPlayers.map((id) => {
+        const name =
+          userIdToName[id as keyof typeof userIdToName] || `<@${id}>`;
+        const emoji = statusEmojis.get(id) || "";
+        const emojiSuffix = emoji ? ` ${emoji}` : "";
+        return `*${name}*${emojiSuffix}`;
+      });
       message += `*Still in hand:* ${nonFoldedNames.join(", ")}\n\n`;
     }
   }
@@ -3677,9 +4034,19 @@ export async function showChips(
     return;
   }
 
+  const stub = getDurableObject(env, context);
+  const playerIds = game.getActivePlayers().map((p) => p.getId());
+  const statusEmojis = stub.getPlayerStatusEmojis(
+    context.teamId!,
+    context.channelId,
+    playerIds
+  );
+
   let message = "";
   game.getActivePlayers().forEach((player) => {
-    message += `<@${player.getId()}>: ${player.getChips()} (Active)\n`;
+    const emoji = statusEmojis.get(player.getId()) || "";
+    const emojiSuffix = emoji ? ` ${emoji}` : "";
+    message += `<@${player.getId()}>${emojiSuffix}: ${player.getChips()} (Active)\n`;
   });
 
   // game.getInactivePlayers().forEach((player) => {
@@ -3699,6 +4066,18 @@ export async function showStacks(
     return;
   }
 
+  const stub = getDurableObject(env, context);
+  const allPlayers = [
+    ...game.getActivePlayers(),
+    ...game.getInactivePlayers(),
+  ];
+  const playerIds = allPlayers.map((p) => p.getId());
+  const statusEmojis = stub.getPlayerStatusEmojis(
+    context.teamId!,
+    context.channelId,
+    playerIds
+  );
+
   const bigBlind = game.getBigBlind();
   const smallBlind = game.getSmallBlind();
   const numActivePlayers = game.getActivePlayers().length;
@@ -3712,7 +4091,9 @@ export async function showStacks(
     const chips = player.getChips();
     const bbMultiple = Math.round(chips / bigBlind);
     const orbitsLeft = numActivePlayers > 0 ? Math.round(chips / orbitCost) : 0;
-    message += `*${name}*: ${chips} (${bbMultiple}xBB, ${orbitsLeft} orbits) Active\n`;
+    const emoji = statusEmojis.get(player.getId()) || "";
+    const emojiSuffix = emoji ? ` ${emoji}` : "";
+    message += `*${name}*${emojiSuffix}: ${chips} (${bbMultiple}xBB, ${orbitsLeft} orbits) Active\n`;
   });
 
   game.getInactivePlayers().forEach((player) => {
@@ -3722,7 +4103,9 @@ export async function showStacks(
     const chips = player.getChips();
     const bbMultiple = Math.round(chips / bigBlind);
     const orbitsLeft = numActivePlayers > 0 ? Math.round(chips / orbitCost) : 0;
-    message += `*${name}*: ${chips} (${bbMultiple}xBB, ${orbitsLeft} orbits) Inactive\n`;
+    const emoji = statusEmojis.get(player.getId()) || "";
+    const emojiSuffix = emoji ? ` ${emoji}` : "";
+    message += `*${name}*${emojiSuffix}: ${chips} (${bbMultiple}xBB, ${orbitsLeft} orbits) Inactive\n`;
   });
 
   await context.say({ text: message });
