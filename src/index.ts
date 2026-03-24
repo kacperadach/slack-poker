@@ -687,6 +687,12 @@ export class PokerDurableObject extends DurableObject<Env> {
       });
     });
 
+    // Join all inactive players to the table
+    const inactivePlayerIds = game.getInactivePlayers().map((p) => p.getId());
+    inactivePlayerIds.forEach((playerId) => {
+      game.addPlayer(playerId);
+    });
+
     const messageReceivedAction: MessageReceivedActionV1 = {
       schemaVersion: 1,
       workspaceId: data.workspaceId,
