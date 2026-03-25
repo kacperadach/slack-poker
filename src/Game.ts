@@ -39,15 +39,81 @@ export interface BettingAction {
   timestamp: number;
 }
 
-export interface CompletedHandPlayerOutcome {
+export type HandActionType =
+  | "post_small_blind"
+  | "post_big_blind"
+  | "fold"
+  | "check"
+  | "call"
+  | "bet"
+  | "raise";
+
+export interface PlayerRoleFlags {
+  isDealer: boolean;
+  isSmallBlind: boolean;
+  isBigBlind: boolean;
+}
+
+export interface HandStartPlayerSnapshot {
   playerId: string;
-  wonAnyPot: boolean;
+  seatIndex: number;
+  roleFlags: PlayerRoleFlags;
+  startingStack: number;
+  holeCards: Card[];
+}
+
+export interface HandStartSnapshot {
+  dealerPosition: number;
+  smallBlind: number;
+  bigBlind: number;
+  players: HandStartPlayerSnapshot[];
+}
+
+export interface HandAction {
+  street: BettingStreet;
+  actionIndex: number;
+  playerId: string;
+  actionType: HandActionType;
+  contribution: number;
+  targetBet: number;
+  isAllIn: boolean;
+  timestamp: number;
+}
+
+export interface BoardSnapshot {
+  flop: Card[];
+  turn: Card[];
+  river: Card[];
+}
+
+export interface PotResult {
+  potIndex: number;
+  potType: "main" | "side";
+  potSize: number;
+  eligiblePlayerIds: string[];
+  winnerPlayerIds: string[];
+  splitAmount: number;
+}
+
+export interface HandEndPlayerSnapshot {
+  playerId: string;
+  finalStack: number;
+  foldedStreet: BettingStreet | null;
   reachedShowdown: boolean;
+  revealedCards: boolean;
   chipsWon: number;
 }
 
-export interface CompletedHandOutcome {
-  players: CompletedHandPlayerOutcome[];
+export interface HandEndSnapshot {
+  players: HandEndPlayerSnapshot[];
+  potResults: PotResult[];
+}
+
+export interface HandHistoryState {
+  handStartSnapshot: HandStartSnapshot | null;
+  actionHistory: HandAction[];
+  boardSnapshot: BoardSnapshot;
+  handEndSnapshot: HandEndSnapshot | null;
 }
 
 export class TexasHoldem {
@@ -69,7 +135,10 @@ export class TexasHoldem {
   private events: GameEvent[];
   private bettingHistory: BettingAction[];
   private handStartChips: Map<string, number>;
-  private completedHandOutcome: CompletedHandOutcome | null;
+  private handStartSnapshot: HandStartSnapshot | null;
+  private actionHistory: HandAction[];
+  private boardSnapshot: BoardSnapshot;
+  private handEndSnapshot: HandEndSnapshot | null;
 
   constructor(
     gameState: GameState = GameState.WaitingForPlayers,
@@ -89,7 +158,10 @@ export class TexasHoldem {
     preDealId: string | undefined = undefined,
     bettingHistory: BettingAction[] = [],
     handStartChips: Map<string, number> = new Map(),
-    completedHandOutcome: CompletedHandOutcome | null = null
+    handStartSnapshot: HandStartSnapshot | null = null,
+    actionHistory: HandAction[] = [],
+    boardSnapshot: BoardSnapshot = { flop: [], turn: [], river: [] },
+    handEndSnapshot: HandEndSnapshot | null = null
   ) {
     this.gameState = gameState;
     this.deck = deck;
@@ -109,7 +181,10 @@ export class TexasHoldem {
     this.events = [];
     this.bettingHistory = bettingHistory;
     this.handStartChips = handStartChips;
-    this.completedHandOutcome = completedHandOutcome;
+    this.handStartSnapshot = handStartSnapshot;
+    this.actionHistory = actionHistory;
+    this.boardSnapshot = boardSnapshot;
+    this.handEndSnapshot = handEndSnapshot;
   }
 
   public progressGame(): void {
@@ -222,59 +297,135 @@ export class TexasHoldem {
   }
 
   private resetCompletedHandTracking(): void {
-    this.completedHandOutcome = null;
     this.handStartChips = new Map();
+    this.handStartSnapshot = null;
+    this.actionHistory = [];
+    this.boardSnapshot = { flop: [], turn: [], river: [] };
+    this.handEndSnapshot = null;
   }
 
-  private setCompletedHandOutcomePlayer(
+  private cloneCards(cards: Card[]): Card[] {
+    return cards.map((card) => Card.fromJson(card.toJson()));
+  }
+
+  private cloneBoardSnapshot(boardSnapshot: BoardSnapshot): BoardSnapshot {
+    return {
+      flop: this.cloneCards(boardSnapshot.flop),
+      turn: this.cloneCards(boardSnapshot.turn),
+      river: this.cloneCards(boardSnapshot.river),
+    };
+  }
+
+  private getRoleFlags(playerIndex: number): PlayerRoleFlags {
+    const numPlayers = this.activePlayers.length;
+    const relativePosition =
+      (playerIndex - this.dealerPosition + numPlayers) % numPlayers;
+
+    return {
+      isDealer: relativePosition === 0,
+      isSmallBlind:
+        numPlayers === 2 ? relativePosition === 1 : relativePosition === 1,
+      isBigBlind:
+        numPlayers === 2 ? relativePosition === 0 : relativePosition === 2,
+    };
+  }
+
+  private recordHandAction(
     playerId: string,
-    updates: Partial<CompletedHandPlayerOutcome>
+    actionType: HandActionType,
+    contribution: number,
+    targetBet: number,
+    isAllIn: boolean
   ): void {
-    if (!this.completedHandOutcome) {
-      this.completedHandOutcome = { players: [] };
+    if (!this.handStartSnapshot) {
+      return;
     }
 
-    let playerOutcome = this.completedHandOutcome.players.find(
-      (player) => player.playerId === playerId
-    );
-
-    if (!playerOutcome) {
-      playerOutcome = {
-        playerId,
-        wonAnyPot: false,
-        reachedShowdown: false,
-        chipsWon: 0,
-      };
-      this.completedHandOutcome.players.push(playerOutcome);
-    }
-
-    if (typeof updates.wonAnyPot === "boolean") {
-      playerOutcome.wonAnyPot = updates.wonAnyPot;
-    }
-    if (typeof updates.reachedShowdown === "boolean") {
-      playerOutcome.reachedShowdown = updates.reachedShowdown;
-    }
-    if (typeof updates.chipsWon === "number") {
-      playerOutcome.chipsWon = updates.chipsWon;
-    }
+    this.actionHistory.push({
+      street: this.gameStateToStreet(this.gameState),
+      actionIndex: this.actionHistory.length,
+      playerId,
+      actionType,
+      contribution,
+      targetBet,
+      isAllIn,
+      timestamp: Date.now(),
+    });
   }
 
-  private markPlayersReachedShowdown(playerIds: string[]): void {
-    playerIds.forEach((playerId) => {
-      this.setCompletedHandOutcomePlayer(playerId, {
-        reachedShowdown: true,
+  private createHandStartSnapshot(): void {
+    if (this.handStartChips.size === 0) {
+      return;
+    }
+
+    this.handStartSnapshot = {
+      dealerPosition: this.dealerPosition,
+      smallBlind: this.smallBlind,
+      bigBlind: this.bigBlind,
+      players: this.activePlayers.map((player, seatIndex) => ({
+        playerId: player.getId(),
+        seatIndex,
+        roleFlags: this.getRoleFlags(seatIndex),
+        startingStack: this.handStartChips.get(player.getId()) ?? player.getChips(),
+        holeCards: this.cloneCards(player.getCards()),
+      })),
+    };
+  }
+
+  private updateBoardSnapshot(): void {
+    this.boardSnapshot = {
+      flop: this.cloneCards(this.communityCards.slice(0, 3)),
+      turn: this.cloneCards(this.communityCards.slice(3, 4)),
+      river: this.cloneCards(this.communityCards.slice(4, 5)),
+    };
+  }
+
+  private getFoldedStreetForPlayer(playerId: string): BettingStreet | null {
+    const foldAction = this.actionHistory.find(
+      (action) => action.playerId === playerId && action.actionType === "fold"
+    );
+    return foldAction?.street ?? null;
+  }
+
+  private finalizeHandEndSnapshot(potResults: PotResult[]): void {
+    if (!this.handStartSnapshot) {
+      this.handEndSnapshot = null;
+      return;
+    }
+
+    const chipsWonByPlayerId = new Map<string, number>();
+    potResults.forEach((potResult) => {
+      potResult.winnerPlayerIds.forEach((playerId) => {
+        chipsWonByPlayerId.set(
+          playerId,
+          (chipsWonByPlayerId.get(playerId) ?? 0) + potResult.splitAmount
+        );
       });
     });
-  }
 
-  private recordWinnings(playerId: string, amount: number): void {
-    const existing = this.completedHandOutcome?.players.find(
-      (player) => player.playerId === playerId
-    );
-    this.setCompletedHandOutcomePlayer(playerId, {
-      wonAnyPot: true,
-      chipsWon: (existing?.chipsWon ?? 0) + amount,
-    });
+    this.handEndSnapshot = {
+      players: this.handStartSnapshot.players.map((playerSnapshot) => {
+        const player = this.activePlayers.find(
+          (activePlayer) => activePlayer.getId() === playerSnapshot.playerId
+        );
+        const foldedStreet = this.getFoldedStreetForPlayer(playerSnapshot.playerId);
+        const reachedShowdown =
+          foldedStreet === null &&
+          this.handStartSnapshot!.players.filter(
+            ({ playerId }) => this.getFoldedStreetForPlayer(playerId) === null
+          ).length > 1;
+
+        return {
+          playerId: playerSnapshot.playerId,
+          finalStack: player?.getChips() ?? playerSnapshot.startingStack,
+          foldedStreet,
+          reachedShowdown,
+          revealedCards: reachedShowdown,
+          chipsWon: chipsWonByPlayerId.get(playerSnapshot.playerId) ?? 0,
+        };
+      }),
+      potResults: potResults.map((potResult) => ({ ...potResult })),
+    };
   }
 
   public startNewBettingRound(): void {
@@ -403,6 +554,8 @@ export class TexasHoldem {
 
     this.smallBlind = this.getSmallBlindByDay();
     this.bigBlind = 2 * this.smallBlind;
+    this.gameState = GameState.PreFlop;
+    this.createHandStartSnapshot();
 
     const smallBlindPlayer =
       this.activePlayers[(this.dealerPosition + 1) % this.activePlayers.length];
@@ -431,6 +584,13 @@ export class TexasHoldem {
       contributionAmount: smallBlindAmount,
       timestamp: Date.now(),
     });
+    this.recordHandAction(
+      smallBlindPlayer.getId(),
+      "post_small_blind",
+      smallBlindAmount,
+      smallBlindAmount,
+      smallBlindPlayer.getIsAllIn()
+    );
 
     // Handle big blind payment
     const bigBlindAmount = Math.min(this.bigBlind, bigBlindPlayer.getChips());
@@ -450,10 +610,16 @@ export class TexasHoldem {
       contributionAmount: bigBlindAmount,
       timestamp: Date.now(),
     });
+    this.recordHandAction(
+      bigBlindPlayer.getId(),
+      "post_big_blind",
+      bigBlindAmount,
+      bigBlindAmount,
+      bigBlindPlayer.getIsAllIn()
+    );
 
     this.currentPot += smallBlindAmount + bigBlindAmount;
     this.currentBetAmount = this.bigBlind;
-    this.gameState = GameState.PreFlop;
 
     const currentPlayer = this.getCurrentPlayer();
     if (currentPlayer) {
@@ -466,8 +632,7 @@ export class TexasHoldem {
 
   private endRound(): void {
     // Handle side pots and distribute winnings
-    this.completedHandOutcome = { players: [] };
-    this.handleSidePots();
+    const potResults = this.handleSidePots();
 
     if (this.communityCards.length < 5) {
       // round is over reveal community cards
@@ -478,6 +643,7 @@ export class TexasHoldem {
           this.burnAndDeal(1);
         }
       }
+      this.updateBoardSnapshot();
       this.events.push(
         new GameEvent("Community Cards would have been:", [
           ...this.communityCards,
@@ -497,6 +663,7 @@ export class TexasHoldem {
       }
     });
 
+    this.finalizeHandEndSnapshot(potResults);
     this.currentPot = 0;
     this.currentBetAmount = 0;
     this.lastRaiseAmount = 0;
@@ -797,6 +964,7 @@ export class TexasHoldem {
 
   public dealFlop(): void {
     this.burnAndDeal(3);
+    this.updateBoardSnapshot();
     this.events.push(new GameEvent("Flop:", this.communityCards));
     this.activePlayers.forEach((player) => {
       if (!this.foldedPlayers.has(player.getId())) {
@@ -807,6 +975,7 @@ export class TexasHoldem {
 
   public dealTurn(): void {
     this.burnAndDeal(1);
+    this.updateBoardSnapshot();
     this.events.push(new GameEvent("Turn:", [...this.communityCards]));
     this.activePlayers.forEach((player) => {
       if (!this.foldedPlayers.has(player.getId())) {
@@ -817,6 +986,7 @@ export class TexasHoldem {
 
   public dealRiver(): void {
     this.burnAndDeal(1);
+    this.updateBoardSnapshot();
     this.events.push(new GameEvent("River:", [...this.communityCards]));
     this.activePlayers.forEach((player) => {
       if (!this.foldedPlayers.has(player.getId())) {
@@ -996,6 +1166,7 @@ export class TexasHoldem {
       contributionAmount: 0,
       timestamp: Date.now(),
     });
+    this.recordHandAction(playerId, "fold", 0, player.getCurrentBet(), player.getIsAllIn());
 
     this.advanceToNextPlayer();
 
@@ -1100,6 +1271,7 @@ export class TexasHoldem {
       contributionAmount: 0,
       timestamp: Date.now(),
     });
+    this.recordHandAction(playerId, "check", 0, player.getCurrentBet(), player.getIsAllIn());
 
     this.advanceToNextPlayer();
     // if (this.isBettingRoundComplete()) {
@@ -1260,6 +1432,13 @@ export class TexasHoldem {
         : undefined,
       timestamp: Date.now(),
     });
+    this.recordHandAction(
+      playerId,
+      isRaise ? "raise" : "bet",
+      betAmount,
+      roundedAmount,
+      player.getIsAllIn()
+    );
     
     this.advanceToNextPlayer();
     this.progressGame();
@@ -1360,6 +1539,13 @@ export class TexasHoldem {
       underlyingActionType: player.getIsAllIn() ? "call" : undefined,
       timestamp: Date.now(),
     });
+    this.recordHandAction(
+      playerId,
+      "call",
+      callAmount,
+      player.getCurrentBet(),
+      player.getIsAllIn()
+    );
 
     const message = player.getIsAllIn()
       ? `${playerId} called ${this.currentBetAmount} chips *:rotating_light: ALL-IN :rotating_light:* Total Pot: ${this.currentPot}`
@@ -1428,7 +1614,8 @@ export class TexasHoldem {
     }
   }
 
-  private handleSidePots(): void {
+  private handleSidePots(): PotResult[] {
+    const potResults: PotResult[] = [];
     // Get active players who haven't folded
     const activeNonFoldedPlayers = this.activePlayers.filter(
       (player) => !this.foldedPlayers.has(player.getId())
@@ -1441,13 +1628,16 @@ export class TexasHoldem {
         new GameEvent(`${winner.getId()} wins ${this.currentPot} chips!`)
       );
       winner.addChips(this.currentPot);
-      this.recordWinnings(winner.getId(), this.currentPot);
-      return;
+      potResults.push({
+        potIndex: 0,
+        potType: "main",
+        potSize: this.currentPot,
+        eligiblePlayerIds: [winner.getId()],
+        winnerPlayerIds: [winner.getId()],
+        splitAmount: this.currentPot,
+      });
+      return potResults;
     }
-
-    this.markPlayersReachedShowdown(
-      activeNonFoldedPlayers.map((player) => player.getId())
-    );
 
     // Get all players who went all-in, sorted by their total contribution
     const allInPlayers = activeNonFoldedPlayers
@@ -1463,8 +1653,10 @@ export class TexasHoldem {
         ))
     ) {
       // No side pots needed, distribute the entire pot
-      this.distributePot(activeNonFoldedPlayers, this.currentPot, false);
-      return;
+      potResults.push(
+        this.distributePot(activeNonFoldedPlayers, this.currentPot, false, 0)
+      );
+      return potResults;
     }
 
     // Create side pots
@@ -1495,7 +1687,9 @@ export class TexasHoldem {
       const eligiblePlayers = activeNonFoldedPlayers.filter(
         (p) => p.getTotalBet() >= currentBet
       );
-      this.distributePot(eligiblePlayers, potSize, true);
+      potResults.push(
+        this.distributePot(eligiblePlayers, potSize, true, potResults.length)
+      );
 
       previousBet = currentBet;
     });
@@ -1506,15 +1700,19 @@ export class TexasHoldem {
       const eligiblePlayers = activeNonFoldedPlayers.filter(
         (p) => !p.getIsAllIn()
       );
-      this.distributePot(eligiblePlayers, remainingPot, false);
+      potResults.push(
+        this.distributePot(eligiblePlayers, remainingPot, false, potResults.length)
+      );
     }
+    return potResults;
   }
 
   private distributePot(
     eligiblePlayers: Player[],
     potSize: number,
-    isSidePot: boolean
-  ): void {
+    isSidePot: boolean,
+    potIndex: number
+  ): PotResult {
     // Evaluate hands and determine the winner(s) for this pot
     const playerHands = eligiblePlayers.map((player) => ({
       player,
@@ -1532,7 +1730,6 @@ export class TexasHoldem {
     const winnings = potSize / winners.length;
     winners.forEach((winner) => {
       winner.player.addChips(winnings);
-      this.recordWinnings(winner.player.getId(), winnings);
     });
 
     this.events.push(
@@ -1561,6 +1758,15 @@ export class TexasHoldem {
         )
       );
     }
+
+    return {
+      potIndex,
+      potType: isSidePot ? "side" : "main",
+      potSize,
+      eligiblePlayerIds: eligiblePlayers.map((player) => player.getId()),
+      winnerPlayerIds: winners.map((winner) => winner.player.getId()),
+      splitAmount: winnings,
+    };
   }
 
   public evaluateHand(cards: Card[]): any {
@@ -1779,14 +1985,41 @@ export class TexasHoldem {
     return new Map(this.handStartChips);
   }
 
-  public getCompletedHandOutcome(): CompletedHandOutcome | null {
-    if (!this.completedHandOutcome) {
+  public getHandStartSnapshot(): HandStartSnapshot | null {
+    if (!this.handStartSnapshot) {
       return null;
     }
 
     return {
-      players: this.completedHandOutcome.players.map((player) => ({
+      dealerPosition: this.handStartSnapshot.dealerPosition,
+      smallBlind: this.handStartSnapshot.smallBlind,
+      bigBlind: this.handStartSnapshot.bigBlind,
+      players: this.handStartSnapshot.players.map((player) => ({
         ...player,
+        holeCards: this.cloneCards(player.holeCards),
+      })),
+    };
+  }
+
+  public getActionHistory(): HandAction[] {
+    return this.actionHistory.map((action) => ({ ...action }));
+  }
+
+  public getBoardSnapshot(): BoardSnapshot {
+    return this.cloneBoardSnapshot(this.boardSnapshot);
+  }
+
+  public getHandEndSnapshot(): HandEndSnapshot | null {
+    if (!this.handEndSnapshot) {
+      return null;
+    }
+
+    return {
+      players: this.handEndSnapshot.players.map((player) => ({ ...player })),
+      potResults: this.handEndSnapshot.potResults.map((potResult) => ({
+        ...potResult,
+        eligiblePlayerIds: [...potResult.eligiblePlayerIds],
+        winnerPlayerIds: [...potResult.winnerPlayerIds],
       })),
     };
   }
@@ -1934,7 +2167,48 @@ export class TexasHoldem {
     this.events.push(new GameEvent(message, this.getCommunityCards()));
   }
 
-  public toJson() {
+  private serializeHandStartSnapshot() {
+    if (!this.handStartSnapshot) {
+      return null;
+    }
+
+    return {
+      ...this.handStartSnapshot,
+      players: this.handStartSnapshot.players.map((player) => ({
+        ...player,
+        holeCards: player.holeCards.map((card) => card.toJson()),
+      })),
+    };
+  }
+
+  private serializeBoardSnapshot(boardSnapshot: BoardSnapshot) {
+    return {
+      flop: boardSnapshot.flop.map((card) => card.toJson()),
+      turn: boardSnapshot.turn.map((card) => card.toJson()),
+      river: boardSnapshot.river.map((card) => card.toJson()),
+    };
+  }
+
+  private serializeHandEndSnapshot() {
+    if (!this.handEndSnapshot) {
+      return null;
+    }
+
+    return {
+      ...this.handEndSnapshot,
+    };
+  }
+
+  private serializeHandHistory() {
+    return {
+      handStartSnapshot: this.serializeHandStartSnapshot(),
+      actionHistory: this.actionHistory,
+      boardSnapshot: this.serializeBoardSnapshot(this.boardSnapshot),
+      handEndSnapshot: this.serializeHandEndSnapshot(),
+    };
+  }
+
+  public toJson(): any {
     return {
       gameState: this.gameState,
       deck: this.deck.toJson(),
@@ -1953,12 +2227,76 @@ export class TexasHoldem {
       preDealId: this.preDealId,
       bettingHistory: this.bettingHistory,
       handStartChips: Array.from(this.handStartChips.entries()),
-      completedHandOutcome: this.completedHandOutcome,
+      handHistory: this.serializeHandHistory(),
     } as const;
   }
 
   public static fromJson(data: any): TexasHoldem {
     // const data = JSON.parse(json);
+    const handHistory = data.handHistory ?? {};
+    const deserializeBoardSnapshot = (boardSnapshot: any): BoardSnapshot => ({
+      flop: (boardSnapshot?.flop ?? []).map((cardJson: any) =>
+        Card.fromJson(cardJson)
+      ),
+      turn: (boardSnapshot?.turn ?? []).map((cardJson: any) =>
+        Card.fromJson(cardJson)
+      ),
+      river: (boardSnapshot?.river ?? []).map((cardJson: any) =>
+        Card.fromJson(cardJson)
+      ),
+    });
+
+    const deserializeHandStartSnapshot = (
+      handStartSnapshot: any
+    ): HandStartSnapshot | null => {
+      if (!handStartSnapshot) {
+        return null;
+      }
+
+      return {
+        dealerPosition: handStartSnapshot.dealerPosition,
+        smallBlind: handStartSnapshot.smallBlind,
+        bigBlind: handStartSnapshot.bigBlind,
+        players: (handStartSnapshot.players ?? []).map((player: any) => ({
+          ...player,
+          roleFlags: {
+            isDealer: Boolean(
+              player.roleFlags?.isDealer ?? player.positionLabel?.includes("D")
+            ),
+            isSmallBlind: Boolean(
+              player.roleFlags?.isSmallBlind ??
+                player.positionLabel?.includes("SB")
+            ),
+            isBigBlind: Boolean(
+              player.roleFlags?.isBigBlind ?? player.positionLabel?.includes("BB")
+            ),
+          },
+          holeCards: (player.holeCards ?? []).map((cardJson: any) =>
+            Card.fromJson(cardJson)
+          ),
+        })),
+      };
+    };
+
+    const deserializeHandEndSnapshot = (
+      handEndSnapshot: any
+    ): HandEndSnapshot | null => {
+      if (!handEndSnapshot) {
+        return null;
+      }
+
+      return {
+        players: (handEndSnapshot.players ?? []).map((player: any) => ({
+          ...player,
+        })),
+        potResults: (handEndSnapshot.potResults ?? []).map((potResult: any) => ({
+          ...potResult,
+          eligiblePlayerIds: [...(potResult.eligiblePlayerIds ?? [])],
+          winnerPlayerIds: [...(potResult.winnerPlayerIds ?? [])],
+        })),
+      };
+    };
+
     const game = new TexasHoldem(
       data.gameState,
       Deck.fromJson(data.deck),
@@ -1981,7 +2319,14 @@ export class TexasHoldem {
       data.preDealId,
       data.bettingHistory || [],
       new Map(data.handStartChips || []),
-      data.completedHandOutcome || null
+      deserializeHandStartSnapshot(
+        handHistory.handStartSnapshot ?? data.handStartSnapshot
+      ),
+      handHistory.actionHistory ?? data.actionHistory ?? [],
+      deserializeBoardSnapshot(handHistory.boardSnapshot ?? data.boardSnapshot),
+      deserializeHandEndSnapshot(
+        handHistory.handEndSnapshot ?? data.handEndSnapshot
+      )
     );
     return game;
   }
@@ -1989,6 +2334,7 @@ export class TexasHoldem {
   // only for testing
   public setCommunityCards(cards: Card[]): void {
     this.communityCards = cards;
+    this.updateBoardSnapshot();
   }
 
   private getSmallBlindByDay(): number {
@@ -2032,7 +2378,7 @@ export class TexasHoldem {
     return smallBlind;
   }
 
-  public getState() {
+  public getState(): any {
     return {
       gameState: this.gameState,
       deck: this.deck.toJson(),
@@ -2055,7 +2401,7 @@ export class TexasHoldem {
       preDealId: this.preDealId,
       bettingHistory: this.bettingHistory,
       handStartChips: Array.from(this.handStartChips.entries()),
-      completedHandOutcome: this.completedHandOutcome,
+      handHistory: this.serializeHandHistory(),
     } as const;
   }
 }

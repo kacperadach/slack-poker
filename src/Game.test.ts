@@ -136,6 +136,95 @@ test("Players are dealt cards correctly", () => {
   });
 });
 
+test("Hand start snapshot records frozen context and blind actions", () => {
+  const game = new TexasHoldem();
+
+  assert.equal(game.addPlayer(PLAYER_1), true);
+  assert.equal(game.addPlayer(PLAYER_2), true);
+  assert.equal(game.addPlayer(PLAYER_3), true);
+  assert.equal(game.buyIn(PLAYER_1, 1000), Success);
+  assert.equal(game.buyIn(PLAYER_2, 1000), Success);
+  assert.equal(game.buyIn(PLAYER_3, 1000), Success);
+
+  assert.equal(game.startRound(PLAYER_1), Success);
+
+  const handStartSnapshot = game.getHandStartSnapshot();
+  assert(handStartSnapshot);
+  assert.equal(handStartSnapshot.dealerPosition, 0);
+  assert.equal(handStartSnapshot.smallBlind, game.getSmallBlind());
+  assert.equal(handStartSnapshot.bigBlind, game.getBigBlind());
+  assert.equal(handStartSnapshot.players.length, 3);
+  assert.deepEqual(
+    handStartSnapshot.players.map((player) => ({
+      playerId: player.playerId,
+      seatIndex: player.seatIndex,
+      roleFlags: player.roleFlags,
+      startingStack: player.startingStack,
+      holeCardCount: player.holeCards.length,
+    })),
+    [
+      {
+        playerId: PLAYER_1,
+        seatIndex: 0,
+        roleFlags: {
+          isDealer: true,
+          isSmallBlind: false,
+          isBigBlind: false,
+        },
+        startingStack: 1000,
+        holeCardCount: 2,
+      },
+      {
+        playerId: PLAYER_2,
+        seatIndex: 1,
+        roleFlags: {
+          isDealer: false,
+          isSmallBlind: true,
+          isBigBlind: false,
+        },
+        startingStack: 1000,
+        holeCardCount: 2,
+      },
+      {
+        playerId: PLAYER_3,
+        seatIndex: 2,
+        roleFlags: {
+          isDealer: false,
+          isSmallBlind: false,
+          isBigBlind: true,
+        },
+        startingStack: 1000,
+        holeCardCount: 2,
+      },
+    ]
+  );
+
+  const actionHistory = game.getActionHistory();
+  assert.equal(actionHistory.length, 2);
+  assert.deepEqual(
+    actionHistory.map((action) => ({
+      playerId: action.playerId,
+      actionType: action.actionType,
+      contribution: action.contribution,
+      targetBet: action.targetBet,
+    })),
+    [
+      {
+        playerId: PLAYER_2,
+        actionType: "post_small_blind",
+        contribution: game.getSmallBlind(),
+        targetBet: game.getSmallBlind(),
+      },
+      {
+        playerId: PLAYER_3,
+        actionType: "post_big_blind",
+        contribution: game.getBigBlind(),
+        targetBet: game.getBigBlind(),
+      },
+    ]
+  );
+});
+
 test("First player can fold", () => {
   const game = new TexasHoldem();
 
@@ -408,6 +497,72 @@ test("All-in Pre-flop deals all cards and distributes pot to winner", () => {
   assert.equal(game.getGameState(), GameState.WaitingForPlayers);
 });
 
+test("Hand history records board progression and end snapshot on showdown", () => {
+  const game = new TexasHoldem();
+
+  assert.equal(game.addPlayer(PLAYER_1), true);
+  assert.equal(game.addPlayer(PLAYER_2), true);
+  assert.equal(game.buyIn(PLAYER_1, 1000), Success);
+  assert.equal(game.buyIn(PLAYER_2, 1000), Success);
+
+  assert.equal(game.startRound(PLAYER_1), Success);
+  while (game.getGameState() !== GameState.WaitingForPlayers) {
+    const currentPlayer = game.getCurrentPlayer();
+    assert(currentPlayer);
+
+    if (
+      game.getCurrentBetAmount() > 0 &&
+      currentPlayer.getCurrentBet() < game.getCurrentBetAmount()
+    ) {
+      assert.equal(game.call(currentPlayer.getId()), Success);
+    } else {
+      assert.equal(game.check(currentPlayer.getId()), Success);
+    }
+  }
+
+  const boardSnapshot = game.getBoardSnapshot();
+  assert.equal(boardSnapshot.flop.length, 3);
+  assert.equal(boardSnapshot.turn.length, 1);
+  assert.equal(boardSnapshot.river.length, 1);
+
+  const handEndSnapshot = game.getHandEndSnapshot();
+  assert(handEndSnapshot);
+  assert.equal(handEndSnapshot.players.length, 2);
+  assert.equal(handEndSnapshot.potResults.length, 1);
+  handEndSnapshot.players.forEach((player) => {
+    assert.equal(player.reachedShowdown, true);
+    assert.equal(player.revealedCards, true);
+    assert.equal(player.foldedStreet, null);
+  });
+});
+
+test("Hand history round-trips through serialization and legacy state still loads", () => {
+  const game = new TexasHoldem();
+
+  assert.equal(game.addPlayer(PLAYER_1), true);
+  assert.equal(game.addPlayer(PLAYER_2), true);
+  assert.equal(game.buyIn(PLAYER_1, 1000), Success);
+  assert.equal(game.buyIn(PLAYER_2, 1000), Success);
+  assert.equal(game.startRound(PLAYER_1), Success);
+  const currentPlayer = game.getCurrentPlayer();
+  assert(currentPlayer);
+  assert.equal(game.call(currentPlayer.getId()), Success);
+
+  const serialized = game.toJson();
+  const reloaded = TexasHoldem.fromJson(serialized);
+
+  assert.equal(reloaded.getHandStartSnapshot()?.players.length, 2);
+  assert.equal(reloaded.getActionHistory().length, game.getActionHistory().length);
+
+  const legacySerialized: any = { ...serialized };
+  delete legacySerialized.handHistory;
+
+  const legacyReloaded = TexasHoldem.fromJson(legacySerialized);
+  assert.equal(legacyReloaded.getHandStartSnapshot(), null);
+  assert.equal(legacyReloaded.getActionHistory().length, 0);
+  assert.equal(legacyReloaded.getHandEndSnapshot(), null);
+});
+
 test("Test 1 Side Pot for non-all-in players", () => {
   const game = new TexasHoldem();
 
@@ -666,10 +821,10 @@ test("Test 2 players call the blinds", () => {
   assert(player2);
   assert.equal(player2.getChips(), 1000 - game.getBigBlind());
 
-  assert.equal(game.getCurrentPlayer().getId(), PLAYER_1);
+  assert.equal(game.getCurrentPlayer()?.getId(), PLAYER_1);
   assert.equal(game.call(PLAYER_1), Success);
 
-  assert.equal(game.getCurrentPlayer().getId(), PLAYER_2);
+  assert.equal(game.getCurrentPlayer()?.getId(), PLAYER_2);
   assert.equal(
     game.call(PLAYER_2),
     "No need to call - already matched the current bet"
