@@ -46,6 +46,7 @@ import {
   removePlayer,
   enableHubsOnlyMode,
   disableHubsOnlyMode,
+  deployed,
 } from "..";
 import { ensureNarpBrainOnError } from "../slackErrorEmoji";
 import { MARCUS_USER_ID, CAMDEN_USER_ID, YUVI_USER_ID } from "../users";
@@ -175,6 +176,49 @@ describe("Poker Durable Object", () => {
     expect(stub.deletePlayer).toHaveBeenCalled();
     expect(sayFn).toHaveBeenCalledWith({
       text: ensureNarpBrainOnError("Cannot remove player during active hand"),
+    });
+  });
+
+  it("deployed command shows the worker deployment time as a relative string", async () => {
+    const sayFn = vi.fn();
+    const fakeContext = createContext({
+      userId: "user1",
+      sayFn,
+    });
+    const fakeEnv = {
+      CF_VERSION_METADATA: {
+        id: "version-id",
+        tag: "v1",
+        timestamp: "2026-01-16T11:59:50.000Z",
+      },
+    } as Env;
+
+    await deployed(
+      fakeEnv,
+      fakeContext,
+      createGenericMessageEvent("user1", "deployed")
+    );
+
+    expect(sayFn).toHaveBeenCalledWith({
+      text: "Worker deployed: 10 seconds ago",
+    });
+  });
+
+  it("deployed command falls back when deployment metadata is unavailable", async () => {
+    const sayFn = vi.fn();
+    const fakeContext = createContext({
+      userId: "user1",
+      sayFn,
+    });
+
+    await deployed(
+      {} as Env,
+      fakeContext,
+      createGenericMessageEvent("user1", "deployed")
+    );
+
+    expect(sayFn).toHaveBeenCalledWith({
+      text: "Worker deployment time is unavailable.",
     });
   });
 
