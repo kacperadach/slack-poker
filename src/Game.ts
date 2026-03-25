@@ -27,12 +27,27 @@ export type BettingActionType =
   | "fold"
   | "all_in";
 
+export type UnderlyingAllInActionType = "bet" | "raise" | "call";
+
 export interface BettingAction {
   street: BettingStreet;
   playerId: string;
   actionType: BettingActionType;
   amount: number;
+  contributionAmount?: number;
+  underlyingActionType?: UnderlyingAllInActionType;
   timestamp: number;
+}
+
+export interface CompletedHandPlayerOutcome {
+  playerId: string;
+  wonAnyPot: boolean;
+  reachedShowdown: boolean;
+  chipsWon: number;
+}
+
+export interface CompletedHandOutcome {
+  players: CompletedHandPlayerOutcome[];
 }
 
 export class TexasHoldem {
@@ -53,6 +68,8 @@ export class TexasHoldem {
   private preDealId: string | undefined = undefined;
   private events: GameEvent[];
   private bettingHistory: BettingAction[];
+  private handStartChips: Map<string, number>;
+  private completedHandOutcome: CompletedHandOutcome | null;
 
   constructor(
     gameState: GameState = GameState.WaitingForPlayers,
@@ -70,7 +87,9 @@ export class TexasHoldem {
     lastRaiseAmount: number = 0,
     playerPositions: Map<string, number> = new Map(),
     preDealId: string | undefined = undefined,
-    bettingHistory: BettingAction[] = []
+    bettingHistory: BettingAction[] = [],
+    handStartChips: Map<string, number> = new Map(),
+    completedHandOutcome: CompletedHandOutcome | null = null
   ) {
     this.gameState = gameState;
     this.deck = deck;
@@ -89,6 +108,8 @@ export class TexasHoldem {
     this.preDealId = preDealId;
     this.events = [];
     this.bettingHistory = bettingHistory;
+    this.handStartChips = handStartChips;
+    this.completedHandOutcome = completedHandOutcome;
   }
 
   public progressGame(): void {
@@ -198,6 +219,62 @@ export class TexasHoldem {
         !this.foldedPlayers.has(player.getId()) && !player.getIsAllIn()
     );
     return activeNonFoldedPlayers.length <= 1;
+  }
+
+  private resetCompletedHandTracking(): void {
+    this.completedHandOutcome = null;
+    this.handStartChips = new Map();
+  }
+
+  private setCompletedHandOutcomePlayer(
+    playerId: string,
+    updates: Partial<CompletedHandPlayerOutcome>
+  ): void {
+    if (!this.completedHandOutcome) {
+      this.completedHandOutcome = { players: [] };
+    }
+
+    let playerOutcome = this.completedHandOutcome.players.find(
+      (player) => player.playerId === playerId
+    );
+
+    if (!playerOutcome) {
+      playerOutcome = {
+        playerId,
+        wonAnyPot: false,
+        reachedShowdown: false,
+        chipsWon: 0,
+      };
+      this.completedHandOutcome.players.push(playerOutcome);
+    }
+
+    if (typeof updates.wonAnyPot === "boolean") {
+      playerOutcome.wonAnyPot = updates.wonAnyPot;
+    }
+    if (typeof updates.reachedShowdown === "boolean") {
+      playerOutcome.reachedShowdown = updates.reachedShowdown;
+    }
+    if (typeof updates.chipsWon === "number") {
+      playerOutcome.chipsWon = updates.chipsWon;
+    }
+  }
+
+  private markPlayersReachedShowdown(playerIds: string[]): void {
+    playerIds.forEach((playerId) => {
+      this.setCompletedHandOutcomePlayer(playerId, {
+        reachedShowdown: true,
+      });
+    });
+  }
+
+  private recordWinnings(playerId: string, amount: number): void {
+    const existing = this.completedHandOutcome?.players.find(
+      (player) => player.playerId === playerId
+    );
+    this.setCompletedHandOutcomePlayer(playerId, {
+      wonAnyPot: true,
+      chipsWon: (existing?.chipsWon ?? 0) + amount,
+    });
   }
 
   public startNewBettingRound(): void {
@@ -310,6 +387,13 @@ export class TexasHoldem {
 
     this.communityCards = [];
     this.foldedPlayers.clear();
+    this.resetCompletedHandTracking();
+    this.handStartChips = new Map(
+      this.activePlayers.map((activePlayer) => [
+        activePlayer.getId(),
+        activePlayer.getChips(),
+      ])
+    );
     this.currentPlayerIndex =
       (this.dealerPosition + 3) % this.activePlayers.length; // Start after big blind
     this.deck.reset();
@@ -344,6 +428,7 @@ export class TexasHoldem {
       playerId: smallBlindPlayer.getId(),
       actionType: "small_blind",
       amount: smallBlindAmount,
+      contributionAmount: smallBlindAmount,
       timestamp: Date.now(),
     });
 
@@ -362,6 +447,7 @@ export class TexasHoldem {
       playerId: bigBlindPlayer.getId(),
       actionType: "big_blind",
       amount: bigBlindAmount,
+      contributionAmount: bigBlindAmount,
       timestamp: Date.now(),
     });
 
@@ -380,6 +466,7 @@ export class TexasHoldem {
 
   private endRound(): void {
     // Handle side pots and distribute winnings
+    this.completedHandOutcome = { players: [] };
     this.handleSidePots();
 
     if (this.communityCards.length < 5) {
@@ -906,6 +993,7 @@ export class TexasHoldem {
       playerId,
       actionType: "fold",
       amount: 0,
+      contributionAmount: 0,
       timestamp: Date.now(),
     });
 
@@ -1009,6 +1097,7 @@ export class TexasHoldem {
       playerId,
       actionType: "check",
       amount: 0,
+      contributionAmount: 0,
       timestamp: Date.now(),
     });
 
@@ -1163,6 +1252,12 @@ export class TexasHoldem {
       playerId,
       actionType,
       amount: roundedAmount,
+      contributionAmount: betAmount,
+      underlyingActionType: player.getIsAllIn()
+        ? isRaise
+          ? "raise"
+          : "bet"
+        : undefined,
       timestamp: Date.now(),
     });
     
@@ -1261,6 +1356,8 @@ export class TexasHoldem {
       playerId,
       actionType: player.getIsAllIn() ? "all_in" : "call",
       amount: this.currentBetAmount,
+      contributionAmount: callAmount,
+      underlyingActionType: player.getIsAllIn() ? "call" : undefined,
       timestamp: Date.now(),
     });
 
@@ -1344,8 +1441,13 @@ export class TexasHoldem {
         new GameEvent(`${winner.getId()} wins ${this.currentPot} chips!`)
       );
       winner.addChips(this.currentPot);
+      this.recordWinnings(winner.getId(), this.currentPot);
       return;
     }
+
+    this.markPlayersReachedShowdown(
+      activeNonFoldedPlayers.map((player) => player.getId())
+    );
 
     // Get all players who went all-in, sorted by their total contribution
     const allInPlayers = activeNonFoldedPlayers
@@ -1428,7 +1530,10 @@ export class TexasHoldem {
     );
     // Split the pot among winners
     const winnings = potSize / winners.length;
-    winners.forEach((winner) => winner.player.addChips(winnings));
+    winners.forEach((winner) => {
+      winner.player.addChips(winnings);
+      this.recordWinnings(winner.player.getId(), winnings);
+    });
 
     this.events.push(
       new GameEvent("Community Cards:", this.getCommunityCards())
@@ -1670,6 +1775,22 @@ export class TexasHoldem {
     return [...this.bettingHistory];
   }
 
+  public getHandStartChips(): Map<string, number> {
+    return new Map(this.handStartChips);
+  }
+
+  public getCompletedHandOutcome(): CompletedHandOutcome | null {
+    if (!this.completedHandOutcome) {
+      return null;
+    }
+
+    return {
+      players: this.completedHandOutcome.players.map((player) => ({
+        ...player,
+      })),
+    };
+  }
+
   public getBettingHistoryByStreet(street: BettingStreet): BettingAction[] {
     return this.bettingHistory.filter((action) => action.street === street);
   }
@@ -1831,6 +1952,8 @@ export class TexasHoldem {
       playerPositions: Array.from(this.playerPositions.entries()),
       preDealId: this.preDealId,
       bettingHistory: this.bettingHistory,
+      handStartChips: Array.from(this.handStartChips.entries()),
+      completedHandOutcome: this.completedHandOutcome,
     } as const;
   }
 
@@ -1856,7 +1979,9 @@ export class TexasHoldem {
       data.lastRaiseAmount,
       new Map(data.playerPositions),
       data.preDealId,
-      data.bettingHistory || []
+      data.bettingHistory || [],
+      new Map(data.handStartChips || []),
+      data.completedHandOutcome || null
     );
     return game;
   }
@@ -1929,6 +2054,8 @@ export class TexasHoldem {
       )[][],
       preDealId: this.preDealId,
       bettingHistory: this.bettingHistory,
+      handStartChips: Array.from(this.handStartChips.entries()),
+      completedHandOutcome: this.completedHandOutcome,
     } as const;
   }
 }

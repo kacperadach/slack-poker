@@ -10,7 +10,7 @@ import { Card } from "./Card";
 import type { GameEvent } from "./GameEvent";
 // @ts-ignore phe is not typed
 import { rankDescription, rankCards } from "phe";
-import { userIdToName } from "./users";
+import { allUsers, userIdToName } from "./users";
 import {
   fetchStockPrice,
   getHubsStockPriceMessage,
@@ -57,6 +57,44 @@ type ScopedGameContext = {
   gameId?: number;
 };
 
+type PlayerHandFactRecord = {
+  workspaceId: string;
+  channelId: string;
+  gameId: number;
+  playerId: string;
+  participated: boolean;
+  wonAnyPot: boolean;
+  reachedShowdown: boolean;
+  folded: boolean;
+  checkCount: number;
+  callCount: number;
+  betCount: number;
+  raiseCount: number;
+  allInCount: number;
+  raiseToTotal: number;
+  chipsCommitted: number;
+  chipsWon: number;
+  netChips: number;
+};
+
+type AggregatedPlayerHandStats = {
+  playerId: string;
+  handsCount: number;
+  participated: number;
+  wonAnyPot: number;
+  reachedShowdown: number;
+  folded: number;
+  checkCount: number;
+  callCount: number;
+  betCount: number;
+  raiseCount: number;
+  allInCount: number;
+  raiseToTotal: number;
+  chipsCommitted: number;
+  chipsWon: number;
+  netChips: number;
+};
+
 /** A Durable Object's behavior is defined in an exported Javascript class */
 export class PokerDurableObject extends DurableObject<Env> {
   sql: SqlStorage;
@@ -101,6 +139,29 @@ export class PokerDurableObject extends DurableObject<Env> {
 				flop TEXT NOT NULL,
 				createdAt INTEGER,
 				PRIMARY KEY (workspaceId, channelId, flop)
+			);
+		`);
+
+    this.sql.exec(`
+			CREATE TABLE IF NOT EXISTS PlayerHandFacts (
+				workspaceId TEXT NOT NULL,
+				channelId TEXT NOT NULL,
+				gameId INTEGER NOT NULL,
+				playerId TEXT NOT NULL,
+				participated INTEGER NOT NULL,
+				wonAnyPot INTEGER NOT NULL,
+				reachedShowdown INTEGER NOT NULL,
+				folded INTEGER NOT NULL,
+				checkCount INTEGER NOT NULL,
+				callCount INTEGER NOT NULL,
+				betCount INTEGER NOT NULL,
+				raiseCount INTEGER NOT NULL,
+				allInCount INTEGER NOT NULL,
+				raiseToTotal INTEGER NOT NULL,
+				chipsCommitted INTEGER NOT NULL,
+				chipsWon INTEGER NOT NULL,
+				netChips INTEGER NOT NULL,
+				PRIMARY KEY (workspaceId, channelId, gameId, playerId)
 			);
 		`);
 
@@ -692,6 +753,215 @@ export class PokerDurableObject extends DurableObject<Env> {
     );
   }
 
+  private insertPlayerHandFact(record: PlayerHandFactRecord): void {
+    this.sql.exec(
+      `
+			INSERT OR REPLACE INTO PlayerHandFacts (
+				workspaceId, channelId, gameId, playerId, participated, wonAnyPot,
+				reachedShowdown, folded, checkCount, callCount, betCount, raiseCount,
+				allInCount, raiseToTotal, chipsCommitted, chipsWon, netChips
+			)
+			VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+		`,
+      record.workspaceId,
+      record.channelId,
+      record.gameId,
+      record.playerId,
+      record.participated ? 1 : 0,
+      record.wonAnyPot ? 1 : 0,
+      record.reachedShowdown ? 1 : 0,
+      record.folded ? 1 : 0,
+      record.checkCount,
+      record.callCount,
+      record.betCount,
+      record.raiseCount,
+      record.allInCount,
+      record.raiseToTotal,
+      record.chipsCommitted,
+      record.chipsWon,
+      record.netChips
+    );
+  }
+
+  private buildPlayerHandFactRecords(
+    workspaceId: string,
+    channelId: string,
+    gameId: number,
+    game: TexasHoldem
+  ): PlayerHandFactRecord[] {
+    const trackedPlayerIds = new Set(allUsers.map((user) => user.userId));
+    const handStartChips = game.getHandStartChips();
+    const completedHandOutcome = game.getCompletedHandOutcome();
+    if (handStartChips.size === 0 || !completedHandOutcome) {
+      return [];
+    }
+
+    const playerById = new Map(
+      [...game.getActivePlayers(), ...game.getInactivePlayers()].map((player) => [
+        player.getId(),
+        player,
+      ])
+    );
+    const bettingHistory = game.getBettingHistory();
+    const outcomeByPlayerId = new Map(
+      completedHandOutcome.players.map((player) => [player.playerId, player])
+    );
+
+    return Array.from(handStartChips.entries())
+      .filter(([playerId]) => trackedPlayerIds.has(playerId))
+      .map(([playerId, startChips]) => {
+        const player = playerById.get(playerId);
+        const playerActions = bettingHistory.filter(
+          (action) => action.playerId === playerId
+        );
+        let checkCount = 0;
+        let callCount = 0;
+        let betCount = 0;
+        let raiseCount = 0;
+        let allInCount = 0;
+        let raiseToTotal = 0;
+
+        playerActions.forEach((action) => {
+          switch (action.actionType) {
+            case "check":
+              checkCount += 1;
+              break;
+            case "call":
+              callCount += 1;
+              break;
+            case "bet":
+              betCount += 1;
+              break;
+            case "raise":
+              raiseCount += 1;
+              raiseToTotal += action.amount;
+              break;
+            case "all_in":
+              allInCount += 1;
+              if (action.underlyingActionType === "call") {
+                callCount += 1;
+              } else if (action.underlyingActionType === "raise") {
+                raiseCount += 1;
+                raiseToTotal += action.amount;
+              } else if (action.underlyingActionType === "bet") {
+                betCount += 1;
+              }
+              break;
+            default:
+              break;
+          }
+        });
+
+        const chipsCommitted = player?.getTotalBet() ?? 0;
+        const finalChips = player?.getChips() ?? startChips;
+        const outcome = outcomeByPlayerId.get(playerId);
+
+        return {
+          workspaceId,
+          channelId,
+          gameId,
+          playerId,
+          participated: true,
+          wonAnyPot: outcome?.wonAnyPot ?? false,
+          reachedShowdown: outcome?.reachedShowdown ?? false,
+          folded: game.getFoldedPlayers().has(playerId),
+          checkCount,
+          callCount,
+          betCount,
+          raiseCount,
+          allInCount,
+          raiseToTotal,
+          chipsCommitted,
+          chipsWon: outcome?.chipsWon ?? 0,
+          netChips: finalChips - startChips,
+        };
+      });
+  }
+
+  private recordCompletedHandFacts(data: {
+    workspaceId: string;
+    channelId: string;
+    gameId: number;
+  }): { ok: true; count: number } | { ok: false; reason: "no_game" } {
+    const activeGame = this.getPokerGame(
+      data.workspaceId,
+      data.channelId,
+      data.gameId
+    );
+    if (!activeGame) {
+      return { ok: false, reason: "no_game" };
+    }
+
+    const game = TexasHoldem.fromJson(activeGame.game);
+    const records = this.buildPlayerHandFactRecords(
+      data.workspaceId,
+      data.channelId,
+      data.gameId,
+      game
+    );
+
+    records.forEach((record) => {
+      this.insertPlayerHandFact(record);
+    });
+
+    return { ok: true, count: records.length };
+  }
+
+  async getPlayerHandStats(
+    workspaceId: string,
+    channelId: string
+  ): Promise<AggregatedPlayerHandStats[]> {
+    const rows = this.sql
+      .exec(
+        `
+			SELECT
+				playerId,
+				COUNT(*) AS handsCount,
+				SUM(participated) AS participated,
+				SUM(wonAnyPot) AS wonAnyPot,
+				SUM(reachedShowdown) AS reachedShowdown,
+				SUM(folded) AS folded,
+				SUM(checkCount) AS checkCount,
+				SUM(callCount) AS callCount,
+				SUM(betCount) AS betCount,
+				SUM(raiseCount) AS raiseCount,
+				SUM(allInCount) AS allInCount,
+				SUM(raiseToTotal) AS raiseToTotal,
+				SUM(chipsCommitted) AS chipsCommitted,
+				SUM(chipsWon) AS chipsWon,
+				SUM(netChips) AS netChips
+			FROM PlayerHandFacts
+			WHERE workspaceId = ? AND channelId = ?
+			GROUP BY playerId
+			ORDER BY playerId ASC
+		`,
+        workspaceId,
+        channelId
+      )
+      .toArray();
+
+    return allUsers.map((user) => {
+      const row = rows.find((candidate) => candidate.playerId === user.userId);
+      return {
+        playerId: user.userId,
+        handsCount: Number(row?.handsCount ?? 0),
+        participated: Number(row?.participated ?? 0),
+        wonAnyPot: Number(row?.wonAnyPot ?? 0),
+        reachedShowdown: Number(row?.reachedShowdown ?? 0),
+        folded: Number(row?.folded ?? 0),
+        checkCount: Number(row?.checkCount ?? 0),
+        callCount: Number(row?.callCount ?? 0),
+        betCount: Number(row?.betCount ?? 0),
+        raiseCount: Number(row?.raiseCount ?? 0),
+        allInCount: Number(row?.allInCount ?? 0),
+        raiseToTotal: Number(row?.raiseToTotal ?? 0),
+        chipsCommitted: Number(row?.chipsCommitted ?? 0),
+        chipsWon: Number(row?.chipsWon ?? 0),
+        netChips: Number(row?.netChips ?? 0),
+      };
+    });
+  }
+
   private finalizeHandIfEnded(
     workspaceId: string,
     channelId: string,
@@ -714,6 +984,11 @@ export class PokerDurableObject extends DurableObject<Env> {
       serializedGame,
       timestamp
     );
+    this.recordCompletedHandFacts({
+      workspaceId,
+      channelId,
+      gameId,
+    });
     this.saveChannelGameState(
       workspaceId,
       channelId,
@@ -1952,6 +2227,7 @@ const MESSAGE_HANDLERS: Record<string, Function> = {
   "^fsearch": searchFlops,
   "^context": context,
   "^stacks": showStacks,
+  "^stats$": showStats,
   "^set stacks": setStacks,
   "^lets take her to the flop": takeHerToThe,
   "^lets take her to the turn": takeHerToThe,
@@ -3437,6 +3713,33 @@ export async function showStacks(
   });
 
   await context.say({ text: message });
+}
+
+export async function showStats(
+  env: Env,
+  context: SlackAppContextWithChannelId,
+  _payload: PostedMessage
+) {
+  const stub = getDurableObject(env, context);
+  const stats = await stub.getPlayerHandStats(context.teamId!, context.channelId);
+  const trackedStats = stats.filter((player) => player.handsCount > 0);
+
+  if (trackedStats.length === 0) {
+    await context.say({
+      text: "No tracked player hand stats yet in this channel.",
+    });
+    return;
+  }
+
+  let message = "*Player Hand Stats*\n";
+  trackedStats.forEach((player) => {
+    const name =
+      userIdToName[player.playerId as keyof typeof userIdToName] ||
+      player.playerId;
+    message += `*${name}*: hands ${player.handsCount}, won ${player.wonAnyPot}, showdown ${player.reachedShowdown}, folded ${player.folded}, checks ${player.checkCount}, calls ${player.callCount}, bets ${player.betCount}, raises ${player.raiseCount}, all-ins ${player.allInCount}, raise total ${player.raiseToTotal}, committed ${player.chipsCommitted}, won chips ${player.chipsWon}, net ${player.netChips}\n`;
+  });
+
+  await context.say({ text: message.trimEnd() });
 }
 
 export async function setStacks(
