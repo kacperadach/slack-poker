@@ -2,7 +2,7 @@
 
 ## Goal
 
-Apply the same refactor pattern to **all message handlers**: keep worker handlers as thin shells and move transactional logic into the Durable Object so a single DO call handles validation, state changes, and action logging.
+Apply the same refactor pattern to **all message handlers**: keep worker handlers as thin shells and move transactional logic into the Durable Object so a single DO call handles validation and state changes.
 
 ## Approach
 
@@ -13,21 +13,19 @@ Apply the same refactor pattern to **all message handlers**: keep worker handler
 - **Durable Object (core):**
   - Validate game state.
   - Mutate game state atomically.
-  - Log `message_received` and the relevant action(s) in the same DO request.
   - Return a small result object for the worker to translate into Slack messages.
 
 ## Why
 
-- Ensures **consistency**: all state mutations + logs occur in one serialized DO request.
+- Ensures **consistency**: all state mutations occur in one serialized DO request.
 - Keeps worker code minimal and focused on I/O.
-- Improves auditability by tying message + mutation in the same transaction.
 
 ## Pattern to Reuse
 
 For each handler, follow the same shape:
 
 1. Worker builds payload → one DO call.
-2. DO validates + mutates + logs.
+2. DO validates + mutates.
 3. Worker sends Slack messages based on DO result.
 
 ## Handler Inventory
