@@ -1867,6 +1867,7 @@ const MESSAGE_HANDLERS: Record<string, Function> = {
   "^reveal": revealCards,
   "^rank": getGameState,
   "^help": help,
+  "^deployed": deployed,
   "^poke": nudgePlayer,
   "^silent poke": silentNudgePlayer,
   "^loud poke": loudNudgePlayer,
@@ -2621,6 +2622,51 @@ async function help(
       .split("\n")
       .map((cmd) => `\`${cmd}\``)
       .join("\n")}`,
+  });
+}
+
+function formatRelativeDeploymentTime(timestamp: string): string | null {
+  const deployedAt = new Date(timestamp);
+  if (Number.isNaN(deployedAt.getTime())) {
+    return null;
+  }
+
+  const elapsedSeconds = Math.max(
+    0,
+    Math.floor((Date.now() - deployedAt.getTime()) / 1000)
+  );
+
+  if (elapsedSeconds < 60) {
+    return `${elapsedSeconds} ${elapsedSeconds === 1 ? "second" : "seconds"} ago`;
+  }
+
+  const elapsedMinutes = Math.floor(elapsedSeconds / 60);
+  if (elapsedMinutes < 60) {
+    return `${elapsedMinutes} ${elapsedMinutes === 1 ? "minute" : "minutes"} ago`;
+  }
+
+  const elapsedHours = Math.floor(elapsedMinutes / 60);
+  if (elapsedHours < 24) {
+    return `${elapsedHours} ${elapsedHours === 1 ? "hour" : "hours"} ago`;
+  }
+
+  const elapsedDays = Math.floor(elapsedHours / 24);
+  return `${elapsedDays} ${elapsedDays === 1 ? "day" : "days"} ago`;
+}
+
+export async function deployed(
+  env: Env,
+  context: SlackAppContextWithChannelId,
+  _payload: PostedMessage
+) {
+  const relativeDeploymentTime = env.CF_VERSION_METADATA?.timestamp
+    ? formatRelativeDeploymentTime(env.CF_VERSION_METADATA.timestamp)
+    : null;
+
+  await context.say({
+    text: relativeDeploymentTime
+      ? `Worker deployed: ${relativeDeploymentTime}`
+      : "Worker deployment time is unavailable.",
   });
 }
 
