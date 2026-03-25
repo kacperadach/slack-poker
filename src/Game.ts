@@ -59,7 +59,6 @@ export interface HandStartPlayerSnapshot {
   seatIndex: number;
   roleFlags: PlayerRoleFlags;
   startingStack: number;
-  dealtIn: boolean;
   holeCards: Card[];
 }
 
@@ -375,7 +374,6 @@ export class TexasHoldem {
         seatIndex,
         roleFlags: this.getRoleFlags(seatIndex),
         startingStack: this.handStartChips.get(player.getId()) ?? player.getChips(),
-        dealtIn: true,
         holeCards: this.cloneCards(player.getCards()),
       })),
     };

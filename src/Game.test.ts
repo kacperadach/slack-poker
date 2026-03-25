@@ -161,7 +161,6 @@ test("Hand start snapshot records frozen context and blind actions", () => {
       seatIndex: player.seatIndex,
       roleFlags: player.roleFlags,
       startingStack: player.startingStack,
-      dealtIn: player.dealtIn,
       holeCardCount: player.holeCards.length,
     })),
     [
@@ -174,7 +173,6 @@ test("Hand start snapshot records frozen context and blind actions", () => {
           isBigBlind: false,
         },
         startingStack: 1000,
-        dealtIn: true,
         holeCardCount: 2,
       },
       {
@@ -186,7 +184,6 @@ test("Hand start snapshot records frozen context and blind actions", () => {
           isBigBlind: false,
         },
         startingStack: 1000,
-        dealtIn: true,
         holeCardCount: 2,
       },
       {
@@ -198,7 +195,6 @@ test("Hand start snapshot records frozen context and blind actions", () => {
           isBigBlind: true,
         },
         startingStack: 1000,
-        dealtIn: true,
         holeCardCount: 2,
       },
     ]
