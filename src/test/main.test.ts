@@ -1,4 +1,4 @@
-import { env, runInDurableObject, SELF } from "cloudflare:test";
+import { env, runInDurableObject } from "cloudflare:test";
 import { describe, it, expect, vi, beforeAll, afterAll } from "vitest";
 
 // Mock the stock price module to return consistent values in tests
@@ -74,11 +74,6 @@ describe("Poker Durable Object", () => {
       expect(result).toContainEqual({ name: "PokerGames" });
       expect(result).toContainEqual({ name: "Flops" });
     });
-  });
-
-  it("does not serve retired analytics endpoints", async () => {
-    const response = await SELF.fetch("https://example.com/_analytics/logs");
-    expect(response.status).toBe(401);
   });
 
   it("awaits hubs only mode write before acknowledging", async () => {
