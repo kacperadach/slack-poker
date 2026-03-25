@@ -42,7 +42,6 @@ import {
   showChips,
   showStacks,
   showStats,
-  resetStatsAndHistory,
   nudgePlayer,
   takeHerToThe,
   context,
@@ -367,10 +366,11 @@ describe("Poker Durable Object", () => {
     ]);
     expect(await getPlayerHandFacts(stub, workspaceId, channelId)).toHaveLength(2);
 
-    await resetStatsAndHistory(
-      env,
-      marcusContext,
-      createGenericMessageEvent(MARCUS_USER_ID, "reset stats")
+    const resetResult = await requestResetStatsAndHistory(
+      stub,
+      workspaceId,
+      channelId,
+      MARCUS_USER_ID
     );
 
     let channelState = await getChannelGameState(stub, workspaceId, channelId);
@@ -387,9 +387,7 @@ describe("Poker Durable Object", () => {
     expect(hands).toEqual([]);
     expect(facts).toEqual([]);
     expect(trackedStats).toEqual([]);
-    expect(sayFn).toHaveBeenCalledWith({
-      text: "Hand history and stats reset for this channel. The next hand will be game #1.",
-    });
+    expect(resetResult).toEqual({ ok: true, pending: false });
 
     await startRound(
       env,
@@ -449,18 +447,17 @@ describe("Poker Durable Object", () => {
       createGenericMessageEvent(MARCUS_USER_ID, "deal")
     );
 
-    await resetStatsAndHistory(
-      env,
-      marcusContext,
-      createGenericMessageEvent(MARCUS_USER_ID, "reset stats")
+    const resetResult = await requestResetStatsAndHistory(
+      stub,
+      workspaceId,
+      channelId,
+      MARCUS_USER_ID
     );
 
     expect(await getPokerGames(stub, workspaceId, channelId)).toEqual([
       { gameId: 1, endedAt: null },
     ]);
-    expect(sayFn).toHaveBeenCalledWith({
-      text: "Hand history and stats will reset after the current hand ends. The next hand will be game #1.",
-    });
+    expect(resetResult).toEqual({ ok: true, pending: true });
 
     const activeHandState = await getGameState(stub, workspaceId, channelId);
     const currentPlayer = activeHandState.activePlayers[activeHandState.currentPlayerIndex];
@@ -5085,6 +5082,26 @@ function getPlayerHandStats(
 ) {
   return runInDurableObject(stub, async (instance) => {
     return instance.getPlayerHandStats(workspaceId, channelId);
+  });
+}
+
+function requestResetStatsAndHistory(
+  stub: DurableObjectStub,
+  workspaceId: string,
+  channelId: string,
+  playerId: string
+) {
+  return runInDurableObject(stub, async (instance) => {
+    return instance.resetStatsAndHistory({
+      workspaceId,
+      channelId,
+      playerId,
+      messageText: "reset stats",
+      normalizedText: "reset stats",
+      handlerKey: "reset stats",
+      slackMessageTs: "test-ts",
+      timestamp: Date.now(),
+    });
   });
 }
 

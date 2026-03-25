@@ -2380,7 +2380,6 @@ const MESSAGE_HANDLERS: Record<string, Function> = {
   "^context": context,
   "^stacks": showStacks,
   "^stats$": showStats,
-  "^reset stats$": resetStatsAndHistory,
   "^set stacks": setStacks,
   "^lets take her to the flop": takeHerToThe,
   "^lets take her to the turn": takeHerToThe,
@@ -3893,48 +3892,6 @@ export async function showStats(
   });
 
   await context.say({ text: message.trimEnd() });
-}
-
-export async function resetStatsAndHistory(
-  env: Env,
-  context: SlackAppContextWithChannelId,
-  payload: PostedMessage,
-  meta?: HandlerMeta
-) {
-  const stub = getDurableObject(env, context);
-  const rawMessageText = meta?.messageText ?? payload.text ?? "";
-  const normalizedText =
-    meta?.normalizedText ?? cleanMessageText(rawMessageText);
-  const handlerKey = meta?.handlerKey ?? "reset stats";
-  const slackMessageTs = meta?.slackMessageTs ?? payload.ts ?? "";
-  const timestamp = meta?.timestamp ?? Date.now();
-
-  const result = await stub.resetStatsAndHistory({
-    workspaceId: context.teamId!,
-    channelId: context.channelId,
-    playerId: context.userId!,
-    messageText: rawMessageText,
-    normalizedText,
-    handlerKey,
-    slackMessageTs,
-    timestamp,
-  });
-
-  if (!result.ok) {
-    await context.say({ text: NO_GAME_EXISTS_MESSAGE });
-    return;
-  }
-
-  if (result.pending) {
-    await context.say({
-      text: "Hand history and stats will reset after the current hand ends. The next hand will be game #1.",
-    });
-    return;
-  }
-
-  await context.say({
-    text: "Hand history and stats reset for this channel. The next hand will be game #1.",
-  });
 }
 
 export async function setStacks(
