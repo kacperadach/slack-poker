@@ -50,18 +50,6 @@ type ActiveGameRecord = {
   endedAt: number | null;
 };
 
-type CompletedHandHistoryRecord = {
-  gameId: number;
-  createdAt: number;
-  endedAt: number;
-  handHistory: {
-    handStartSnapshot: SerializedGame["handHistory"]["handStartSnapshot"];
-    actionHistory: SerializedGame["handHistory"]["actionHistory"];
-    boardSnapshot: SerializedGame["handHistory"]["boardSnapshot"];
-    handEndSnapshot: SerializedGame["handHistory"]["handEndSnapshot"];
-  };
-};
-
 type ScopedGameContext = {
   scope: "channel" | "active";
   channelState: ChannelGameStateRecord;
@@ -709,35 +697,6 @@ export class PokerDurableObject extends DurableObject<Env> {
       game: JSON.parse(row.value.game as string) as SerializedGame,
       createdAt: Number(row.value.createdAt),
       endedAt: row.value.endedAt === null ? null : Number(row.value.endedAt),
-    };
-  }
-
-  getCompletedHandHistory(
-    workspaceId: string,
-    channelId: string,
-    gameId: number
-  ): CompletedHandHistoryRecord | null {
-    const pokerGame = this.getPokerGame(workspaceId, channelId, gameId);
-    if (!pokerGame || pokerGame.endedAt === null) {
-      return null;
-    }
-
-    return {
-      gameId: pokerGame.gameId,
-      createdAt: pokerGame.createdAt,
-      endedAt: pokerGame.endedAt,
-      handHistory: {
-        handStartSnapshot:
-          pokerGame.game.handHistory?.handStartSnapshot ?? null,
-        actionHistory: pokerGame.game.handHistory?.actionHistory ?? [],
-        boardSnapshot:
-          pokerGame.game.handHistory?.boardSnapshot ?? {
-            flop: [],
-            turn: [],
-            river: [],
-          },
-        handEndSnapshot: pokerGame.game.handHistory?.handEndSnapshot ?? null,
-      },
     };
   }
 
@@ -2177,7 +2136,6 @@ const MESSAGE_HANDLERS: Record<string, Function> = {
   "^reveal card": revealSingleCard,
   "^reveal": revealCards,
   "^rank": getGameState,
-  "^history:\\d+$": showHandHistory,
   "^help": help,
   "^deployed": deployed,
   "^poke": nudgePlayer,
@@ -3777,86 +3735,6 @@ export async function showStats(
   });
 
   await context.say({ text: message.trimEnd() });
-}
-
-function formatTimestamp(timestamp: number): string {
-  return new Date(timestamp).toLocaleString("en-US", {
-    year: "numeric",
-    month: "2-digit",
-    day: "2-digit",
-    hour: "2-digit",
-    minute: "2-digit",
-    second: "2-digit",
-  });
-}
-
-function splitSlackCodeBlock(label: string, content: string): string[] {
-  const maxChunkLength = 3500;
-  if (content.length <= maxChunkLength) {
-    return [`*${label}*\n\`\`\`json\n${content}\n\`\`\``];
-  }
-
-  const chunks: string[] = [];
-  let start = 0;
-  let part = 1;
-  while (start < content.length) {
-    const end = Math.min(start + maxChunkLength, content.length);
-    chunks.push(
-      `*${label} (part ${part})*\n\`\`\`json\n${content.slice(start, end)}\n\`\`\``
-    );
-    start = end;
-    part += 1;
-  }
-
-  return chunks;
-}
-
-export async function showHandHistory(
-  env: Env,
-  context: SlackAppContextWithChannelId,
-  payload: PostedMessage,
-  meta?: HandlerMeta
-) {
-  const normalizedText =
-    meta?.normalizedText ?? cleanMessageText(payload.text ?? "");
-  const gameIdMatch = normalizedText.match(/^history:(\d+)$/);
-
-  if (!gameIdMatch) {
-    await context.say({
-      text: ensureNarpBrainOnError(
-        'Invalid format! Please use "history:{gameId}"'
-      ),
-    });
-    return;
-  }
-
-  const gameId = Number.parseInt(gameIdMatch[1], 10);
-  const stub = getDurableObject(env, context);
-  const handHistory = await stub.getCompletedHandHistory(
-    context.teamId!,
-    context.channelId,
-    gameId
-  );
-
-  if (!handHistory) {
-    await context.say({
-      text: ensureNarpBrainOnError(
-        `No finished hand found for game #${gameId} in this channel.`
-      ),
-    });
-    return;
-  }
-
-  const header = `*Hand History #${handHistory.gameId}*\nStarted: ${formatTimestamp(
-    handHistory.createdAt
-  )}\nEnded: ${formatTimestamp(handHistory.endedAt)}`;
-  await context.say({ text: header });
-
-  const historyDump = JSON.stringify(handHistory.handHistory, null, 2);
-  const chunks = splitSlackCodeBlock(`history:${handHistory.gameId}`, historyDump);
-  for (const chunk of chunks) {
-    await context.say({ text: chunk });
-  }
 }
 
 export async function setStacks(
