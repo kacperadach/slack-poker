@@ -34,6 +34,29 @@ import { ensureNarpBrainOnError } from "./slackErrorEmoji";
 
 // Durable Object only needs to read/write game to SQL
 
+type SerializedGame = ReturnType<TexasHoldem["toJson"]>;
+type PublicGameState = ReturnType<TexasHoldem["getState"]>;
+
+type ChannelGameStateRecord = {
+  game: SerializedGame;
+  nextGameId: number;
+  activeGameId: number | null;
+};
+
+type ActiveGameRecord = {
+  gameId: number;
+  game: SerializedGame;
+  createdAt: number;
+  endedAt: number | null;
+};
+
+type ScopedGameContext = {
+  scope: "channel" | "active";
+  channelState: ChannelGameStateRecord;
+  game: TexasHoldem;
+  gameId?: number;
+};
+
 /** A Durable Object's behavior is defined in an exported Javascript class */
 export class PokerDurableObject extends DurableObject<Env> {
   sql: SqlStorage;
@@ -47,11 +70,26 @@ export class PokerDurableObject extends DurableObject<Env> {
   constructor(ctx: DurableObjectState, env: Env) {
     super(ctx, env);
     this.sql = ctx.storage.sql;
+    this.migratePokerGamesSchemaIfNeeded();
     this.sql.exec(`
 			CREATE TABLE IF NOT EXISTS PokerGames (
 				workspaceId TEXT NOT NULL,
 				channelId TEXT NOT NULL,
+				gameId INTEGER NOT NULL,
 				game JSON NOT NULL,
+				createdAt INTEGER NOT NULL,
+				endedAt INTEGER,
+				PRIMARY KEY (workspaceId, channelId, gameId)
+			);
+		`);
+
+    this.sql.exec(`
+			CREATE TABLE IF NOT EXISTS ChannelGameState (
+				workspaceId TEXT NOT NULL,
+				channelId TEXT NOT NULL,
+				game JSON NOT NULL,
+				nextGameId INTEGER NOT NULL,
+				activeGameId INTEGER,
 				PRIMARY KEY (workspaceId, channelId)
 			);
 		`);
@@ -340,7 +378,7 @@ export class PokerDurableObject extends DurableObject<Env> {
       channelId
     );
 
-    const flops = [];
+    const flops: Array<{ createdAt: number; flop: string }> = [];
     for (const row of result) {
       flops.push({
         createdAt: row.createdAt as number,
@@ -366,33 +404,59 @@ export class PokerDurableObject extends DurableObject<Env> {
       `%${flopSearch}%`
     );
 
-    const flops = [];
+    const flops: Array<{ createdAt: number; flop: string }> = [];
     for (const row of result) {
-      flops.push(row);
+      flops.push({
+        createdAt: row.createdAt as number,
+        flop: row.flop as string,
+      });
     }
 
     return flops;
   }
 
-  createGame(workspaceId: string, channelId: string, game: any): void {
-    this.sql.exec(
+  private hasTable(tableName: string): boolean {
+    const result = this.sql.exec(
       `
-			INSERT INTO PokerGames (workspaceId, channelId, game)
-			VALUES (?, ?, ?)
-			ON CONFLICT(workspaceId, channelId) DO UPDATE SET
-				game = excluded.game
+			SELECT name FROM sqlite_master
+			WHERE type = 'table' AND name = ?
 		`,
-      workspaceId,
-      channelId,
-      game
+      tableName
     );
+    return result.next().done === false;
   }
 
-  async fetchGame(workspaceId: string, channelId: string): Promise<any | null> {
-    const game = this.sql
+  private migratePokerGamesSchemaIfNeeded(): void {
+    if (!this.hasTable("PokerGames")) {
+      return;
+    }
+
+    const columns = this.sql
+      .exec<{ name: string }>(`PRAGMA table_info(PokerGames)`)
+      .toArray()
+      .map((row) => row.name);
+
+    if (columns.length === 0 || columns.includes("gameId")) {
+      return;
+    }
+
+    if (!this.hasTable("LegacyPokerGames")) {
+      this.sql.exec(`ALTER TABLE PokerGames RENAME TO LegacyPokerGames`);
+    }
+  }
+
+  private loadLegacyGame(
+    workspaceId: string,
+    channelId: string
+  ): SerializedGame | null {
+    if (!this.hasTable("LegacyPokerGames")) {
+      return null;
+    }
+
+    const row = this.sql
       .exec(
         `
-			SELECT game FROM PokerGames
+			SELECT game FROM LegacyPokerGames
 			WHERE workspaceId = ? AND channelId = ?
 		`,
         workspaceId,
@@ -400,11 +464,334 @@ export class PokerDurableObject extends DurableObject<Env> {
       )
       .next();
 
-    if (!game.value) {
+    if (!row.value) {
       return null;
     }
 
-    return JSON.parse(game.value.game as string);
+    return JSON.parse(row.value.game as string) as SerializedGame;
+  }
+
+  private deleteLegacyGame(workspaceId: string, channelId: string): void {
+    if (!this.hasTable("LegacyPokerGames")) {
+      return;
+    }
+
+    this.sql.exec(
+      `
+			DELETE FROM LegacyPokerGames
+			WHERE workspaceId = ? AND channelId = ?
+		`,
+      workspaceId,
+      channelId
+    );
+  }
+
+  private saveChannelGameState(
+    workspaceId: string,
+    channelId: string,
+    game: string,
+    nextGameId: number,
+    activeGameId: number | null
+  ): void {
+    this.sql.exec(
+      `
+			INSERT INTO ChannelGameState (workspaceId, channelId, game, nextGameId, activeGameId)
+			VALUES (?, ?, ?, ?, ?)
+			ON CONFLICT(workspaceId, channelId) DO UPDATE SET
+				game = excluded.game,
+				nextGameId = excluded.nextGameId,
+				activeGameId = excluded.activeGameId
+		`,
+      workspaceId,
+      channelId,
+      game,
+      nextGameId,
+      activeGameId
+    );
+  }
+
+  private getChannelGameState(
+    workspaceId: string,
+    channelId: string
+  ): ChannelGameStateRecord | null {
+    const row = this.sql
+      .exec(
+        `
+			SELECT game, nextGameId, activeGameId
+			FROM ChannelGameState
+			WHERE workspaceId = ? AND channelId = ?
+		`,
+        workspaceId,
+        channelId
+      )
+      .next();
+
+    if (!row.value) {
+      return null;
+    }
+
+    return {
+      game: JSON.parse(row.value.game as string) as SerializedGame,
+      nextGameId: Number(row.value.nextGameId),
+      activeGameId:
+        row.value.activeGameId === null
+          ? null
+          : Number(row.value.activeGameId),
+    };
+  }
+
+  private loadChannelGameState(
+    workspaceId: string,
+    channelId: string
+  ): ChannelGameStateRecord | null {
+    const existing = this.getChannelGameState(workspaceId, channelId);
+    if (existing) {
+      return existing;
+    }
+
+    const legacyGame = this.loadLegacyGame(workspaceId, channelId);
+    if (!legacyGame) {
+      return null;
+    }
+
+    const now = Date.now();
+    const legacyTexasHoldem = TexasHoldem.fromJson(legacyGame);
+
+    if (legacyTexasHoldem.getGameState() === GameState.WaitingForPlayers) {
+      this.saveChannelGameState(
+        workspaceId,
+        channelId,
+        JSON.stringify(legacyTexasHoldem.toJson()),
+        1,
+        null
+      );
+    } else {
+      this.insertPokerGame(
+        workspaceId,
+        channelId,
+        1,
+        JSON.stringify(legacyTexasHoldem.toJson()),
+        now,
+        null
+      );
+      this.saveChannelGameState(
+        workspaceId,
+        channelId,
+        JSON.stringify(legacyTexasHoldem.toJson()),
+        2,
+        1
+      );
+    }
+
+    this.deleteLegacyGame(workspaceId, channelId);
+    return this.getChannelGameState(workspaceId, channelId);
+  }
+
+  private insertPokerGame(
+    workspaceId: string,
+    channelId: string,
+    gameId: number,
+    game: string,
+    createdAt: number,
+    endedAt: number | null
+  ): void {
+    this.sql.exec(
+      `
+			INSERT INTO PokerGames (workspaceId, channelId, gameId, game, createdAt, endedAt)
+			VALUES (?, ?, ?, ?, ?, ?)
+		`,
+      workspaceId,
+      channelId,
+      gameId,
+      game,
+      createdAt,
+      endedAt
+    );
+  }
+
+  private getPokerGame(
+    workspaceId: string,
+    channelId: string,
+    gameId: number
+  ): ActiveGameRecord | null {
+    const row = this.sql
+      .exec(
+        `
+			SELECT gameId, game, createdAt, endedAt
+			FROM PokerGames
+			WHERE workspaceId = ? AND channelId = ? AND gameId = ?
+		`,
+        workspaceId,
+        channelId,
+        gameId
+      )
+      .next();
+
+    if (!row.value) {
+      return null;
+    }
+
+    return {
+      gameId: Number(row.value.gameId),
+      game: JSON.parse(row.value.game as string) as SerializedGame,
+      createdAt: Number(row.value.createdAt),
+      endedAt: row.value.endedAt === null ? null : Number(row.value.endedAt),
+    };
+  }
+
+  private loadActiveGame(
+    workspaceId: string,
+    channelId: string
+  ): ActiveGameRecord | null {
+    const channelState = this.loadChannelGameState(workspaceId, channelId);
+    if (!channelState || channelState.activeGameId === null) {
+      return null;
+    }
+
+    return this.getPokerGame(
+      workspaceId,
+      channelId,
+      channelState.activeGameId
+    );
+  }
+
+  private createHandFromChannelState(
+    workspaceId: string,
+    channelId: string
+  ): { gameId: number; game: TexasHoldem; channelState: ChannelGameStateRecord } | null {
+    const channelState = this.loadChannelGameState(workspaceId, channelId);
+    if (!channelState || channelState.activeGameId !== null) {
+      return null;
+    }
+
+    return {
+      gameId: channelState.nextGameId,
+      game: TexasHoldem.fromJson(channelState.game),
+      channelState,
+    };
+  }
+
+  private saveActiveHand(
+    workspaceId: string,
+    channelId: string,
+    gameId: number,
+    game: string,
+    endedAt: number | null = null
+  ): void {
+    this.sql.exec(
+      `
+			UPDATE PokerGames
+			SET game = ?, endedAt = ?
+			WHERE workspaceId = ? AND channelId = ? AND gameId = ?
+		`,
+      game,
+      endedAt,
+      workspaceId,
+      channelId,
+      gameId
+    );
+  }
+
+  private finalizeHandIfEnded(
+    workspaceId: string,
+    channelId: string,
+    gameId: number,
+    game: TexasHoldem,
+    channelState: ChannelGameStateRecord,
+    timestamp: number
+  ): void {
+    const serializedGame = JSON.stringify(game.toJson());
+
+    if (game.getGameState() !== GameState.WaitingForPlayers) {
+      this.saveActiveHand(workspaceId, channelId, gameId, serializedGame, null);
+      return;
+    }
+
+    this.saveActiveHand(
+      workspaceId,
+      channelId,
+      gameId,
+      serializedGame,
+      timestamp
+    );
+    this.saveChannelGameState(
+      workspaceId,
+      channelId,
+      serializedGame,
+      channelState.nextGameId,
+      null
+    );
+  }
+
+  private loadScopedGame(
+    workspaceId: string,
+    channelId: string
+  ): ScopedGameContext | null {
+    const channelState = this.loadChannelGameState(workspaceId, channelId);
+    if (!channelState) {
+      return null;
+    }
+
+    if (channelState.activeGameId !== null) {
+      const activeGame = this.getPokerGame(
+        workspaceId,
+        channelId,
+        channelState.activeGameId
+      );
+      if (activeGame) {
+        return {
+          scope: "active",
+          channelState,
+          gameId: activeGame.gameId,
+          game: TexasHoldem.fromJson(activeGame.game),
+        };
+      }
+    }
+
+    return {
+      scope: "channel",
+      channelState,
+      game: TexasHoldem.fromJson(channelState.game),
+    };
+  }
+
+  private persistScopedGame(
+    workspaceId: string,
+    channelId: string,
+    scopedGame: ScopedGameContext,
+    timestamp: number
+  ): void {
+    const serializedGame = JSON.stringify(scopedGame.game.toJson());
+
+    if (scopedGame.scope === "active") {
+      this.finalizeHandIfEnded(
+        workspaceId,
+        channelId,
+        scopedGame.gameId!,
+        scopedGame.game,
+        scopedGame.channelState,
+        timestamp
+      );
+      return;
+    }
+
+    this.saveChannelGameState(
+      workspaceId,
+      channelId,
+      serializedGame,
+      scopedGame.channelState.nextGameId,
+      scopedGame.channelState.activeGameId
+    );
+  }
+
+  async fetchGame(workspaceId: string, channelId: string): Promise<any | null> {
+    const activeGame = this.loadActiveGame(workspaceId, channelId);
+    if (activeGame) {
+      return activeGame.game;
+    }
+
+    const channelState = this.loadChannelGameState(workspaceId, channelId);
+    return channelState?.game ?? null;
   }
 
   async newGame(data: {
@@ -417,6 +804,10 @@ export class PokerDurableObject extends DurableObject<Env> {
     slackMessageTs: string;
     timestamp: number;
   }): Promise<{ ok: true } | { ok: false; blockingPlayerId: string }> {
+    const channelState = this.loadChannelGameState(
+      data.workspaceId,
+      data.channelId
+    );
     const existing = await this.fetchGame(data.workspaceId, data.channelId);
     if (existing) {
       const game = TexasHoldem.fromJson(existing);
@@ -430,13 +821,22 @@ export class PokerDurableObject extends DurableObject<Env> {
       if (blockingPlayer) {
         return { ok: false, blockingPlayerId: blockingPlayer.getId() };
       }
+      if (channelState?.activeGameId !== null) {
+        const fallbackPlayer = allPlayers[0];
+        return {
+          ok: false,
+          blockingPlayerId: fallbackPlayer?.getId() ?? data.playerId,
+        };
+      }
     }
 
     const newGameInstance = new TexasHoldem();
-    this.createGame(
+    this.saveChannelGameState(
       data.workspaceId,
       data.channelId,
-      JSON.stringify(newGameInstance.toJson())
+      JSON.stringify(newGameInstance.toJson()),
+      channelState?.nextGameId ?? 1,
+      null
     );
 
     return { ok: true };
@@ -455,16 +855,20 @@ export class PokerDurableObject extends DurableObject<Env> {
     | { ok: true; game: ReturnType<TexasHoldem["getState"]> }
     | { ok: false; reason: "no_game" }
   > {
-    const existing = await this.fetchGame(data.workspaceId, data.channelId);
-    if (!existing) {
+    const scopedGame = this.loadScopedGame(data.workspaceId, data.channelId);
+    if (!scopedGame) {
       return { ok: false, reason: "no_game" };
     }
 
-    const game = TexasHoldem.fromJson(existing);
-    game.addPlayer(data.playerId);
-    this.saveGame(data.workspaceId, data.channelId, JSON.stringify(game.toJson()));
+    scopedGame.game.addPlayer(data.playerId);
+    this.persistScopedGame(
+      data.workspaceId,
+      data.channelId,
+      scopedGame,
+      data.timestamp
+    );
 
-    return { ok: true, game: game.getState() };
+    return { ok: true, game: scopedGame.game.getState() };
   }
 
   async buyIn(data: {
@@ -481,17 +885,20 @@ export class PokerDurableObject extends DurableObject<Env> {
     | { ok: true; game: ReturnType<TexasHoldem["getState"]> }
     | { ok: false; reason: "no_game" }
   > {
-    const existing = await this.fetchGame(data.workspaceId, data.channelId);
-    if (!existing) {
+    const scopedGame = this.loadScopedGame(data.workspaceId, data.channelId);
+    if (!scopedGame) {
       return { ok: false, reason: "no_game" };
     }
 
-    const game = TexasHoldem.fromJson(existing);
+    scopedGame.game.buyIn(data.playerId, data.amount);
+    this.persistScopedGame(
+      data.workspaceId,
+      data.channelId,
+      scopedGame,
+      data.timestamp
+    );
 
-    game.buyIn(data.playerId, data.amount);
-    this.saveGame(data.workspaceId, data.channelId, JSON.stringify(game.toJson()));
-
-    return { ok: true, game: game.getState() };
+    return { ok: true, game: scopedGame.game.getState() };
   }
 
   async setStacks(data: {
@@ -517,14 +924,12 @@ export class PokerDurableObject extends DurableObject<Env> {
       }
     | { ok: false; reason: "no_game" | "round_in_progress" }
   > {
-    const existing = await this.fetchGame(data.workspaceId, data.channelId);
-    if (!existing) {
+    const scopedGame = this.loadScopedGame(data.workspaceId, data.channelId);
+    if (!scopedGame) {
       return { ok: false, reason: "no_game" };
     }
 
-    const game = TexasHoldem.fromJson(existing);
-
-    if (game.getGameState() !== GameState.WaitingForPlayers) {
+    if (scopedGame.game.getGameState() !== GameState.WaitingForPlayers) {
       return { ok: false, reason: "round_in_progress" };
     }
 
@@ -536,8 +941,8 @@ export class PokerDurableObject extends DurableObject<Env> {
     }> = [];
 
     const allPlayers = [
-      ...game.getActivePlayers(),
-      ...game.getInactivePlayers(),
+      ...scopedGame.game.getActivePlayers(),
+      ...scopedGame.game.getInactivePlayers(),
     ];
 
     allPlayers.forEach((player) => {
@@ -552,9 +957,14 @@ export class PokerDurableObject extends DurableObject<Env> {
       });
     });
 
-    this.saveGame(data.workspaceId, data.channelId, JSON.stringify(game.toJson()));
+    this.persistScopedGame(
+      data.workspaceId,
+      data.channelId,
+      scopedGame,
+      data.timestamp
+    );
 
-    return { ok: true, game: game.getState(), adjustments };
+    return { ok: true, game: scopedGame.game.getState(), adjustments };
   }
 
   async fold(data: {
@@ -570,14 +980,25 @@ export class PokerDurableObject extends DurableObject<Env> {
     | { ok: true; game: ReturnType<TexasHoldem["getState"]> }
     | { ok: false; reason: "no_game" }
   > {
-    const existing = await this.fetchGame(data.workspaceId, data.channelId);
-    if (!existing) {
+    const activeGame = this.loadActiveGame(data.workspaceId, data.channelId);
+    if (!activeGame) {
       return { ok: false, reason: "no_game" };
     }
 
-    const game = TexasHoldem.fromJson(existing);
+    const channelState = this.loadChannelGameState(
+      data.workspaceId,
+      data.channelId
+    )!;
+    const game = TexasHoldem.fromJson(activeGame.game);
     game.fold(data.playerId);
-    this.saveGame(data.workspaceId, data.channelId, JSON.stringify(game.toJson()));
+    this.finalizeHandIfEnded(
+      data.workspaceId,
+      data.channelId,
+      activeGame.gameId,
+      game,
+      channelState,
+      data.timestamp
+    );
 
     return { ok: true, game: game.getState() };
   }
@@ -595,14 +1016,25 @@ export class PokerDurableObject extends DurableObject<Env> {
     | { ok: true; game: ReturnType<TexasHoldem["getState"]> }
     | { ok: false; reason: "no_game" }
   > {
-    const existing = await this.fetchGame(data.workspaceId, data.channelId);
-    if (!existing) {
+    const activeGame = this.loadActiveGame(data.workspaceId, data.channelId);
+    if (!activeGame) {
       return { ok: false, reason: "no_game" };
     }
 
-    const game = TexasHoldem.fromJson(existing);
+    const channelState = this.loadChannelGameState(
+      data.workspaceId,
+      data.channelId
+    )!;
+    const game = TexasHoldem.fromJson(activeGame.game);
     game.check(data.playerId);
-    this.saveGame(data.workspaceId, data.channelId, JSON.stringify(game.toJson()));
+    this.finalizeHandIfEnded(
+      data.workspaceId,
+      data.channelId,
+      activeGame.gameId,
+      game,
+      channelState,
+      data.timestamp
+    );
 
     return { ok: true, game: game.getState() };
   }
@@ -620,14 +1052,25 @@ export class PokerDurableObject extends DurableObject<Env> {
     | { ok: true; game: ReturnType<TexasHoldem["getState"]> }
     | { ok: false; reason: "no_game" }
   > {
-    const existing = await this.fetchGame(data.workspaceId, data.channelId);
-    if (!existing) {
+    const activeGame = this.loadActiveGame(data.workspaceId, data.channelId);
+    if (!activeGame) {
       return { ok: false, reason: "no_game" };
     }
 
-    const game = TexasHoldem.fromJson(existing);
+    const channelState = this.loadChannelGameState(
+      data.workspaceId,
+      data.channelId
+    )!;
+    const game = TexasHoldem.fromJson(activeGame.game);
     game.call(data.playerId);
-    this.saveGame(data.workspaceId, data.channelId, JSON.stringify(game.toJson()));
+    this.finalizeHandIfEnded(
+      data.workspaceId,
+      data.channelId,
+      activeGame.gameId,
+      game,
+      channelState,
+      data.timestamp
+    );
 
     return { ok: true, game: game.getState() };
   }
@@ -646,14 +1089,25 @@ export class PokerDurableObject extends DurableObject<Env> {
     | { ok: true; game: ReturnType<TexasHoldem["getState"]> }
     | { ok: false; reason: "no_game" }
   > {
-    const existing = await this.fetchGame(data.workspaceId, data.channelId);
-    if (!existing) {
+    const activeGame = this.loadActiveGame(data.workspaceId, data.channelId);
+    if (!activeGame) {
       return { ok: false, reason: "no_game" };
     }
 
-    const game = TexasHoldem.fromJson(existing);
+    const channelState = this.loadChannelGameState(
+      data.workspaceId,
+      data.channelId
+    )!;
+    const game = TexasHoldem.fromJson(activeGame.game);
     game.bet(data.playerId, data.amount);
-    this.saveGame(data.workspaceId, data.channelId, JSON.stringify(game.toJson()));
+    this.finalizeHandIfEnded(
+      data.workspaceId,
+      data.channelId,
+      activeGame.gameId,
+      game,
+      channelState,
+      data.timestamp
+    );
 
     return { ok: true, game: game.getState() };
   }
@@ -671,14 +1125,25 @@ export class PokerDurableObject extends DurableObject<Env> {
     | { ok: true; game: ReturnType<TexasHoldem["getState"]> }
     | { ok: false; reason: "no_game" }
   > {
-    const existing = await this.fetchGame(data.workspaceId, data.channelId);
-    if (!existing) {
+    const activeGame = this.loadActiveGame(data.workspaceId, data.channelId);
+    if (!activeGame) {
       return { ok: false, reason: "no_game" };
     }
 
-    const game = TexasHoldem.fromJson(existing);
+    const channelState = this.loadChannelGameState(
+      data.workspaceId,
+      data.channelId
+    )!;
+    const game = TexasHoldem.fromJson(activeGame.game);
     game.allIn(data.playerId);
-    this.saveGame(data.workspaceId, data.channelId, JSON.stringify(game.toJson()));
+    this.finalizeHandIfEnded(
+      data.workspaceId,
+      data.channelId,
+      activeGame.gameId,
+      game,
+      channelState,
+      data.timestamp
+    );
 
     return { ok: true, game: game.getState() };
   }
@@ -693,19 +1158,70 @@ export class PokerDurableObject extends DurableObject<Env> {
     slackMessageTs: string;
     timestamp: number;
   }): Promise<
-    | { ok: true; game: ReturnType<TexasHoldem["getState"]> }
+    | { ok: true; game: ReturnType<TexasHoldem["getState"]>; gameId: number }
     | { ok: false; reason: "no_game" }
   > {
-    const existing = await this.fetchGame(data.workspaceId, data.channelId);
-    if (!existing) {
+    const existingActiveGame = this.loadActiveGame(
+      data.workspaceId,
+      data.channelId
+    );
+    if (existingActiveGame) {
+      const channelState = this.loadChannelGameState(
+        data.workspaceId,
+        data.channelId
+      )!;
+      const game = TexasHoldem.fromJson(existingActiveGame.game);
+      game.startRound(data.playerId);
+      this.finalizeHandIfEnded(
+        data.workspaceId,
+        data.channelId,
+        existingActiveGame.gameId,
+        game,
+        channelState,
+        data.timestamp
+      );
+      return { ok: true, game: game.getState(), gameId: existingActiveGame.gameId };
+    }
+
+    const hand = this.createHandFromChannelState(
+      data.workspaceId,
+      data.channelId
+    );
+    if (!hand) {
       return { ok: false, reason: "no_game" };
     }
 
-    const game = TexasHoldem.fromJson(existing);
-    game.startRound(data.playerId);
-    this.saveGame(data.workspaceId, data.channelId, JSON.stringify(game.toJson()));
+    hand.game.startRound(data.playerId);
+    this.insertPokerGame(
+      data.workspaceId,
+      data.channelId,
+      hand.gameId,
+      JSON.stringify(hand.game.toJson()),
+      data.timestamp,
+      hand.game.getGameState() === GameState.WaitingForPlayers
+        ? data.timestamp
+        : null
+    );
+    this.saveChannelGameState(
+      data.workspaceId,
+      data.channelId,
+      JSON.stringify(hand.channelState.game),
+      hand.channelState.nextGameId + 1,
+      hand.game.getGameState() === GameState.WaitingForPlayers
+        ? null
+        : hand.gameId
+    );
+    if (hand.game.getGameState() === GameState.WaitingForPlayers) {
+      this.saveChannelGameState(
+        data.workspaceId,
+        data.channelId,
+        JSON.stringify(hand.game.toJson()),
+        hand.channelState.nextGameId + 1,
+        null
+      );
+    }
 
-    return { ok: true, game: game.getState() };
+    return { ok: true, game: hand.game.getState(), gameId: hand.gameId };
   }
 
   async takeHerToThe(data: {
@@ -722,12 +1238,16 @@ export class PokerDurableObject extends DurableObject<Env> {
     | { ok: true; game: ReturnType<TexasHoldem["getState"]> }
     | { ok: false; reason: "no_game" | "invalid_state" }
   > {
-    const existing = await this.fetchGame(data.workspaceId, data.channelId);
-    if (!existing) {
+    const activeGame = this.loadActiveGame(data.workspaceId, data.channelId);
+    if (!activeGame) {
       return { ok: false, reason: "no_game" };
     }
 
-    const game = TexasHoldem.fromJson(existing);
+    const channelState = this.loadChannelGameState(
+      data.workspaceId,
+      data.channelId
+    )!;
+    const game = TexasHoldem.fromJson(activeGame.game);
     const currentState = game.getGameState();
 
     // Validate game state matches requested phase transition
@@ -743,7 +1263,14 @@ export class PokerDurableObject extends DurableObject<Env> {
     }
 
     game.callOrCheck(data.playerId);
-    this.saveGame(data.workspaceId, data.channelId, JSON.stringify(game.toJson()));
+    this.finalizeHandIfEnded(
+      data.workspaceId,
+      data.channelId,
+      activeGame.gameId,
+      game,
+      channelState,
+      data.timestamp
+    );
 
     return { ok: true, game: game.getState() };
   }
@@ -761,12 +1288,16 @@ export class PokerDurableObject extends DurableObject<Env> {
     | { ok: true; game: ReturnType<TexasHoldem["getState"]> }
     | { ok: false; reason: "no_game" | "not_river" }
   > {
-    const existing = await this.fetchGame(data.workspaceId, data.channelId);
-    if (!existing) {
+    const activeGame = this.loadActiveGame(data.workspaceId, data.channelId);
+    if (!activeGame) {
       return { ok: false, reason: "no_game" };
     }
 
-    const game = TexasHoldem.fromJson(existing);
+    const channelState = this.loadChannelGameState(
+      data.workspaceId,
+      data.channelId
+    )!;
+    const game = TexasHoldem.fromJson(activeGame.game);
     const currentState = game.getGameState();
 
     if (currentState !== GameState.River) {
@@ -774,7 +1305,14 @@ export class PokerDurableObject extends DurableObject<Env> {
     }
 
     game.callOrCheck(data.playerId);
-    this.saveGame(data.workspaceId, data.channelId, JSON.stringify(game.toJson()));
+    this.finalizeHandIfEnded(
+      data.workspaceId,
+      data.channelId,
+      activeGame.gameId,
+      game,
+      channelState,
+      data.timestamp
+    );
 
     return { ok: true, game: game.getState() };
   }
@@ -792,14 +1330,56 @@ export class PokerDurableObject extends DurableObject<Env> {
     | { ok: true; game: ReturnType<TexasHoldem["getState"]> }
     | { ok: false; reason: "no_game" }
   > {
-    const existing = await this.fetchGame(data.workspaceId, data.channelId);
-    if (!existing) {
-      return { ok: false, reason: "no_game" };
+    const activeGame = this.loadActiveGame(data.workspaceId, data.channelId);
+    if (!activeGame) {
+      const hand = this.createHandFromChannelState(
+        data.workspaceId,
+        data.channelId
+      );
+      if (!hand) {
+        return { ok: false, reason: "no_game" };
+      }
+
+      hand.game.preDeal(data.playerId);
+      this.insertPokerGame(
+        data.workspaceId,
+        data.channelId,
+        hand.gameId,
+        JSON.stringify(hand.game.toJson()),
+        data.timestamp,
+        hand.game.getGameState() === GameState.WaitingForPlayers
+          ? data.timestamp
+          : null
+      );
+      this.saveChannelGameState(
+        data.workspaceId,
+        data.channelId,
+        hand.game.getGameState() === GameState.WaitingForPlayers
+          ? JSON.stringify(hand.game.toJson())
+          : JSON.stringify(hand.channelState.game),
+        hand.channelState.nextGameId + 1,
+        hand.game.getGameState() === GameState.WaitingForPlayers
+          ? null
+          : hand.gameId
+      );
+
+      return { ok: true, game: hand.game.getState() };
     }
 
-    const game = TexasHoldem.fromJson(existing);
+    const channelState = this.loadChannelGameState(
+      data.workspaceId,
+      data.channelId
+    )!;
+    const game = TexasHoldem.fromJson(activeGame.game);
     game.preDeal(data.playerId);
-    this.saveGame(data.workspaceId, data.channelId, JSON.stringify(game.toJson()));
+    this.finalizeHandIfEnded(
+      data.workspaceId,
+      data.channelId,
+      activeGame.gameId,
+      game,
+      channelState,
+      data.timestamp
+    );
 
     return { ok: true, game: game.getState() };
   }
@@ -817,17 +1397,24 @@ export class PokerDurableObject extends DurableObject<Env> {
     | { ok: true; game: ReturnType<TexasHoldem["getState"]> }
     | { ok: false; reason: "no_game" }
   > {
-    const existing = await this.fetchGame(data.workspaceId, data.channelId);
-    if (!existing) {
+    const activeGame = this.loadActiveGame(data.workspaceId, data.channelId);
+    if (!activeGame) {
       return { ok: false, reason: "no_game" };
     }
 
-    const game = TexasHoldem.fromJson(existing);
+    const channelState = this.loadChannelGameState(
+      data.workspaceId,
+      data.channelId
+    )!;
+    const game = TexasHoldem.fromJson(activeGame.game);
     game.preNH(data.playerId);
-    this.saveGame(
+    this.finalizeHandIfEnded(
       data.workspaceId,
       data.channelId,
-      JSON.stringify(game.toJson())
+      activeGame.gameId,
+      game,
+      channelState,
+      data.timestamp
     );
 
     return { ok: true, game: game.getState() };
@@ -846,17 +1433,24 @@ export class PokerDurableObject extends DurableObject<Env> {
     | { ok: true; game: ReturnType<TexasHoldem["getState"]> }
     | { ok: false; reason: "no_game" }
   > {
-    const existing = await this.fetchGame(data.workspaceId, data.channelId);
-    if (!existing) {
+    const activeGame = this.loadActiveGame(data.workspaceId, data.channelId);
+    if (!activeGame) {
       return { ok: false, reason: "no_game" };
     }
 
-    const game = TexasHoldem.fromJson(existing);
+    const channelState = this.loadChannelGameState(
+      data.workspaceId,
+      data.channelId
+    )!;
+    const game = TexasHoldem.fromJson(activeGame.game);
     game.preAH(data.playerId);
-    this.saveGame(
+    this.finalizeHandIfEnded(
       data.workspaceId,
       data.channelId,
-      JSON.stringify(game.toJson())
+      activeGame.gameId,
+      game,
+      channelState,
+      data.timestamp
     );
 
     return { ok: true, game: game.getState() };
@@ -875,17 +1469,24 @@ export class PokerDurableObject extends DurableObject<Env> {
     | { ok: true; game: ReturnType<TexasHoldem["getState"]> }
     | { ok: false; reason: "no_game" }
   > {
-    const existing = await this.fetchGame(data.workspaceId, data.channelId);
-    if (!existing) {
+    const activeGame = this.loadActiveGame(data.workspaceId, data.channelId);
+    if (!activeGame) {
       return { ok: false, reason: "no_game" };
     }
 
-    const game = TexasHoldem.fromJson(existing);
+    const channelState = this.loadChannelGameState(
+      data.workspaceId,
+      data.channelId
+    )!;
+    const game = TexasHoldem.fromJson(activeGame.game);
     game.preCheck(data.playerId);
-    this.saveGame(
+    this.finalizeHandIfEnded(
       data.workspaceId,
       data.channelId,
-      JSON.stringify(game.toJson())
+      activeGame.gameId,
+      game,
+      channelState,
+      data.timestamp
     );
 
     return { ok: true, game: game.getState() };
@@ -904,17 +1505,24 @@ export class PokerDurableObject extends DurableObject<Env> {
     | { ok: true; game: ReturnType<TexasHoldem["getState"]> }
     | { ok: false; reason: "no_game" }
   > {
-    const existing = await this.fetchGame(data.workspaceId, data.channelId);
-    if (!existing) {
+    const activeGame = this.loadActiveGame(data.workspaceId, data.channelId);
+    if (!activeGame) {
       return { ok: false, reason: "no_game" };
     }
 
-    const game = TexasHoldem.fromJson(existing);
+    const channelState = this.loadChannelGameState(
+      data.workspaceId,
+      data.channelId
+    )!;
+    const game = TexasHoldem.fromJson(activeGame.game);
     game.preFold(data.playerId);
-    this.saveGame(
+    this.finalizeHandIfEnded(
       data.workspaceId,
       data.channelId,
-      JSON.stringify(game.toJson())
+      activeGame.gameId,
+      game,
+      channelState,
+      data.timestamp
     );
 
     return { ok: true, game: game.getState() };
@@ -933,17 +1541,24 @@ export class PokerDurableObject extends DurableObject<Env> {
     | { ok: true; game: ReturnType<TexasHoldem["getState"]> }
     | { ok: false; reason: "no_game" }
   > {
-    const existing = await this.fetchGame(data.workspaceId, data.channelId);
-    if (!existing) {
+    const activeGame = this.loadActiveGame(data.workspaceId, data.channelId);
+    if (!activeGame) {
       return { ok: false, reason: "no_game" };
     }
 
-    const game = TexasHoldem.fromJson(existing);
+    const channelState = this.loadChannelGameState(
+      data.workspaceId,
+      data.channelId
+    )!;
+    const game = TexasHoldem.fromJson(activeGame.game);
     game.preCall(data.playerId);
-    this.saveGame(
+    this.finalizeHandIfEnded(
       data.workspaceId,
       data.channelId,
-      JSON.stringify(game.toJson())
+      activeGame.gameId,
+      game,
+      channelState,
+      data.timestamp
     );
 
     return { ok: true, game: game.getState() };
@@ -963,17 +1578,24 @@ export class PokerDurableObject extends DurableObject<Env> {
     | { ok: true; game: ReturnType<TexasHoldem["getState"]> }
     | { ok: false; reason: "no_game" }
   > {
-    const existing = await this.fetchGame(data.workspaceId, data.channelId);
-    if (!existing) {
+    const activeGame = this.loadActiveGame(data.workspaceId, data.channelId);
+    if (!activeGame) {
       return { ok: false, reason: "no_game" };
     }
 
-    const game = TexasHoldem.fromJson(existing);
+    const channelState = this.loadChannelGameState(
+      data.workspaceId,
+      data.channelId
+    )!;
+    const game = TexasHoldem.fromJson(activeGame.game);
     game.preBet(data.playerId, data.amount);
-    this.saveGame(
+    this.finalizeHandIfEnded(
       data.workspaceId,
       data.channelId,
-      JSON.stringify(game.toJson())
+      activeGame.gameId,
+      game,
+      channelState,
+      data.timestamp
     );
 
     return { ok: true, game: game.getState() };
@@ -992,16 +1614,20 @@ export class PokerDurableObject extends DurableObject<Env> {
     | { ok: true; game: ReturnType<TexasHoldem["getState"]> }
     | { ok: false; reason: "no_game" }
   > {
-    const existing = await this.fetchGame(data.workspaceId, data.channelId);
-    if (!existing) {
+    const scopedGame = this.loadScopedGame(data.workspaceId, data.channelId);
+    if (!scopedGame) {
       return { ok: false, reason: "no_game" };
     }
 
-    const game = TexasHoldem.fromJson(existing);
-    game.cashOut(data.playerId);
-    this.saveGame(data.workspaceId, data.channelId, JSON.stringify(game.toJson()));
+    scopedGame.game.cashOut(data.playerId);
+    this.persistScopedGame(
+      data.workspaceId,
+      data.channelId,
+      scopedGame,
+      data.timestamp
+    );
 
-    return { ok: true, game: game.getState() };
+    return { ok: true, game: scopedGame.game.getState() };
   }
 
   async leaveGame(data: {
@@ -1017,16 +1643,20 @@ export class PokerDurableObject extends DurableObject<Env> {
     | { ok: true; game: ReturnType<TexasHoldem["getState"]> }
     | { ok: false; reason: "no_game" }
   > {
-    const existing = await this.fetchGame(data.workspaceId, data.channelId);
-    if (!existing) {
+    const scopedGame = this.loadScopedGame(data.workspaceId, data.channelId);
+    if (!scopedGame) {
       return { ok: false, reason: "no_game" };
     }
 
-    const game = TexasHoldem.fromJson(existing);
-    game.removePlayer(data.playerId);
-    this.saveGame(data.workspaceId, data.channelId, JSON.stringify(game.toJson()));
+    scopedGame.game.removePlayer(data.playerId);
+    this.persistScopedGame(
+      data.workspaceId,
+      data.channelId,
+      scopedGame,
+      data.timestamp
+    );
 
-    return { ok: true, game: game.getState() };
+    return { ok: true, game: scopedGame.game.getState() };
   }
 
   async deletePlayer(data: {
@@ -1043,33 +1673,24 @@ export class PokerDurableObject extends DurableObject<Env> {
     | { ok: true; game: ReturnType<TexasHoldem["getState"]> }
     | { ok: false; reason: "no_game" | "delete_failed"; message?: string }
   > {
-    const existing = await this.fetchGame(data.workspaceId, data.channelId);
-    if (!existing) {
+    const scopedGame = this.loadScopedGame(data.workspaceId, data.channelId);
+    if (!scopedGame) {
       return { ok: false, reason: "no_game" };
     }
 
-    const game = TexasHoldem.fromJson(existing);
-    const result = game.deletePlayer(data.targetPlayerId);
+    const result = scopedGame.game.deletePlayer(data.targetPlayerId);
 
     if (result !== "Success") {
       return { ok: false, reason: "delete_failed", message: result };
     }
-    this.saveGame(data.workspaceId, data.channelId, JSON.stringify(game.toJson()));
-
-    return { ok: true, game: game.getState() };
-  }
-
-  saveGame(workspaceId: string, channelId: string, game: any): void {
-    this.sql.exec(
-      `
-			UPDATE PokerGames
-			SET game = ?
-			WHERE workspaceId = ? AND channelId = ?
-		`,
-      game,
-      workspaceId,
-      channelId
+    this.persistScopedGame(
+      data.workspaceId,
+      data.channelId,
+      scopedGame,
+      data.timestamp
     );
+
+    return { ok: true, game: scopedGame.game.getState() };
   }
 
 }
@@ -1086,7 +1707,7 @@ export default {
     env: Env,
     ctx: ExecutionContext
   ): Promise<Response> {
-    const app = new SlackApp({ env }).event(
+    const app = new SlackApp({ env: env as any }).event(
       "message",
       async ({ context, payload }) => {
         if (!isPostedMessageEvent(payload)) {
@@ -2649,6 +3270,8 @@ export async function startRound(
     return;
   }
 
+  await context.say({ text: `Starting game #${result.gameId}!` });
+
   // Display stock price when a hand starts (non-blocking, graceful failure)
   // Check if a round actually started (gameState is PreFlop)
   if (result.game.gameState === GameState.PreFlop) {
@@ -3068,7 +3691,10 @@ async function fetchGame(env: Env, context: SlackAppContextWithChannelId) {
   const workspaceId = context.teamId!;
   const channelId = context.channelId;
   const stub = getDurableObject(env, context);
-  const game = await stub.fetchGame(workspaceId, channelId);
+  const game = (await stub.fetchGame(
+    workspaceId,
+    channelId
+  )) as SerializedGame | null;
 
   if (!game) {
     return null;
