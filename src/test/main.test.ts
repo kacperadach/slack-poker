@@ -1338,8 +1338,8 @@ describe("Poker Durable Object", () => {
       [
         [
           {
-            "text": "<@alice>'s turn
-      *bob* raised 160 chips! Total Pot: 240",
+            "text": "*bob* raised 160 chips! Total Pot: 240
+      <@alice>'s turn",
           },
         ],
       ]
@@ -1385,8 +1385,8 @@ describe("Poker Durable Object", () => {
       [
         [
           {
-            "text": "<@alice>'s turn
-      *bob* bet 100 chips! Total Pot: 420",
+            "text": "*bob* bet 100 chips! Total Pot: 420
+      <@alice>'s turn",
           },
         ],
       ]
@@ -1435,8 +1435,8 @@ describe("Poker Durable Object", () => {
       [
         [
           {
-            "text": "<@alice>'s turn
-      *bob* bet 150 chips! Total Pot: 670",
+            "text": "*bob* bet 150 chips! Total Pot: 670
+      <@alice>'s turn",
           },
         ],
       ]
@@ -1577,8 +1577,8 @@ describe("Poker Durable Object", () => {
       [
         [
           {
-            "text": "<@player1>'s turn
-      *player2* raised 300 chips! *:rotating_light: ALL-IN :rotating_light:* Total Pot: 380",
+            "text": "*player2* raised 300 chips! *:rotating_light: ALL-IN :rotating_light:* Total Pot: 380
+      <@player1>'s turn",
           },
         ],
       ]
@@ -1795,8 +1795,8 @@ describe("Poker Durable Object", () => {
       [
         [
           {
-            "text": "<@alice>'s turn
-      *charlie* bet 100 chips! Total Pot: 300",
+            "text": "*charlie* bet 100 chips! Total Pot: 300
+      <@alice>'s turn",
           },
         ],
       ]
@@ -1960,8 +1960,8 @@ describe("Poker Durable Object", () => {
       [
         [
           {
-            "text": "<@trapper>'s turn
-      *victim* bet 100 chips! Total Pot: 260",
+            "text": "*victim* bet 100 chips! Total Pot: 260
+      <@trapper>'s turn",
           },
         ],
       ]
@@ -1985,8 +1985,8 @@ describe("Poker Durable Object", () => {
       [
         [
           {
-            "text": "<@victim>'s turn
-      *trapper* raised 300 chips! Total Pot: 560",
+            "text": "*trapper* raised 300 chips! Total Pot: 560
+      <@victim>'s turn",
           },
         ],
       ]
@@ -2624,8 +2624,8 @@ describe("Poker Durable Object", () => {
       [
         [
           {
-            "text": "<@player1>'s turn
-      *player2* bet 100 chips! Total Pot: 260",
+            "text": "*player2* bet 100 chips! Total Pot: 260
+      <@player1>'s turn",
           },
         ],
       ]
@@ -3386,8 +3386,8 @@ describe("Poker Durable Object", () => {
           {
             "text": "*bob* called 80 chips! Total Pot: 240
       *charlie* is pre-moving!
-      <@alice>'s turn
-      *charlie* raised 200 chips! Total Pot: 360",
+      *charlie* raised 200 chips! Total Pot: 360
+      <@alice>'s turn",
           },
         ],
       ]

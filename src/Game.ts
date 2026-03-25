@@ -1440,9 +1440,6 @@ export class TexasHoldem {
       player.getIsAllIn()
     );
     
-    this.advanceToNextPlayer();
-    this.progressGame();
-
     this.events.push(
       new GameEvent(
         `${playerId} ${isRaise ? "raised" : "bet"} ${roundedAmount} chips!${player.getIsAllIn() ? " *:rotating_light: ALL-IN :rotating_light:*" : ""} Total Pot: ${
@@ -1450,6 +1447,9 @@ export class TexasHoldem {
         }`
       )
     );
+
+    this.advanceToNextPlayer();
+    this.progressGame();
 
     return isRaise ? `Raised to ${roundedAmount}` : `Bet ${roundedAmount}`;
   }
