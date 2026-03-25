@@ -50,6 +50,19 @@ type ActiveGameRecord = {
   endedAt: number | null;
 };
 
+type CompletedHandHistoryRecord = {
+  gameId: number;
+  createdAt: number;
+  endedAt: number;
+  handHistory: {
+    handCounter: number;
+    handStartSnapshot: SerializedGame["handHistory"]["handStartSnapshot"];
+    actionHistory: SerializedGame["handHistory"]["actionHistory"];
+    boardSnapshot: SerializedGame["handHistory"]["boardSnapshot"];
+    handEndSnapshot: SerializedGame["handHistory"]["handEndSnapshot"];
+  };
+};
+
 type ScopedGameContext = {
   scope: "channel" | "active";
   channelState: ChannelGameStateRecord;
@@ -700,6 +713,36 @@ export class PokerDurableObject extends DurableObject<Env> {
     };
   }
 
+  getCompletedHandHistory(
+    workspaceId: string,
+    channelId: string,
+    gameId: number
+  ): CompletedHandHistoryRecord | null {
+    const pokerGame = this.getPokerGame(workspaceId, channelId, gameId);
+    if (!pokerGame || pokerGame.endedAt === null) {
+      return null;
+    }
+
+    return {
+      gameId: pokerGame.gameId,
+      createdAt: pokerGame.createdAt,
+      endedAt: pokerGame.endedAt,
+      handHistory: {
+        handCounter: pokerGame.game.handHistory?.handCounter ?? 0,
+        handStartSnapshot:
+          pokerGame.game.handHistory?.handStartSnapshot ?? null,
+        actionHistory: pokerGame.game.handHistory?.actionHistory ?? [],
+        boardSnapshot:
+          pokerGame.game.handHistory?.boardSnapshot ?? {
+            flop: [],
+            turn: [],
+            river: [],
+          },
+        handEndSnapshot: pokerGame.game.handHistory?.handEndSnapshot ?? null,
+      },
+    };
+  }
+
   private loadActiveGame(
     workspaceId: string,
     channelId: string
@@ -790,9 +833,9 @@ export class PokerDurableObject extends DurableObject<Env> {
     game: TexasHoldem
   ): PlayerHandFactRecord[] {
     const trackedPlayerIds = new Set(allUsers.map((user) => user.userId));
-    const handStartChips = game.getHandStartChips();
-    const completedHandOutcome = game.getCompletedHandOutcome();
-    if (handStartChips.size === 0 || !completedHandOutcome) {
+    const handStartSnapshot = game.getHandStartSnapshot();
+    const handEndSnapshot = game.getHandEndSnapshot();
+    if (!handStartSnapshot || !handEndSnapshot) {
       return [];
     }
 
@@ -802,16 +845,16 @@ export class PokerDurableObject extends DurableObject<Env> {
         player,
       ])
     );
-    const bettingHistory = game.getBettingHistory();
+    const actionHistory = game.getActionHistory();
     const outcomeByPlayerId = new Map(
-      completedHandOutcome.players.map((player) => [player.playerId, player])
+      handEndSnapshot.players.map((player) => [player.playerId, player])
     );
 
-    return Array.from(handStartChips.entries())
-      .filter(([playerId]) => trackedPlayerIds.has(playerId))
-      .map(([playerId, startChips]) => {
+    return handStartSnapshot.players
+      .filter(({ playerId }) => trackedPlayerIds.has(playerId))
+      .map(({ playerId, startingStack }) => {
         const player = playerById.get(playerId);
-        const playerActions = bettingHistory.filter(
+        const playerActions = actionHistory.filter(
           (action) => action.playerId === playerId
         );
         let checkCount = 0;
@@ -834,26 +877,21 @@ export class PokerDurableObject extends DurableObject<Env> {
               break;
             case "raise":
               raiseCount += 1;
-              raiseToTotal += action.amount;
-              break;
-            case "all_in":
-              allInCount += 1;
-              if (action.underlyingActionType === "call") {
-                callCount += 1;
-              } else if (action.underlyingActionType === "raise") {
-                raiseCount += 1;
-                raiseToTotal += action.amount;
-              } else if (action.underlyingActionType === "bet") {
-                betCount += 1;
-              }
+              raiseToTotal += action.targetBet;
               break;
             default:
               break;
           }
+          if (action.isAllIn) {
+            allInCount += 1;
+          }
         });
 
-        const chipsCommitted = player?.getTotalBet() ?? 0;
-        const finalChips = player?.getChips() ?? startChips;
+        const chipsCommitted = playerActions.reduce(
+          (total, action) => total + action.contribution,
+          0
+        );
+        const finalChips = player?.getChips() ?? startingStack;
         const outcome = outcomeByPlayerId.get(playerId);
 
         return {
@@ -862,9 +900,9 @@ export class PokerDurableObject extends DurableObject<Env> {
           gameId,
           playerId,
           participated: true,
-          wonAnyPot: outcome?.wonAnyPot ?? false,
+          wonAnyPot: (outcome?.chipsWon ?? 0) > 0,
           reachedShowdown: outcome?.reachedShowdown ?? false,
-          folded: game.getFoldedPlayers().has(playerId),
+          folded: outcome?.foldedStreet !== null,
           checkCount,
           callCount,
           betCount,
@@ -873,7 +911,7 @@ export class PokerDurableObject extends DurableObject<Env> {
           raiseToTotal,
           chipsCommitted,
           chipsWon: outcome?.chipsWon ?? 0,
-          netChips: finalChips - startChips,
+          netChips: finalChips - startingStack,
         };
       });
   }
@@ -2141,6 +2179,7 @@ const MESSAGE_HANDLERS: Record<string, Function> = {
   "^reveal card": revealSingleCard,
   "^reveal": revealCards,
   "^rank": getGameState,
+  "^history:\\d+$": showHandHistory,
   "^help": help,
   "^deployed": deployed,
   "^poke": nudgePlayer,
@@ -3740,6 +3779,86 @@ export async function showStats(
   });
 
   await context.say({ text: message.trimEnd() });
+}
+
+function formatTimestamp(timestamp: number): string {
+  return new Date(timestamp).toLocaleString("en-US", {
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+    hour: "2-digit",
+    minute: "2-digit",
+    second: "2-digit",
+  });
+}
+
+function splitSlackCodeBlock(label: string, content: string): string[] {
+  const maxChunkLength = 3500;
+  if (content.length <= maxChunkLength) {
+    return [`*${label}*\n\`\`\`json\n${content}\n\`\`\``];
+  }
+
+  const chunks: string[] = [];
+  let start = 0;
+  let part = 1;
+  while (start < content.length) {
+    const end = Math.min(start + maxChunkLength, content.length);
+    chunks.push(
+      `*${label} (part ${part})*\n\`\`\`json\n${content.slice(start, end)}\n\`\`\``
+    );
+    start = end;
+    part += 1;
+  }
+
+  return chunks;
+}
+
+export async function showHandHistory(
+  env: Env,
+  context: SlackAppContextWithChannelId,
+  payload: PostedMessage,
+  meta?: HandlerMeta
+) {
+  const normalizedText =
+    meta?.normalizedText ?? cleanMessageText(payload.text ?? "");
+  const gameIdMatch = normalizedText.match(/^history:(\d+)$/);
+
+  if (!gameIdMatch) {
+    await context.say({
+      text: ensureNarpBrainOnError(
+        'Invalid format! Please use "history:{gameId}"'
+      ),
+    });
+    return;
+  }
+
+  const gameId = Number.parseInt(gameIdMatch[1], 10);
+  const stub = getDurableObject(env, context);
+  const handHistory = await stub.getCompletedHandHistory(
+    context.teamId!,
+    context.channelId,
+    gameId
+  );
+
+  if (!handHistory) {
+    await context.say({
+      text: ensureNarpBrainOnError(
+        `No finished hand found for game #${gameId} in this channel.`
+      ),
+    });
+    return;
+  }
+
+  const header = `*Hand History #${handHistory.gameId}*\nStarted: ${formatTimestamp(
+    handHistory.createdAt
+  )}\nEnded: ${formatTimestamp(handHistory.endedAt)}`;
+  await context.say({ text: header });
+
+  const historyDump = JSON.stringify(handHistory.handHistory, null, 2);
+  const chunks = splitSlackCodeBlock(`history:${handHistory.gameId}`, historyDump);
+  for (const chunk of chunks) {
+    await context.say({ text: chunk });
+  }
 }
 
 export async function setStacks(
