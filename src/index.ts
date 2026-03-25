@@ -11,15 +11,6 @@ import type { GameEvent } from "./GameEvent";
 // @ts-ignore phe is not typed
 import { rankDescription, rankCards } from "phe";
 import { userIdToName } from "./users";
-import type {
-  ActionLogEntry,
-  CallActionV1,
-  CheckActionV1,
-  MessageReceivedActionV1,
-  NewGameActionV1,
-  RemovePlayerActionV1,
-  RoundStartActionV1,
-} from "./ActionLog";
 import {
   fetchStockPrice,
   getHubsStockPriceMessage,
@@ -73,21 +64,6 @@ export class PokerDurableObject extends DurableObject<Env> {
 				createdAt INTEGER,
 				PRIMARY KEY (workspaceId, channelId, flop)
 			);
-		`);
-
-    this.sql.exec(`
-			CREATE TABLE IF NOT EXISTS ActionLog (
-				id INTEGER PRIMARY KEY AUTOINCREMENT,
-				workspaceId TEXT NOT NULL,
-				channelId TEXT NOT NULL,
-				timestamp INTEGER NOT NULL,
-				data JSON NOT NULL
-			);
-		`);
-
-    this.sql.exec(`
-			CREATE INDEX IF NOT EXISTS idx_actionlog_lookup
-			ON ActionLog (workspaceId, channelId, timestamp);
 		`);
 
     // Table to track processed messages for idempotency
@@ -463,33 +439,6 @@ export class PokerDurableObject extends DurableObject<Env> {
       JSON.stringify(newGameInstance.toJson())
     );
 
-    const messageReceivedAction: MessageReceivedActionV1 = {
-      schemaVersion: 1,
-      workspaceId: data.workspaceId,
-      channelId: data.channelId,
-      timestamp: data.timestamp,
-      actionType: "message_received",
-      messageText: data.messageText,
-      playerId: data.playerId,
-      slackMessageTs: data.slackMessageTs,
-      normalizedText: data.normalizedText,
-      handlerKey: data.handlerKey,
-    };
-    this.logAction(messageReceivedAction);
-
-    const newGameAction: NewGameActionV1 = {
-      schemaVersion: 1,
-      workspaceId: data.workspaceId,
-      channelId: data.channelId,
-      timestamp: Date.now(),
-      actionType: "new_game",
-      messageText: data.messageText,
-      playerId: data.playerId,
-      smallBlind: newGameInstance.getSmallBlind(),
-      bigBlind: newGameInstance.getBigBlind(),
-    };
-    this.logAction(newGameAction);
-
     return { ok: true };
   }
 
@@ -513,37 +462,7 @@ export class PokerDurableObject extends DurableObject<Env> {
 
     const game = TexasHoldem.fromJson(existing);
     game.addPlayer(data.playerId);
-
-    const messageReceivedAction: MessageReceivedActionV1 = {
-      schemaVersion: 1,
-      workspaceId: data.workspaceId,
-      channelId: data.channelId,
-      timestamp: data.timestamp,
-      actionType: "message_received",
-      messageText: data.messageText,
-      playerId: data.playerId,
-      slackMessageTs: data.slackMessageTs,
-      normalizedText: data.normalizedText,
-      handlerKey: data.handlerKey,
-    };
-    this.logAction(messageReceivedAction);
-
-    const joinAction: ActionLogEntry = {
-      schemaVersion: 1,
-      workspaceId: data.workspaceId,
-      channelId: data.channelId,
-      timestamp: Date.now(),
-      actionType: "join",
-      messageText: data.messageText,
-      playerId: data.playerId,
-    };
-
-    this.saveGameWithAction(
-      data.workspaceId,
-      data.channelId,
-      JSON.stringify(game.toJson()),
-      joinAction
-    );
+    this.saveGame(data.workspaceId, data.channelId, JSON.stringify(game.toJson()));
 
     return { ok: true, game: game.getState() };
   }
@@ -569,62 +488,8 @@ export class PokerDurableObject extends DurableObject<Env> {
 
     const game = TexasHoldem.fromJson(existing);
 
-    // Check if player needs to be auto-joined (not in active or inactive players)
-    const isInActive = game
-      .getActivePlayers()
-      .some((p) => p.getId() === data.playerId);
-    const isInInactive = game
-      .getInactivePlayers()
-      .some((p) => p.getId() === data.playerId);
-    const needsAutoJoin = !isInActive && !isInInactive;
-
     game.buyIn(data.playerId, data.amount);
-
-    const messageReceivedAction: MessageReceivedActionV1 = {
-      schemaVersion: 1,
-      workspaceId: data.workspaceId,
-      channelId: data.channelId,
-      timestamp: data.timestamp,
-      actionType: "message_received",
-      messageText: data.messageText,
-      playerId: data.playerId,
-      slackMessageTs: data.slackMessageTs,
-      normalizedText: data.normalizedText,
-      handlerKey: data.handlerKey,
-    };
-    this.logAction(messageReceivedAction);
-
-    // If player was auto-joined, log the join action first
-    if (needsAutoJoin) {
-      const joinAction: ActionLogEntry = {
-        schemaVersion: 1,
-        workspaceId: data.workspaceId,
-        channelId: data.channelId,
-        timestamp: Date.now(),
-        actionType: "join",
-        messageText: data.messageText,
-        playerId: data.playerId,
-      };
-      this.logAction(joinAction);
-    }
-
-    const buyInAction: ActionLogEntry = {
-      schemaVersion: 1,
-      workspaceId: data.workspaceId,
-      channelId: data.channelId,
-      timestamp: Date.now(),
-      actionType: "buy_in",
-      messageText: data.messageText,
-      playerId: data.playerId,
-      amount: data.amount,
-    };
-
-    this.saveGameWithAction(
-      data.workspaceId,
-      data.channelId,
-      JSON.stringify(game.toJson()),
-      buyInAction
-    );
+    this.saveGame(data.workspaceId, data.channelId, JSON.stringify(game.toJson()));
 
     return { ok: true, game: game.getState() };
   }
@@ -687,37 +552,7 @@ export class PokerDurableObject extends DurableObject<Env> {
       });
     });
 
-    const messageReceivedAction: MessageReceivedActionV1 = {
-      schemaVersion: 1,
-      workspaceId: data.workspaceId,
-      channelId: data.channelId,
-      timestamp: data.timestamp,
-      actionType: "message_received",
-      messageText: data.messageText,
-      playerId: data.playerId,
-      slackMessageTs: data.slackMessageTs,
-      normalizedText: data.normalizedText,
-      handlerKey: data.handlerKey,
-    };
-    this.logAction(messageReceivedAction);
-
-    const setStacksAction: ActionLogEntry = {
-      schemaVersion: 1,
-      workspaceId: data.workspaceId,
-      channelId: data.channelId,
-      timestamp: Date.now(),
-      actionType: "set_stacks",
-      messageText: data.messageText,
-      playerId: data.playerId,
-      amount: data.targetAmount,
-    };
-
-    this.saveGameWithAction(
-      data.workspaceId,
-      data.channelId,
-      JSON.stringify(game.toJson()),
-      setStacksAction
-    );
+    this.saveGame(data.workspaceId, data.channelId, JSON.stringify(game.toJson()));
 
     return { ok: true, game: game.getState(), adjustments };
   }
@@ -742,37 +577,7 @@ export class PokerDurableObject extends DurableObject<Env> {
 
     const game = TexasHoldem.fromJson(existing);
     game.fold(data.playerId);
-
-    const messageReceivedAction: MessageReceivedActionV1 = {
-      schemaVersion: 1,
-      workspaceId: data.workspaceId,
-      channelId: data.channelId,
-      timestamp: data.timestamp,
-      actionType: "message_received",
-      messageText: data.messageText,
-      playerId: data.playerId,
-      slackMessageTs: data.slackMessageTs,
-      normalizedText: data.normalizedText,
-      handlerKey: data.handlerKey,
-    };
-    this.logAction(messageReceivedAction);
-
-    const foldAction: ActionLogEntry = {
-      schemaVersion: 1,
-      workspaceId: data.workspaceId,
-      channelId: data.channelId,
-      timestamp: Date.now(),
-      actionType: "fold",
-      messageText: data.messageText,
-      playerId: data.playerId,
-    };
-
-    this.saveGameWithAction(
-      data.workspaceId,
-      data.channelId,
-      JSON.stringify(game.toJson()),
-      foldAction
-    );
+    this.saveGame(data.workspaceId, data.channelId, JSON.stringify(game.toJson()));
 
     return { ok: true, game: game.getState() };
   }
@@ -797,37 +602,7 @@ export class PokerDurableObject extends DurableObject<Env> {
 
     const game = TexasHoldem.fromJson(existing);
     game.check(data.playerId);
-
-    const messageReceivedAction: MessageReceivedActionV1 = {
-      schemaVersion: 1,
-      workspaceId: data.workspaceId,
-      channelId: data.channelId,
-      timestamp: data.timestamp,
-      actionType: "message_received",
-      messageText: data.messageText,
-      playerId: data.playerId,
-      slackMessageTs: data.slackMessageTs,
-      normalizedText: data.normalizedText,
-      handlerKey: data.handlerKey,
-    };
-    this.logAction(messageReceivedAction);
-
-    const checkAction: ActionLogEntry = {
-      schemaVersion: 1,
-      workspaceId: data.workspaceId,
-      channelId: data.channelId,
-      timestamp: Date.now(),
-      actionType: "check",
-      messageText: data.messageText,
-      playerId: data.playerId,
-    };
-
-    this.saveGameWithAction(
-      data.workspaceId,
-      data.channelId,
-      JSON.stringify(game.toJson()),
-      checkAction
-    );
+    this.saveGame(data.workspaceId, data.channelId, JSON.stringify(game.toJson()));
 
     return { ok: true, game: game.getState() };
   }
@@ -851,42 +626,8 @@ export class PokerDurableObject extends DurableObject<Env> {
     }
 
     const game = TexasHoldem.fromJson(existing);
-    const callAmount =
-      game.getCurrentBetAmount() -
-      (game.getCurrentPlayer()?.getCurrentBet() ?? 0);
     game.call(data.playerId);
-
-    const messageReceivedAction: MessageReceivedActionV1 = {
-      schemaVersion: 1,
-      workspaceId: data.workspaceId,
-      channelId: data.channelId,
-      timestamp: data.timestamp,
-      actionType: "message_received",
-      messageText: data.messageText,
-      playerId: data.playerId,
-      slackMessageTs: data.slackMessageTs,
-      normalizedText: data.normalizedText,
-      handlerKey: data.handlerKey,
-    };
-    this.logAction(messageReceivedAction);
-
-    const callAction: ActionLogEntry = {
-      schemaVersion: 1,
-      workspaceId: data.workspaceId,
-      channelId: data.channelId,
-      timestamp: Date.now(),
-      actionType: "call",
-      messageText: data.messageText,
-      playerId: data.playerId,
-      amount: callAmount,
-    };
-
-    this.saveGameWithAction(
-      data.workspaceId,
-      data.channelId,
-      JSON.stringify(game.toJson()),
-      callAction
-    );
+    this.saveGame(data.workspaceId, data.channelId, JSON.stringify(game.toJson()));
 
     return { ok: true, game: game.getState() };
   }
@@ -912,38 +653,7 @@ export class PokerDurableObject extends DurableObject<Env> {
 
     const game = TexasHoldem.fromJson(existing);
     game.bet(data.playerId, data.amount);
-
-    const messageReceivedAction: MessageReceivedActionV1 = {
-      schemaVersion: 1,
-      workspaceId: data.workspaceId,
-      channelId: data.channelId,
-      timestamp: data.timestamp,
-      actionType: "message_received",
-      messageText: data.messageText,
-      playerId: data.playerId,
-      slackMessageTs: data.slackMessageTs,
-      normalizedText: data.normalizedText,
-      handlerKey: data.handlerKey,
-    };
-    this.logAction(messageReceivedAction);
-
-    const betAction: ActionLogEntry = {
-      schemaVersion: 1,
-      workspaceId: data.workspaceId,
-      channelId: data.channelId,
-      timestamp: Date.now(),
-      actionType: "bet",
-      messageText: data.messageText,
-      playerId: data.playerId,
-      amount: data.amount,
-    };
-
-    this.saveGameWithAction(
-      data.workspaceId,
-      data.channelId,
-      JSON.stringify(game.toJson()),
-      betAction
-    );
+    this.saveGame(data.workspaceId, data.channelId, JSON.stringify(game.toJson()));
 
     return { ok: true, game: game.getState() };
   }
@@ -967,41 +677,8 @@ export class PokerDurableObject extends DurableObject<Env> {
     }
 
     const game = TexasHoldem.fromJson(existing);
-    const player = game.getCurrentPlayer();
-    const allInAmount = player ? player.getCurrentBet() + player.getChips() : 0;
     game.allIn(data.playerId);
-
-    const messageReceivedAction: MessageReceivedActionV1 = {
-      schemaVersion: 1,
-      workspaceId: data.workspaceId,
-      channelId: data.channelId,
-      timestamp: data.timestamp,
-      actionType: "message_received",
-      messageText: data.messageText,
-      playerId: data.playerId,
-      slackMessageTs: data.slackMessageTs,
-      normalizedText: data.normalizedText,
-      handlerKey: data.handlerKey,
-    };
-    this.logAction(messageReceivedAction);
-
-    const allInAction: ActionLogEntry = {
-      schemaVersion: 1,
-      workspaceId: data.workspaceId,
-      channelId: data.channelId,
-      timestamp: Date.now(),
-      actionType: "all_in",
-      messageText: data.messageText,
-      playerId: data.playerId,
-      amount: allInAmount,
-    };
-
-    this.saveGameWithAction(
-      data.workspaceId,
-      data.channelId,
-      JSON.stringify(game.toJson()),
-      allInAction
-    );
+    this.saveGame(data.workspaceId, data.channelId, JSON.stringify(game.toJson()));
 
     return { ok: true, game: game.getState() };
   }
@@ -1026,75 +703,7 @@ export class PokerDurableObject extends DurableObject<Env> {
 
     const game = TexasHoldem.fromJson(existing);
     game.startRound(data.playerId);
-
-    const messageReceivedAction: MessageReceivedActionV1 = {
-      schemaVersion: 1,
-      workspaceId: data.workspaceId,
-      channelId: data.channelId,
-      timestamp: data.timestamp,
-      actionType: "message_received",
-      messageText: data.messageText,
-      playerId: data.playerId,
-      slackMessageTs: data.slackMessageTs,
-      normalizedText: data.normalizedText,
-      handlerKey: data.handlerKey,
-    };
-    this.logAction(messageReceivedAction);
-
-    // Build round_start action
-    const state = game.getState();
-    const playerOrder = state.activePlayers.map((p) => p.id);
-    const playerStacks: Record<string, number> = {};
-    const playerCards: Record<string, [string, string]> = {};
-
-    state.activePlayers.forEach((p) => {
-      playerStacks[p.id] = p.chips;
-      if (p.cards.length === 2) {
-        playerCards[p.id] = [p.cards[0].toString(), p.cards[1].toString()];
-      }
-    });
-
-    const communityCards = state.communityCards.map((c) => c.toString());
-    const fullCommunityCards: [string, string, string, string, string] = [
-      communityCards[0] ?? "",
-      communityCards[1] ?? "",
-      communityCards[2] ?? "",
-      communityCards[3] ?? "",
-      communityCards[4] ?? "",
-    ];
-
-    const numPlayers = playerOrder.length;
-    const dealerPos = state.dealerPosition;
-    const sbPos = numPlayers === 2 ? dealerPos : (dealerPos + 1) % numPlayers;
-    const bbPos =
-      numPlayers === 2
-        ? (dealerPos + 1) % numPlayers
-        : (dealerPos + 2) % numPlayers;
-
-    const roundStartAction: RoundStartActionV1 = {
-      schemaVersion: 1,
-      workspaceId: data.workspaceId,
-      channelId: data.channelId,
-      timestamp: Date.now(),
-      actionType: "round_start",
-      messageText: data.messageText,
-      dealerPosition: state.dealerPosition,
-      playerOrder,
-      playerStacks,
-      playerCards,
-      communityCards: fullCommunityCards,
-      smallBlindPlayerId: playerOrder[sbPos] ?? "",
-      smallBlindAmount: state.smallBlind,
-      bigBlindPlayerId: playerOrder[bbPos] ?? "",
-      bigBlindAmount: state.bigBlind,
-    };
-
-    this.saveGameWithAction(
-      data.workspaceId,
-      data.channelId,
-      JSON.stringify(game.toJson()),
-      roundStartAction
-    );
+    this.saveGame(data.workspaceId, data.channelId, JSON.stringify(game.toJson()));
 
     return { ok: true, game: game.getState() };
   }
@@ -1133,62 +742,8 @@ export class PokerDurableObject extends DurableObject<Env> {
       return { ok: false, reason: "invalid_state" };
     }
 
-    // Determine if this is a call or check
-    const currentBet = game.getCurrentBetAmount();
-    const playerBet = game.getCurrentPlayer()?.getCurrentBet() ?? 0;
-    const isCall = currentBet > playerBet;
-    const callAmount = currentBet - playerBet;
-
     game.callOrCheck(data.playerId);
-
-    const messageReceivedAction: MessageReceivedActionV1 = {
-      schemaVersion: 1,
-      workspaceId: data.workspaceId,
-      channelId: data.channelId,
-      timestamp: data.timestamp,
-      actionType: "message_received",
-      messageText: data.messageText,
-      playerId: data.playerId,
-      slackMessageTs: data.slackMessageTs,
-      normalizedText: data.normalizedText,
-      handlerKey: data.handlerKey,
-    };
-    this.logAction(messageReceivedAction);
-
-    if (isCall) {
-      const callAction: CallActionV1 = {
-        schemaVersion: 1,
-        workspaceId: data.workspaceId,
-        channelId: data.channelId,
-        timestamp: Date.now(),
-        actionType: "call",
-        messageText: data.messageText,
-        playerId: data.playerId,
-        amount: callAmount,
-      };
-      this.saveGameWithAction(
-        data.workspaceId,
-        data.channelId,
-        JSON.stringify(game.toJson()),
-        callAction
-      );
-    } else {
-      const checkAction: CheckActionV1 = {
-        schemaVersion: 1,
-        workspaceId: data.workspaceId,
-        channelId: data.channelId,
-        timestamp: Date.now(),
-        actionType: "check",
-        messageText: data.messageText,
-        playerId: data.playerId,
-      };
-      this.saveGameWithAction(
-        data.workspaceId,
-        data.channelId,
-        JSON.stringify(game.toJson()),
-        checkAction
-      );
-    }
+    this.saveGame(data.workspaceId, data.channelId, JSON.stringify(game.toJson()));
 
     return { ok: true, game: game.getState() };
   }
@@ -1218,61 +773,8 @@ export class PokerDurableObject extends DurableObject<Env> {
       return { ok: false, reason: "not_river" };
     }
 
-    const currentBet = game.getCurrentBetAmount();
-    const playerBet = game.getCurrentPlayer()?.getCurrentBet() ?? 0;
-    const isCall = currentBet > playerBet;
-    const callAmount = currentBet - playerBet;
-
     game.callOrCheck(data.playerId);
-
-    const messageReceivedAction: MessageReceivedActionV1 = {
-      schemaVersion: 1,
-      workspaceId: data.workspaceId,
-      channelId: data.channelId,
-      timestamp: data.timestamp,
-      actionType: "message_received",
-      messageText: data.messageText,
-      playerId: data.playerId,
-      slackMessageTs: data.slackMessageTs,
-      normalizedText: data.normalizedText,
-      handlerKey: data.handlerKey,
-    };
-    this.logAction(messageReceivedAction);
-
-    if (isCall) {
-      const callAction: CallActionV1 = {
-        schemaVersion: 1,
-        workspaceId: data.workspaceId,
-        channelId: data.channelId,
-        timestamp: Date.now(),
-        actionType: "call",
-        messageText: data.messageText,
-        playerId: data.playerId,
-        amount: callAmount,
-      };
-      this.saveGameWithAction(
-        data.workspaceId,
-        data.channelId,
-        JSON.stringify(game.toJson()),
-        callAction
-      );
-    } else {
-      const checkAction: CheckActionV1 = {
-        schemaVersion: 1,
-        workspaceId: data.workspaceId,
-        channelId: data.channelId,
-        timestamp: Date.now(),
-        actionType: "check",
-        messageText: data.messageText,
-        playerId: data.playerId,
-      };
-      this.saveGameWithAction(
-        data.workspaceId,
-        data.channelId,
-        JSON.stringify(game.toJson()),
-        checkAction
-      );
-    }
+    this.saveGame(data.workspaceId, data.channelId, JSON.stringify(game.toJson()));
 
     return { ok: true, game: game.getState() };
   }
@@ -1296,86 +798,8 @@ export class PokerDurableObject extends DurableObject<Env> {
     }
 
     const game = TexasHoldem.fromJson(existing);
-    const wasWaiting = game.getGameState() === GameState.WaitingForPlayers;
-
     game.preDeal(data.playerId);
-
-    const messageReceivedAction: MessageReceivedActionV1 = {
-      schemaVersion: 1,
-      workspaceId: data.workspaceId,
-      channelId: data.channelId,
-      timestamp: data.timestamp,
-      actionType: "message_received",
-      messageText: data.messageText,
-      playerId: data.playerId,
-      slackMessageTs: data.slackMessageTs,
-      normalizedText: data.normalizedText,
-      handlerKey: data.handlerKey,
-    };
-    this.logAction(messageReceivedAction);
-
-    // If state transitioned from WaitingForPlayers, log round_start
-    if (wasWaiting && game.getGameState() !== GameState.WaitingForPlayers) {
-      const state = game.getState();
-      const playerOrder = state.activePlayers.map((p) => p.id);
-      const playerStacks: Record<string, number> = {};
-      const playerCards: Record<string, [string, string]> = {};
-
-      state.activePlayers.forEach((p) => {
-        playerStacks[p.id] = p.chips;
-        if (p.cards.length === 2) {
-          playerCards[p.id] = [p.cards[0].toString(), p.cards[1].toString()];
-        }
-      });
-
-      const communityCards = state.communityCards.map((c) => c.toString());
-      const fullCommunityCards: [string, string, string, string, string] = [
-        communityCards[0] ?? "",
-        communityCards[1] ?? "",
-        communityCards[2] ?? "",
-        communityCards[3] ?? "",
-        communityCards[4] ?? "",
-      ];
-
-      const numPlayers = playerOrder.length;
-      const dealerPos = state.dealerPosition;
-      const sbPos = numPlayers === 2 ? dealerPos : (dealerPos + 1) % numPlayers;
-      const bbPos =
-        numPlayers === 2
-          ? (dealerPos + 1) % numPlayers
-          : (dealerPos + 2) % numPlayers;
-
-      const roundStartAction: RoundStartActionV1 = {
-        schemaVersion: 1,
-        workspaceId: data.workspaceId,
-        channelId: data.channelId,
-        timestamp: Date.now(),
-        actionType: "round_start",
-        messageText: data.messageText,
-        dealerPosition: state.dealerPosition,
-        playerOrder,
-        playerStacks,
-        playerCards,
-        communityCards: fullCommunityCards,
-        smallBlindPlayerId: playerOrder[sbPos] ?? "",
-        smallBlindAmount: state.smallBlind,
-        bigBlindPlayerId: playerOrder[bbPos] ?? "",
-        bigBlindAmount: state.bigBlind,
-      };
-
-      this.saveGameWithAction(
-        data.workspaceId,
-        data.channelId,
-        JSON.stringify(game.toJson()),
-        roundStartAction
-      );
-    } else {
-      this.saveGame(
-        data.workspaceId,
-        data.channelId,
-        JSON.stringify(game.toJson())
-      );
-    }
+    this.saveGame(data.workspaceId, data.channelId, JSON.stringify(game.toJson()));
 
     return { ok: true, game: game.getState() };
   }
@@ -1400,20 +824,6 @@ export class PokerDurableObject extends DurableObject<Env> {
 
     const game = TexasHoldem.fromJson(existing);
     game.preNH(data.playerId);
-
-    const messageReceivedAction: MessageReceivedActionV1 = {
-      schemaVersion: 1,
-      workspaceId: data.workspaceId,
-      channelId: data.channelId,
-      timestamp: data.timestamp,
-      actionType: "message_received",
-      messageText: data.messageText,
-      playerId: data.playerId,
-      slackMessageTs: data.slackMessageTs,
-      normalizedText: data.normalizedText,
-      handlerKey: data.handlerKey,
-    };
-    this.logAction(messageReceivedAction);
     this.saveGame(
       data.workspaceId,
       data.channelId,
@@ -1443,20 +853,6 @@ export class PokerDurableObject extends DurableObject<Env> {
 
     const game = TexasHoldem.fromJson(existing);
     game.preAH(data.playerId);
-
-    const messageReceivedAction: MessageReceivedActionV1 = {
-      schemaVersion: 1,
-      workspaceId: data.workspaceId,
-      channelId: data.channelId,
-      timestamp: data.timestamp,
-      actionType: "message_received",
-      messageText: data.messageText,
-      playerId: data.playerId,
-      slackMessageTs: data.slackMessageTs,
-      normalizedText: data.normalizedText,
-      handlerKey: data.handlerKey,
-    };
-    this.logAction(messageReceivedAction);
     this.saveGame(
       data.workspaceId,
       data.channelId,
@@ -1486,20 +882,6 @@ export class PokerDurableObject extends DurableObject<Env> {
 
     const game = TexasHoldem.fromJson(existing);
     game.preCheck(data.playerId);
-
-    const messageReceivedAction: MessageReceivedActionV1 = {
-      schemaVersion: 1,
-      workspaceId: data.workspaceId,
-      channelId: data.channelId,
-      timestamp: data.timestamp,
-      actionType: "message_received",
-      messageText: data.messageText,
-      playerId: data.playerId,
-      slackMessageTs: data.slackMessageTs,
-      normalizedText: data.normalizedText,
-      handlerKey: data.handlerKey,
-    };
-    this.logAction(messageReceivedAction);
     this.saveGame(
       data.workspaceId,
       data.channelId,
@@ -1529,20 +911,6 @@ export class PokerDurableObject extends DurableObject<Env> {
 
     const game = TexasHoldem.fromJson(existing);
     game.preFold(data.playerId);
-
-    const messageReceivedAction: MessageReceivedActionV1 = {
-      schemaVersion: 1,
-      workspaceId: data.workspaceId,
-      channelId: data.channelId,
-      timestamp: data.timestamp,
-      actionType: "message_received",
-      messageText: data.messageText,
-      playerId: data.playerId,
-      slackMessageTs: data.slackMessageTs,
-      normalizedText: data.normalizedText,
-      handlerKey: data.handlerKey,
-    };
-    this.logAction(messageReceivedAction);
     this.saveGame(
       data.workspaceId,
       data.channelId,
@@ -1572,20 +940,6 @@ export class PokerDurableObject extends DurableObject<Env> {
 
     const game = TexasHoldem.fromJson(existing);
     game.preCall(data.playerId);
-
-    const messageReceivedAction: MessageReceivedActionV1 = {
-      schemaVersion: 1,
-      workspaceId: data.workspaceId,
-      channelId: data.channelId,
-      timestamp: data.timestamp,
-      actionType: "message_received",
-      messageText: data.messageText,
-      playerId: data.playerId,
-      slackMessageTs: data.slackMessageTs,
-      normalizedText: data.normalizedText,
-      handlerKey: data.handlerKey,
-    };
-    this.logAction(messageReceivedAction);
     this.saveGame(
       data.workspaceId,
       data.channelId,
@@ -1616,20 +970,6 @@ export class PokerDurableObject extends DurableObject<Env> {
 
     const game = TexasHoldem.fromJson(existing);
     game.preBet(data.playerId, data.amount);
-
-    const messageReceivedAction: MessageReceivedActionV1 = {
-      schemaVersion: 1,
-      workspaceId: data.workspaceId,
-      channelId: data.channelId,
-      timestamp: data.timestamp,
-      actionType: "message_received",
-      messageText: data.messageText,
-      playerId: data.playerId,
-      slackMessageTs: data.slackMessageTs,
-      normalizedText: data.normalizedText,
-      handlerKey: data.handlerKey,
-    };
-    this.logAction(messageReceivedAction);
     this.saveGame(
       data.workspaceId,
       data.channelId,
@@ -1658,45 +998,8 @@ export class PokerDurableObject extends DurableObject<Env> {
     }
 
     const game = TexasHoldem.fromJson(existing);
-    const allPlayers = [
-      ...game.getActivePlayers(),
-      ...game.getInactivePlayers(),
-    ];
-    const player = allPlayers.find((p) => p.getId() === data.playerId);
-    const cashOutAmount = player?.getChips() ?? 0;
     game.cashOut(data.playerId);
-
-    const messageReceivedAction: MessageReceivedActionV1 = {
-      schemaVersion: 1,
-      workspaceId: data.workspaceId,
-      channelId: data.channelId,
-      timestamp: data.timestamp,
-      actionType: "message_received",
-      messageText: data.messageText,
-      playerId: data.playerId,
-      slackMessageTs: data.slackMessageTs,
-      normalizedText: data.normalizedText,
-      handlerKey: data.handlerKey,
-    };
-    this.logAction(messageReceivedAction);
-
-    const cashOutAction: ActionLogEntry = {
-      schemaVersion: 1,
-      workspaceId: data.workspaceId,
-      channelId: data.channelId,
-      timestamp: Date.now(),
-      actionType: "cash_out",
-      messageText: data.messageText,
-      playerId: data.playerId,
-      amount: cashOutAmount,
-    };
-
-    this.saveGameWithAction(
-      data.workspaceId,
-      data.channelId,
-      JSON.stringify(game.toJson()),
-      cashOutAction
-    );
+    this.saveGame(data.workspaceId, data.channelId, JSON.stringify(game.toJson()));
 
     return { ok: true, game: game.getState() };
   }
@@ -1721,37 +1024,7 @@ export class PokerDurableObject extends DurableObject<Env> {
 
     const game = TexasHoldem.fromJson(existing);
     game.removePlayer(data.playerId);
-
-    const messageReceivedAction: MessageReceivedActionV1 = {
-      schemaVersion: 1,
-      workspaceId: data.workspaceId,
-      channelId: data.channelId,
-      timestamp: data.timestamp,
-      actionType: "message_received",
-      messageText: data.messageText,
-      playerId: data.playerId,
-      slackMessageTs: data.slackMessageTs,
-      normalizedText: data.normalizedText,
-      handlerKey: data.handlerKey,
-    };
-    this.logAction(messageReceivedAction);
-
-    const leaveAction: ActionLogEntry = {
-      schemaVersion: 1,
-      workspaceId: data.workspaceId,
-      channelId: data.channelId,
-      timestamp: Date.now(),
-      actionType: "leave",
-      messageText: data.messageText,
-      playerId: data.playerId,
-    };
-
-    this.saveGameWithAction(
-      data.workspaceId,
-      data.channelId,
-      JSON.stringify(game.toJson()),
-      leaveAction
-    );
+    this.saveGame(data.workspaceId, data.channelId, JSON.stringify(game.toJson()));
 
     return { ok: true, game: game.getState() };
   }
@@ -1781,37 +1054,7 @@ export class PokerDurableObject extends DurableObject<Env> {
     if (result !== "Success") {
       return { ok: false, reason: "delete_failed", message: result };
     }
-
-    const messageReceivedAction: MessageReceivedActionV1 = {
-      schemaVersion: 1,
-      workspaceId: data.workspaceId,
-      channelId: data.channelId,
-      timestamp: data.timestamp,
-      actionType: "message_received",
-      messageText: data.messageText,
-      playerId: data.requestingPlayerId,
-      slackMessageTs: data.slackMessageTs,
-      normalizedText: data.normalizedText,
-      handlerKey: data.handlerKey,
-    };
-    this.logAction(messageReceivedAction);
-
-    const removePlayerAction: RemovePlayerActionV1 = {
-      schemaVersion: 1,
-      workspaceId: data.workspaceId,
-      channelId: data.channelId,
-      timestamp: Date.now(),
-      actionType: "remove_player",
-      messageText: data.messageText,
-      playerId: data.targetPlayerId,
-    };
-
-    this.saveGameWithAction(
-      data.workspaceId,
-      data.channelId,
-      JSON.stringify(game.toJson()),
-      removePlayerAction
-    );
+    this.saveGame(data.workspaceId, data.channelId, JSON.stringify(game.toJson()));
 
     return { ok: true, game: game.getState() };
   }
@@ -1829,183 +1072,6 @@ export class PokerDurableObject extends DurableObject<Env> {
     );
   }
 
-  /**
-   * Save game state and log action atomically.
-   * Both operations happen in the same DO request, ensuring consistency.
-   */
-  saveGameWithAction(
-    workspaceId: string,
-    channelId: string,
-    game: any,
-    action: ActionLogEntry
-  ): void {
-    // Save game state
-    this.sql.exec(
-      `
-			UPDATE PokerGames
-			SET game = ?
-			WHERE workspaceId = ? AND channelId = ?
-		`,
-      game,
-      workspaceId,
-      channelId
-    );
-
-    // Log the action
-    this.sql.exec(
-      `
-			INSERT INTO ActionLog (workspaceId, channelId, timestamp, data)
-			VALUES (?, ?, ?, ?)
-		`,
-      action.workspaceId,
-      action.channelId,
-      action.timestamp,
-      JSON.stringify(action)
-    );
-  }
-
-  /**
-   * Log an action to the immutable ActionLog.
-   * The data object should be self-contained with all relevant information.
-   * workspaceId, channelId, and timestamp are duplicated in columns for indexing
-   * and also stored in the JSON data for completeness.
-   *
-   * @param data - Typed action log entry (see ActionLog.ts for all types)
-   */
-  logAction(data: ActionLogEntry): void {
-    this.sql.exec(
-      `
-			INSERT INTO ActionLog (workspaceId, channelId, timestamp, data)
-			VALUES (?, ?, ?, ?)
-		`,
-      data.workspaceId,
-      data.channelId,
-      data.timestamp,
-      JSON.stringify(data)
-    );
-  }
-
-  /**
-   * Get action logs for a game, ordered by timestamp ascending.
-   * Returns typed ActionLogEntry objects for type-safe access.
-   */
-  getActionLogs(
-    workspaceId: string,
-    channelId: string,
-    options: {
-      limit?: number;
-      offset?: number;
-      startTime?: number;
-      endTime?: number;
-    } = {}
-  ): Array<{
-    id: number;
-    data: ActionLogEntry;
-  }> {
-    let query = `
-			SELECT id, data
-			FROM ActionLog
-			WHERE workspaceId = ? AND channelId = ?
-		`;
-    const params: (string | number)[] = [workspaceId, channelId];
-
-    if (options.startTime !== undefined) {
-      query += ` AND timestamp >= ?`;
-      params.push(options.startTime);
-    }
-
-    if (options.endTime !== undefined) {
-      query += ` AND timestamp <= ?`;
-      params.push(options.endTime);
-    }
-
-    query += ` ORDER BY timestamp ASC`;
-
-    if (options.limit) {
-      query += ` LIMIT ?`;
-      params.push(options.limit);
-    }
-
-    if (options.offset) {
-      query += ` OFFSET ?`;
-      params.push(options.offset);
-    }
-
-    const result = this.sql.exec(query, ...params);
-
-    const logs: Array<{ id: number; data: ActionLogEntry }> = [];
-    for (const row of result) {
-      logs.push({
-        id: row.id as number,
-        data: JSON.parse(row.data as string) as ActionLogEntry,
-      });
-    }
-
-    return logs;
-  }
-
-  /**
-   * Get the database size in bytes using SQLite pragma.
-   */
-  getDatabaseSize(): {
-    totalBytes: number;
-    pageSize: number;
-    pageCount: number;
-  } {
-    const pageSizeResult = this.sql.exec(`PRAGMA page_size`);
-    const pageCountResult = this.sql.exec(`PRAGMA page_count`);
-
-    const pageSize = pageSizeResult.one()?.page_size as number;
-    const pageCount = pageCountResult.one()?.page_count as number;
-
-    return {
-      totalBytes: pageSize * pageCount,
-      pageSize,
-      pageCount,
-    };
-  }
-
-  /**
-   * Get all action logs across all workspaces/channels for analytics.
-   * Only returns logs older than 24 hours to prevent live game snooping.
-   * Returns an array of all logs for streaming.
-   */
-  getAllActionLogs(): Array<{
-    id: number;
-    workspaceId: string;
-    channelId: string;
-    timestamp: number;
-    data: ActionLogEntry;
-  }> {
-    const oneDayAgo = Date.now() - 24 * 60 * 60 * 1000;
-    const result = this.sql.exec(
-      `
-      SELECT id, workspaceId, channelId, timestamp, data
-      FROM ActionLog
-      WHERE timestamp < ?
-      ORDER BY id ASC
-    `,
-      oneDayAgo
-    );
-
-    const logs: Array<{
-      id: number;
-      workspaceId: string;
-      channelId: string;
-      timestamp: number;
-      data: ActionLogEntry;
-    }> = [];
-    for (const row of result) {
-      logs.push({
-        id: row.id as number,
-        workspaceId: row.workspaceId as string,
-        channelId: row.channelId as string,
-        timestamp: row.timestamp as number,
-        data: JSON.parse(row.data as string) as ActionLogEntry,
-      });
-    }
-    return logs;
-  }
 }
 
 type PostedMessage = typeof isPostedMessageEvent extends (
@@ -2020,62 +1086,6 @@ export default {
     env: Env,
     ctx: ExecutionContext
   ): Promise<Response> {
-    const url = new URL(request.url);
-
-    // Analytics endpoints: /_analytics/db_size or /_analytics/logs
-    if (url.pathname.startsWith("/_analytics/")) {
-      const workspace = url.searchParams.get("workspace");
-      const channel = url.searchParams.get("channel");
-
-      if (!workspace || !channel) {
-        return new Response(
-          JSON.stringify({ error: "Missing workspace or channel query param" }),
-          { status: 400, headers: { "Content-Type": "application/json" } }
-        );
-      }
-
-      const id = env.POKER_DURABLE_OBJECT.idFromName(`${workspace}-${channel}`);
-      const stub = env.POKER_DURABLE_OBJECT.get(id);
-
-      // /_analytics/db_size?workspace=X&channel=Y
-      if (url.pathname === "/_analytics/db_size") {
-        const dbSize = await stub.getDatabaseSize();
-        return new Response(JSON.stringify(dbSize, null, 2), {
-          headers: { "Content-Type": "application/json" },
-        });
-      }
-
-      // /_analytics/logs?workspace=X&channel=Y
-      if (url.pathname === "/_analytics/logs") {
-        const logs = await stub.getAllActionLogs();
-
-        const { readable, writable } = new TransformStream();
-        const writer = writable.getWriter();
-        const encoder = new TextEncoder();
-
-        ctx.waitUntil(
-          (async () => {
-            try {
-              for (const log of logs) {
-                await writer.write(encoder.encode(JSON.stringify(log) + "\n"));
-              }
-            } finally {
-              await writer.close();
-            }
-          })()
-        );
-
-        return new Response(readable, {
-          headers: {
-            "Content-Type": "application/x-ndjson",
-            "Transfer-Encoding": "chunked",
-          },
-        });
-      }
-
-      return new Response("Not found", { status: 404 });
-    }
-
     const app = new SlackApp({ env }).event(
       "message",
       async ({ context, payload }) => {
@@ -2407,21 +1417,6 @@ async function handleMessage(
         messageText: payload.text ?? "",
         timestamp: Date.now(),
       };
-      if (handler !== newGame && handler !== joinGame && handler !== buyIn) {
-        const messageAction: MessageReceivedActionV1 = {
-          schemaVersion: 1,
-          workspaceId: context.teamId!,
-          channelId: context.channelId,
-          timestamp: meta.timestamp,
-          actionType: "message_received",
-          messageText: meta.messageText,
-          playerId: context.userId!,
-          slackMessageTs: meta.slackMessageTs,
-          normalizedText: meta.normalizedText,
-          handlerKey: meta.handlerKey,
-        };
-        stub.logAction(messageAction);
-      }
       await (handler as any)(env, context, payload, meta);
       return;
     }
