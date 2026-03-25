@@ -72,6 +72,7 @@ describe("Poker Durable Object", () => {
         }>("SELECT name FROM sqlite_master WHERE type='table'")
         .toArray();
       expect(result).toContainEqual({ name: "PokerGames" });
+      expect(result).toContainEqual({ name: "ChannelGameState" });
       expect(result).toContainEqual({ name: "Flops" });
     });
   });
@@ -111,7 +112,9 @@ describe("Poker Durable Object", () => {
       true
     );
 
-    resolveWrite?.();
+    if (resolveWrite) {
+      resolveWrite();
+    }
     await enablePromise;
 
     expect(callOrder).toEqual(["stub-called", "stub-resolved"]);
@@ -137,7 +140,9 @@ describe("Poker Durable Object", () => {
       false
     );
 
-    resolveWrite?.();
+    if (resolveWrite) {
+      resolveWrite();
+    }
     await disablePromise;
 
     expect(callOrder).toEqual(["stub-called", "stub-resolved"]);
@@ -193,6 +198,273 @@ describe("Poker Durable Object", () => {
     expect(sayFn).toHaveBeenCalledWith({
       text: "New Poker Game created!",
     });
+  });
+
+  it("creates sequential hand rows per channel and carries state forward", async () => {
+    const workspaceId = "history-workspace";
+    const channelId = "history-channel";
+    const sayFn = vi.fn();
+    const contextUser1 = createContext({
+      userId: "user1",
+      sayFn,
+      workspaceId,
+      channelId,
+    });
+    const contextUser2 = createContext({
+      userId: "user2",
+      sayFn,
+      workspaceId,
+      channelId,
+    });
+    const stub = getStub({ workspaceId, channelId });
+
+    await newGame(env, contextUser1, createGenericMessageEvent("user1"));
+    await joinGame(env, contextUser1, createGenericMessageEvent("user1"));
+    await joinGame(env, contextUser2, createGenericMessageEvent("user2"));
+    await buyIn(env, contextUser1, createGenericMessageEvent("user1", "buy in 100"));
+    await buyIn(env, contextUser2, createGenericMessageEvent("user2", "buy in 100"));
+
+    await startRound(env, contextUser1, createGenericMessageEvent("user1", "deal"));
+
+    let channelState = await getChannelGameState(stub, workspaceId, channelId);
+    let hands = await getPokerGames(stub, workspaceId, channelId);
+    expect(channelState?.activeGameId).toBe(1);
+    expect(channelState?.nextGameId).toBe(2);
+    expect(hands.map((hand) => hand.gameId)).toEqual([1]);
+    expect(hands[0].endedAt).toBeNull();
+
+    const gameState = await getGameState(stub, workspaceId, channelId);
+    const currentPlayer = gameState.activePlayers[gameState.currentPlayerIndex];
+    expect(currentPlayer).toBeTruthy();
+
+    await fold(
+      env,
+      createContext({
+        userId: currentPlayer.id,
+        sayFn,
+        workspaceId,
+        channelId,
+      }),
+      createGenericMessageEvent(currentPlayer.id, "fold")
+    );
+
+    channelState = await getChannelGameState(stub, workspaceId, channelId);
+    hands = await getPokerGames(stub, workspaceId, channelId);
+    expect(channelState?.activeGameId).toBeNull();
+    expect(channelState?.nextGameId).toBe(2);
+    expect(hands[0].endedAt).not.toBeNull();
+
+    await startRound(env, contextUser1, createGenericMessageEvent("user1", "deal"));
+
+    channelState = await getChannelGameState(stub, workspaceId, channelId);
+    hands = await getPokerGames(stub, workspaceId, channelId);
+    expect(channelState?.activeGameId).toBe(2);
+    expect(channelState?.nextGameId).toBe(3);
+    expect(hands.map((hand) => hand.gameId)).toEqual([1, 2]);
+  });
+
+  it("does not create a hand row or increment game id when deal fails to start", async () => {
+    const workspaceId = "failed-start-workspace";
+    const channelId = "failed-start-channel";
+    const sayFn = vi.fn();
+    const contextUser1 = createContext({
+      userId: "solo",
+      sayFn,
+      workspaceId,
+      channelId,
+    });
+    const stub = getStub({ workspaceId, channelId });
+
+    await newGame(env, contextUser1, createGenericMessageEvent("solo"));
+    await joinGame(env, contextUser1, createGenericMessageEvent("solo"));
+    sayFn.mockClear();
+
+    await startRound(env, contextUser1, createGenericMessageEvent("solo", "deal"));
+
+    const channelState = await getChannelGameState(stub, workspaceId, channelId);
+    const hands = await getPokerGames(stub, workspaceId, channelId);
+    expect(channelState?.activeGameId).toBeNull();
+    expect(channelState?.nextGameId).toBe(1);
+    expect(hands).toHaveLength(0);
+    expect(sayFn).not.toHaveBeenCalledWith({
+      text: expect.stringContaining("Starting game #"),
+    });
+  });
+
+  it("does not announce a new game id when deal is attempted mid-hand", async () => {
+    const workspaceId = "midhand-start-workspace";
+    const channelId = "midhand-start-channel";
+    const sayFn = vi.fn();
+    const contextUser1 = createContext({
+      userId: "user1",
+      sayFn,
+      workspaceId,
+      channelId,
+    });
+    const contextUser2 = createContext({
+      userId: "user2",
+      sayFn,
+      workspaceId,
+      channelId,
+    });
+    const stub = getStub({ workspaceId, channelId });
+
+    await newGame(env, contextUser1, createGenericMessageEvent("user1"));
+    await joinGame(env, contextUser1, createGenericMessageEvent("user1"));
+    await joinGame(env, contextUser2, createGenericMessageEvent("user2"));
+    await buyIn(env, contextUser1, createGenericMessageEvent("user1", "buy in 100"));
+    await buyIn(env, contextUser2, createGenericMessageEvent("user2", "buy in 100"));
+    await startRound(env, contextUser1, createGenericMessageEvent("user1", "deal"));
+    sayFn.mockClear();
+
+    await startRound(env, contextUser1, createGenericMessageEvent("user1", "deal"));
+
+    const channelState = await getChannelGameState(stub, workspaceId, channelId);
+    const hands = await getPokerGames(stub, workspaceId, channelId);
+    expect(channelState?.activeGameId).toBe(1);
+    expect(channelState?.nextGameId).toBe(2);
+    expect(hands).toHaveLength(1);
+    expect(sayFn).not.toHaveBeenCalledWith({
+      text: expect.stringContaining("Starting game #"),
+    });
+  });
+
+  it("migrates legacy waiting-state rows into ChannelGameState lazily", async () => {
+    const workspaceId = "legacy-waiting-workspace";
+    const channelId = "legacy-waiting-channel";
+    const stub = getStub({ workspaceId, channelId });
+
+    await runInDurableObject(stub, async (_instance, state) => {
+      state.storage.sql.exec(`
+        CREATE TABLE IF NOT EXISTS LegacyPokerGames (
+          workspaceId TEXT NOT NULL,
+          channelId TEXT NOT NULL,
+          game JSON NOT NULL,
+          PRIMARY KEY (workspaceId, channelId)
+        )
+      `);
+      state.storage.sql.exec(
+        `
+          INSERT INTO LegacyPokerGames (workspaceId, channelId, game)
+          VALUES (?, ?, ?)
+        `,
+        workspaceId,
+        channelId,
+        JSON.stringify(new TexasHoldem().toJson())
+      );
+    });
+
+    const migrated = await (stub as any).fetchGame(workspaceId, channelId);
+    expect(migrated).toBeTruthy();
+
+    const channelState = await getChannelGameState(stub, workspaceId, channelId);
+    const hands = await getPokerGames(stub, workspaceId, channelId);
+    expect(channelState?.activeGameId).toBeNull();
+    expect(channelState?.nextGameId).toBe(1);
+    expect(hands).toHaveLength(0);
+  });
+
+  it("migrates legacy active rows into PokerGames lazily", async () => {
+    const workspaceId = "legacy-active-workspace";
+    const channelId = "legacy-active-channel";
+    const stub = getStub({ workspaceId, channelId });
+    const legacyGame = new TexasHoldem();
+    legacyGame.addPlayer("user1");
+    legacyGame.addPlayer("user2");
+    legacyGame.buyIn("user1", 100);
+    legacyGame.buyIn("user2", 100);
+    legacyGame.startRound("user1");
+
+    await runInDurableObject(stub, async (_instance, state) => {
+      state.storage.sql.exec(`
+        CREATE TABLE IF NOT EXISTS LegacyPokerGames (
+          workspaceId TEXT NOT NULL,
+          channelId TEXT NOT NULL,
+          game JSON NOT NULL,
+          PRIMARY KEY (workspaceId, channelId)
+        )
+      `);
+      state.storage.sql.exec(
+        `
+          INSERT INTO LegacyPokerGames (workspaceId, channelId, game)
+          VALUES (?, ?, ?)
+        `,
+        workspaceId,
+        channelId,
+        JSON.stringify(legacyGame.toJson())
+      );
+    });
+
+    const migrated = await (stub as any).fetchGame(workspaceId, channelId);
+    expect(migrated).toBeTruthy();
+
+    const channelState = await getChannelGameState(stub, workspaceId, channelId);
+    const hands = await getPokerGames(stub, workspaceId, channelId);
+    expect(channelState?.activeGameId).toBe(1);
+    expect(channelState?.nextGameId).toBe(2);
+    expect(hands).toHaveLength(1);
+    expect(hands[0].gameId).toBe(1);
+    expect(hands[0].endedAt).toBeNull();
+  });
+
+  it("continues gameplay after migrating a legacy active hand", async () => {
+    const workspaceId = "legacy-active-continue-workspace";
+    const channelId = "legacy-active-continue-channel";
+    const stub = getStub({ workspaceId, channelId });
+    const sayFn = vi.fn();
+    const legacyGame = new TexasHoldem();
+    legacyGame.addPlayer("user1");
+    legacyGame.addPlayer("user2");
+    legacyGame.buyIn("user1", 100);
+    legacyGame.buyIn("user2", 100);
+    legacyGame.startRound("user1");
+
+    await runInDurableObject(stub, async (_instance, state) => {
+      state.storage.sql.exec(`
+        CREATE TABLE IF NOT EXISTS LegacyPokerGames (
+          workspaceId TEXT NOT NULL,
+          channelId TEXT NOT NULL,
+          game JSON NOT NULL,
+          PRIMARY KEY (workspaceId, channelId)
+        )
+      `);
+      state.storage.sql.exec(
+        `
+          INSERT INTO LegacyPokerGames (workspaceId, channelId, game)
+          VALUES (?, ?, ?)
+        `,
+        workspaceId,
+        channelId,
+        JSON.stringify(legacyGame.toJson())
+      );
+    });
+
+    const migrated = await (stub as any).fetchGame(workspaceId, channelId);
+    expect(migrated).toBeTruthy();
+
+    const migratedGameState = await getGameState(stub, workspaceId, channelId);
+    const currentPlayer =
+      migratedGameState.activePlayers[migratedGameState.currentPlayerIndex];
+    expect(currentPlayer).toBeTruthy();
+
+    await fold(
+      env,
+      createContext({
+        userId: currentPlayer.id,
+        sayFn,
+        workspaceId,
+        channelId,
+      }),
+      createGenericMessageEvent(currentPlayer.id, "fold")
+    );
+
+    const channelState = await getChannelGameState(stub, workspaceId, channelId);
+    const hands = await getPokerGames(stub, workspaceId, channelId);
+    expect(channelState?.activeGameId).toBeNull();
+    expect(channelState?.nextGameId).toBe(2);
+    expect(hands).toHaveLength(1);
+    expect(hands[0].gameId).toBe(1);
+    expect(hands[0].endedAt).not.toBeNull();
   });
 
   it("won't pre-deal if no game exists", async () => {
@@ -434,6 +706,11 @@ describe("Poker Durable Object", () => {
       [
         [
           {
+            "text": "Starting game #1!",
+          },
+        ],
+        [
+          {
             "text": ":chart_with_upwards_trend: $HUBS: $1,000.00 (+10.00, +1.00%)",
           },
         ],
@@ -643,6 +920,11 @@ describe("Poker Durable Object", () => {
       [
         [
           {
+            "text": "Starting game #2!",
+          },
+        ],
+        [
+          {
             "text": ":chart_with_upwards_trend: $HUBS: $1,000.00 (+10.00, +1.00%)",
           },
         ],
@@ -771,6 +1053,11 @@ describe("Poker Durable Object", () => {
     expect(gameStatePreflop.currentPot).toBe(120); // 40 SB + 80 BB
     expect(sayFn.mock.calls).toMatchInlineSnapshot(`
       [
+        [
+          {
+            "text": "Starting game #1!",
+          },
+        ],
         [
           {
             "text": ":chart_with_upwards_trend: $HUBS: $1,000.00 (+10.00, +1.00%)",
@@ -1008,6 +1295,11 @@ describe("Poker Durable Object", () => {
       [
         [
           {
+            "text": "Starting game #1!",
+          },
+        ],
+        [
+          {
             "text": ":chart_with_upwards_trend: $HUBS: $1,000.00 (+10.00, +1.00%)",
           },
         ],
@@ -1168,6 +1460,11 @@ describe("Poker Durable Object", () => {
     // First to act preflop is alice (after BB)
     expect(sayFn.mock.calls).toMatchInlineSnapshot(`
       [
+        [
+          {
+            "text": "Starting game #1!",
+          },
+        ],
         [
           {
             "text": ":chart_with_upwards_trend: $HUBS: $1,000.00 (+10.00, +1.00%)",
@@ -4214,14 +4511,80 @@ function getGameState(
   channelId: string
 ) {
   return runInDurableObject(stub, async (_instance, state) => {
-    const result = state.storage.sql
+    const channelState = state.storage.sql
       .exec(
-        "SELECT game FROM PokerGames WHERE workspaceId = ? AND channelId = ?",
+        "SELECT game, activeGameId FROM ChannelGameState WHERE workspaceId = ? AND channelId = ?",
         workspaceId,
         channelId
       )
       .one();
-    return TexasHoldem.fromJson(JSON.parse(result.game as string)).getState();
+
+    if (!channelState) {
+      throw new Error("No channel state found");
+    }
+
+    if (channelState.activeGameId !== null) {
+      const activeHand = state.storage.sql
+        .exec(
+          "SELECT game FROM PokerGames WHERE workspaceId = ? AND channelId = ? AND gameId = ?",
+          workspaceId,
+          channelId,
+          channelState.activeGameId
+        )
+        .one();
+
+      return TexasHoldem.fromJson(JSON.parse(activeHand.game as string)).getState();
+    }
+
+    return TexasHoldem.fromJson(
+      JSON.parse(channelState.game as string)
+    ).getState();
+  });
+}
+
+function getChannelGameState(
+  stub: DurableObjectStub,
+  workspaceId: string,
+  channelId: string
+) {
+  return runInDurableObject(stub, async (_instance, state) => {
+    const row = state.storage.sql
+      .exec(
+        "SELECT nextGameId, activeGameId FROM ChannelGameState WHERE workspaceId = ? AND channelId = ?",
+        workspaceId,
+        channelId
+      )
+      .one();
+
+    if (!row) {
+      return null;
+    }
+
+    return {
+      nextGameId: Number(row.nextGameId),
+      activeGameId:
+        row.activeGameId === null ? null : Number(row.activeGameId),
+    };
+  });
+}
+
+function getPokerGames(
+  stub: DurableObjectStub,
+  workspaceId: string,
+  channelId: string
+) {
+  return runInDurableObject(stub, async (_instance, state) => {
+    return state.storage.sql
+      .exec(
+        "SELECT gameId, endedAt FROM PokerGames WHERE workspaceId = ? AND channelId = ? ORDER BY gameId ASC",
+        workspaceId,
+        channelId
+      )
+      .toArray()
+      .map((row) => ({
+        gameId: Number(row.gameId),
+        endedAt: row.endedAt === null ? null : Number(row.endedAt),
+      }));
   });
 }
 
