@@ -165,6 +165,15 @@ export class PokerDurableObject extends DurableObject<Env> {
 			);
 		`);
 
+    this.sql.exec(`
+			CREATE TABLE IF NOT EXISTS PendingChannelResets (
+				workspaceId TEXT NOT NULL,
+				channelId TEXT NOT NULL,
+				requestedAt INTEGER NOT NULL,
+				PRIMARY KEY (workspaceId, channelId)
+			);
+		`);
+
     // Table to track processed messages for idempotency
     // This prevents duplicate processing when Slack retries message delivery
     this.sql.exec(`
@@ -571,6 +580,101 @@ export class PokerDurableObject extends DurableObject<Env> {
     );
   }
 
+  private hasPendingChannelReset(
+    workspaceId: string,
+    channelId: string
+  ): boolean {
+    const row = this.sql
+      .exec(
+        `
+			SELECT 1
+			FROM PendingChannelResets
+			WHERE workspaceId = ? AND channelId = ?
+			LIMIT 1
+		`,
+        workspaceId,
+        channelId
+      )
+      .next();
+
+    return row.value !== undefined;
+  }
+
+  private queueChannelReset(
+    workspaceId: string,
+    channelId: string,
+    requestedAt: number
+  ): void {
+    this.sql.exec(
+      `
+			INSERT INTO PendingChannelResets (workspaceId, channelId, requestedAt)
+			VALUES (?, ?, ?)
+			ON CONFLICT(workspaceId, channelId) DO UPDATE SET
+				requestedAt = excluded.requestedAt
+		`,
+      workspaceId,
+      channelId,
+      requestedAt
+    );
+  }
+
+  private clearPendingChannelReset(
+    workspaceId: string,
+    channelId: string
+  ): void {
+    this.sql.exec(
+      `
+			DELETE FROM PendingChannelResets
+			WHERE workspaceId = ? AND channelId = ?
+		`,
+      workspaceId,
+      channelId
+    );
+  }
+
+  private resetChannelHistoryAndStats(
+    workspaceId: string,
+    channelId: string,
+    preservedGame: string
+  ): void {
+    this.sql.exec(
+      `
+			DELETE FROM PokerGames
+			WHERE workspaceId = ? AND channelId = ?
+		`,
+      workspaceId,
+      channelId
+    );
+    this.sql.exec(
+      `
+			DELETE FROM PlayerHandFacts
+			WHERE workspaceId = ? AND channelId = ?
+		`,
+      workspaceId,
+      channelId
+    );
+    this.saveChannelGameState(workspaceId, channelId, preservedGame, 1, null);
+  }
+
+  private maybeApplyPendingChannelReset(
+    workspaceId: string,
+    channelId: string,
+    preservedGame: string
+  ): boolean {
+    const channelState = this.getChannelGameState(workspaceId, channelId);
+    if (
+      !channelState ||
+      channelState.activeGameId !== null ||
+      !this.hasPendingChannelReset(workspaceId, channelId)
+    ) {
+      return false;
+    }
+
+    this.resetChannelHistoryAndStats(workspaceId, channelId, preservedGame);
+    this.clearPendingChannelReset(workspaceId, channelId);
+    return true;
+  }
+
   private getChannelGameState(
     workspaceId: string,
     channelId: string
@@ -720,9 +824,22 @@ export class PokerDurableObject extends DurableObject<Env> {
     workspaceId: string,
     channelId: string
   ): { gameId: number; game: TexasHoldem; channelState: ChannelGameStateRecord } | null {
-    const channelState = this.loadChannelGameState(workspaceId, channelId);
+    let channelState = this.loadChannelGameState(workspaceId, channelId);
     if (!channelState || channelState.activeGameId !== null) {
       return null;
+    }
+
+    if (
+      this.maybeApplyPendingChannelReset(
+        workspaceId,
+        channelId,
+        JSON.stringify(channelState.game)
+      )
+    ) {
+      channelState = this.getChannelGameState(workspaceId, channelId);
+      if (!channelState) {
+        return null;
+      }
     }
 
     return {
@@ -957,6 +1074,45 @@ export class PokerDurableObject extends DurableObject<Env> {
     });
   }
 
+  async resetStatsAndHistory(data: {
+    workspaceId: string;
+    channelId: string;
+    playerId: string;
+    messageText: string;
+    normalizedText: string;
+    handlerKey: string;
+    slackMessageTs: string;
+    timestamp: number;
+  }): Promise<
+    | { ok: true; pending: boolean }
+    | { ok: false; reason: "no_game" }
+  > {
+    const channelState = this.loadChannelGameState(
+      data.workspaceId,
+      data.channelId
+    );
+    if (!channelState) {
+      return { ok: false, reason: "no_game" };
+    }
+
+    if (channelState.activeGameId !== null) {
+      this.queueChannelReset(
+        data.workspaceId,
+        data.channelId,
+        data.timestamp
+      );
+      return { ok: true, pending: true };
+    }
+
+    this.resetChannelHistoryAndStats(
+      data.workspaceId,
+      data.channelId,
+      JSON.stringify(channelState.game)
+    );
+    this.clearPendingChannelReset(data.workspaceId, data.channelId);
+    return { ok: true, pending: false };
+  }
+
   private finalizeHandIfEnded(
     workspaceId: string,
     channelId: string,
@@ -991,6 +1147,7 @@ export class PokerDurableObject extends DurableObject<Env> {
       channelState.nextGameId,
       null
     );
+    this.maybeApplyPendingChannelReset(workspaceId, channelId, serializedGame);
   }
 
   private loadScopedGame(
@@ -2223,6 +2380,7 @@ const MESSAGE_HANDLERS: Record<string, Function> = {
   "^context": context,
   "^stacks": showStacks,
   "^stats$": showStats,
+  "^reset stats$": resetStatsAndHistory,
   "^set stacks": setStacks,
   "^lets take her to the flop": takeHerToThe,
   "^lets take her to the turn": takeHerToThe,
@@ -3735,6 +3893,48 @@ export async function showStats(
   });
 
   await context.say({ text: message.trimEnd() });
+}
+
+export async function resetStatsAndHistory(
+  env: Env,
+  context: SlackAppContextWithChannelId,
+  payload: PostedMessage,
+  meta?: HandlerMeta
+) {
+  const stub = getDurableObject(env, context);
+  const rawMessageText = meta?.messageText ?? payload.text ?? "";
+  const normalizedText =
+    meta?.normalizedText ?? cleanMessageText(rawMessageText);
+  const handlerKey = meta?.handlerKey ?? "reset stats";
+  const slackMessageTs = meta?.slackMessageTs ?? payload.ts ?? "";
+  const timestamp = meta?.timestamp ?? Date.now();
+
+  const result = await stub.resetStatsAndHistory({
+    workspaceId: context.teamId!,
+    channelId: context.channelId,
+    playerId: context.userId!,
+    messageText: rawMessageText,
+    normalizedText,
+    handlerKey,
+    slackMessageTs,
+    timestamp,
+  });
+
+  if (!result.ok) {
+    await context.say({ text: NO_GAME_EXISTS_MESSAGE });
+    return;
+  }
+
+  if (result.pending) {
+    await context.say({
+      text: "Hand history and stats will reset after the current hand ends. The next hand will be game #1.",
+    });
+    return;
+  }
+
+  await context.say({
+    text: "Hand history and stats reset for this channel. The next hand will be game #1.",
+  });
 }
 
 export async function setStacks(

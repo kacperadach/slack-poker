@@ -42,6 +42,7 @@ import {
   showChips,
   showStacks,
   showStats,
+  resetStatsAndHistory,
   nudgePlayer,
   takeHerToThe,
   context,
@@ -308,6 +309,208 @@ describe("Poker Durable Object", () => {
     expect(channelState?.activeGameId).toBe(2);
     expect(channelState?.nextGameId).toBe(3);
     expect(hands.map((hand) => hand.gameId)).toEqual([1, 2]);
+  });
+
+  it("resets channel stats and history immediately when the channel is idle", async () => {
+    const workspaceId = "reset-completed-history-workspace";
+    const channelId = "reset-completed-history-channel";
+    const sayFn = vi.fn();
+    const marcusContext = createContext({
+      userId: MARCUS_USER_ID,
+      sayFn,
+      workspaceId,
+      channelId,
+    });
+    const camdenContext = createContext({
+      userId: CAMDEN_USER_ID,
+      sayFn,
+      workspaceId,
+      channelId,
+    });
+    const stub = getStub({ workspaceId, channelId });
+
+    await newGame(env, marcusContext, createGenericMessageEvent(MARCUS_USER_ID));
+    await joinGame(env, marcusContext, createGenericMessageEvent(MARCUS_USER_ID));
+    await joinGame(env, camdenContext, createGenericMessageEvent(CAMDEN_USER_ID));
+    await buyIn(
+      env,
+      marcusContext,
+      createGenericMessageEvent(MARCUS_USER_ID, "buy in 100")
+    );
+    await buyIn(
+      env,
+      camdenContext,
+      createGenericMessageEvent(CAMDEN_USER_ID, "buy in 100")
+    );
+    await startRound(
+      env,
+      marcusContext,
+      createGenericMessageEvent(MARCUS_USER_ID, "deal")
+    );
+
+    const firstHandState = await getGameState(stub, workspaceId, channelId);
+    const firstCurrentPlayer =
+      firstHandState.activePlayers[firstHandState.currentPlayerIndex];
+    await fold(
+      env,
+      createContext({
+        userId: firstCurrentPlayer.id,
+        sayFn,
+        workspaceId,
+        channelId,
+      }),
+      createGenericMessageEvent(firstCurrentPlayer.id, "fold")
+    );
+
+    expect(await getPokerGames(stub, workspaceId, channelId)).toEqual([
+      { gameId: 1, endedAt: expect.any(Number) },
+    ]);
+    expect(await getPlayerHandFacts(stub, workspaceId, channelId)).toHaveLength(2);
+
+    await resetStatsAndHistory(
+      env,
+      marcusContext,
+      createGenericMessageEvent(MARCUS_USER_ID, "reset stats")
+    );
+
+    let channelState = await getChannelGameState(stub, workspaceId, channelId);
+    let hands = await getPokerGames(stub, workspaceId, channelId);
+    let facts = await getPlayerHandFacts(stub, workspaceId, channelId);
+    const trackedStats = (await getPlayerHandStats(stub, workspaceId, channelId)).filter(
+      (player) => player.handsCount > 0
+    );
+
+    expect(channelState).toEqual({
+      activeGameId: null,
+      nextGameId: 1,
+    });
+    expect(hands).toEqual([]);
+    expect(facts).toEqual([]);
+    expect(trackedStats).toEqual([]);
+    expect(sayFn).toHaveBeenCalledWith({
+      text: "Hand history and stats reset for this channel. The next hand will be game #1.",
+    });
+
+    await startRound(
+      env,
+      marcusContext,
+      createGenericMessageEvent(MARCUS_USER_ID, "deal")
+    );
+
+    channelState = await getChannelGameState(stub, workspaceId, channelId);
+    hands = await getPokerGames(stub, workspaceId, channelId);
+    facts = await getPlayerHandFacts(stub, workspaceId, channelId);
+    const gameState = await getGameState(stub, workspaceId, channelId);
+
+    expect(channelState).toEqual({
+      activeGameId: 1,
+      nextGameId: 2,
+    });
+    expect(hands).toEqual([{ gameId: 1, endedAt: null }]);
+    expect(facts).toEqual([]);
+    expect(gameState.activePlayers).toHaveLength(2);
+    expect(sayFn).toHaveBeenCalledWith({ text: "Starting game #1!" });
+  });
+
+  it("queues a reset during an active hand, then clears history and stats after the hand ends", async () => {
+    const workspaceId = "reset-active-history-workspace";
+    const channelId = "reset-active-history-channel";
+    const sayFn = vi.fn();
+    const marcusContext = createContext({
+      userId: MARCUS_USER_ID,
+      sayFn,
+      workspaceId,
+      channelId,
+    });
+    const camdenContext = createContext({
+      userId: CAMDEN_USER_ID,
+      sayFn,
+      workspaceId,
+      channelId,
+    });
+    const stub = getStub({ workspaceId, channelId });
+
+    await newGame(env, marcusContext, createGenericMessageEvent(MARCUS_USER_ID));
+    await joinGame(env, marcusContext, createGenericMessageEvent(MARCUS_USER_ID));
+    await joinGame(env, camdenContext, createGenericMessageEvent(CAMDEN_USER_ID));
+    await buyIn(
+      env,
+      marcusContext,
+      createGenericMessageEvent(MARCUS_USER_ID, "buy in 100")
+    );
+    await buyIn(
+      env,
+      camdenContext,
+      createGenericMessageEvent(CAMDEN_USER_ID, "buy in 100")
+    );
+    await startRound(
+      env,
+      marcusContext,
+      createGenericMessageEvent(MARCUS_USER_ID, "deal")
+    );
+
+    await resetStatsAndHistory(
+      env,
+      marcusContext,
+      createGenericMessageEvent(MARCUS_USER_ID, "reset stats")
+    );
+
+    expect(await getPokerGames(stub, workspaceId, channelId)).toEqual([
+      { gameId: 1, endedAt: null },
+    ]);
+    expect(sayFn).toHaveBeenCalledWith({
+      text: "Hand history and stats will reset after the current hand ends. The next hand will be game #1.",
+    });
+
+    const activeHandState = await getGameState(stub, workspaceId, channelId);
+    const currentPlayer = activeHandState.activePlayers[activeHandState.currentPlayerIndex];
+    await fold(
+      env,
+      createContext({
+        userId: currentPlayer.id,
+        sayFn,
+        workspaceId,
+        channelId,
+      }),
+      createGenericMessageEvent(currentPlayer.id, "fold")
+    );
+
+    let channelState = await getChannelGameState(stub, workspaceId, channelId);
+    let hands = await getPokerGames(stub, workspaceId, channelId);
+    let facts = await getPlayerHandFacts(stub, workspaceId, channelId);
+    const trackedStats = (await getPlayerHandStats(stub, workspaceId, channelId)).filter(
+      (player) => player.handsCount > 0
+    );
+    const settledGameState = await getGameState(stub, workspaceId, channelId);
+
+    expect(channelState).toEqual({
+      activeGameId: null,
+      nextGameId: 1,
+    });
+    expect(hands).toEqual([]);
+    expect(facts).toEqual([]);
+    expect(trackedStats).toEqual([]);
+    expect(settledGameState.activePlayers).toHaveLength(2);
+    expect(
+      settledGameState.activePlayers.reduce((total, player) => total + player.chips, 0)
+    ).toBe(200);
+
+    await startRound(
+      env,
+      marcusContext,
+      createGenericMessageEvent(MARCUS_USER_ID, "deal")
+    );
+
+    channelState = await getChannelGameState(stub, workspaceId, channelId);
+    hands = await getPokerGames(stub, workspaceId, channelId);
+    facts = await getPlayerHandFacts(stub, workspaceId, channelId);
+
+    expect(channelState).toEqual({
+      activeGameId: 1,
+      nextGameId: 2,
+    });
+    expect(hands).toEqual([{ gameId: 1, endedAt: null }]);
+    expect(facts).toEqual([]);
   });
 
   it("persists player hand facts for an uncontested fold win and aggregates stats", async () => {
