@@ -17,6 +17,7 @@ vi.mock("../StockPrice", () => ({
 }));
 import { GameState, TexasHoldem } from "../Game";
 import { Card } from "../Card";
+import { Player } from "../Player";
 import {
   buyIn,
   joinGame,
@@ -40,6 +41,7 @@ import {
   revealSingleCard,
   showChips,
   showStacks,
+  showStats,
   nudgePlayer,
   takeHerToThe,
   context,
@@ -75,6 +77,7 @@ describe("Poker Durable Object", () => {
       expect(result).toContainEqual({ name: "PokerGames" });
       expect(result).toContainEqual({ name: "ChannelGameState" });
       expect(result).toContainEqual({ name: "Flops" });
+      expect(result).toContainEqual({ name: "PlayerHandFacts" });
     });
   });
 
@@ -305,6 +308,203 @@ describe("Poker Durable Object", () => {
     expect(channelState?.activeGameId).toBe(2);
     expect(channelState?.nextGameId).toBe(3);
     expect(hands.map((hand) => hand.gameId)).toEqual([1, 2]);
+  });
+
+  it("persists player hand facts for an uncontested fold win and aggregates stats", async () => {
+    const workspaceId = "facts-fold-workspace";
+    const channelId = "facts-fold-channel";
+    const sayFn = vi.fn();
+    const marcusContext = createContext({
+      userId: MARCUS_USER_ID,
+      sayFn,
+      workspaceId,
+      channelId,
+    });
+    const camdenContext = createContext({
+      userId: CAMDEN_USER_ID,
+      sayFn,
+      workspaceId,
+      channelId,
+    });
+    const stub = getStub({ workspaceId, channelId });
+
+    await newGame(env, marcusContext, createGenericMessageEvent(MARCUS_USER_ID));
+    await joinGame(env, marcusContext, createGenericMessageEvent(MARCUS_USER_ID));
+    await joinGame(env, camdenContext, createGenericMessageEvent(CAMDEN_USER_ID));
+    await buyIn(
+      env,
+      marcusContext,
+      createGenericMessageEvent(MARCUS_USER_ID, "buy in 100")
+    );
+    await buyIn(
+      env,
+      camdenContext,
+      createGenericMessageEvent(CAMDEN_USER_ID, "buy in 100")
+    );
+    await startRound(
+      env,
+      marcusContext,
+      createGenericMessageEvent(MARCUS_USER_ID, "deal")
+    );
+
+    const gameState = await getGameState(stub, workspaceId, channelId);
+    const currentPlayer = gameState.activePlayers[gameState.currentPlayerIndex];
+    await fold(
+      env,
+      createContext({
+        userId: currentPlayer.id,
+        sayFn,
+        workspaceId,
+        channelId,
+      }),
+      createGenericMessageEvent(currentPlayer.id, "fold")
+    );
+
+    const facts = await getPlayerHandFacts(stub, workspaceId, channelId);
+    expect(facts).toHaveLength(2);
+
+    const foldedPlayerFact = facts.find((fact) => fact.playerId === currentPlayer.id);
+    const winnerFact = facts.find((fact) => fact.playerId !== currentPlayer.id);
+
+    expect(foldedPlayerFact).toMatchObject({
+      participated: true,
+      wonAnyPot: false,
+      reachedShowdown: false,
+      folded: true,
+      chipsWon: 0,
+    });
+    expect(winnerFact).toMatchObject({
+      participated: true,
+      wonAnyPot: true,
+      reachedShowdown: false,
+      folded: false,
+      chipsWon: 120,
+      netChips: 40,
+    });
+
+    const stats = await getPlayerHandStats(stub, workspaceId, channelId);
+    const winningStat = stats.find((player) => player.playerId === winnerFact!.playerId);
+    expect(winningStat).toMatchObject({
+      handsCount: 1,
+      wonAnyPot: 1,
+      reachedShowdown: 0,
+      folded: 0,
+      chipsWon: 120,
+      netChips: 40,
+    });
+  });
+
+  it("persists showdown facts and split pots from tracked players", async () => {
+    const workspaceId = "facts-showdown-workspace";
+    const channelId = "facts-showdown-channel";
+    const sayFn = vi.fn();
+    const marcusContext = createContext({
+      userId: MARCUS_USER_ID,
+      sayFn,
+      workspaceId,
+      channelId,
+    });
+    const camdenContext = createContext({
+      userId: CAMDEN_USER_ID,
+      sayFn,
+      workspaceId,
+      channelId,
+    });
+    const stub = getStub({ workspaceId, channelId });
+
+    await newGame(env, marcusContext, createGenericMessageEvent(MARCUS_USER_ID));
+    await joinGame(env, marcusContext, createGenericMessageEvent(MARCUS_USER_ID));
+    await joinGame(env, camdenContext, createGenericMessageEvent(CAMDEN_USER_ID));
+    await buyIn(
+      env,
+      marcusContext,
+      createGenericMessageEvent(MARCUS_USER_ID, "buy in 100")
+    );
+    await buyIn(
+      env,
+      camdenContext,
+      createGenericMessageEvent(CAMDEN_USER_ID, "buy in 100")
+    );
+    await startRound(
+      env,
+      marcusContext,
+      createGenericMessageEvent(MARCUS_USER_ID, "deal")
+    );
+
+    await playHeadsUpToRiver(stub, workspaceId, channelId, sayFn);
+    await setActiveHandCards(stub, workspaceId, channelId, {
+      [MARCUS_USER_ID]: [
+        new Card("2", "clubs"),
+        new Card("3", "diamonds"),
+      ],
+      [CAMDEN_USER_ID]: [
+        new Card("4", "clubs"),
+        new Card("5", "diamonds"),
+      ],
+    }, [
+      new Card("6", "hearts"),
+      new Card("7", "spades"),
+      new Card("8", "clubs"),
+      new Card("9", "diamonds"),
+      new Card("10", "hearts"),
+    ]);
+
+    await finishHeadsUpRiver(stub, workspaceId, channelId, sayFn);
+
+    const facts = await getPlayerHandFacts(stub, workspaceId, channelId);
+    const marcusFact = facts.find((fact) => fact.playerId === MARCUS_USER_ID);
+    const camdenFact = facts.find((fact) => fact.playerId === CAMDEN_USER_ID);
+
+    expect(marcusFact).toMatchObject({
+      wonAnyPot: true,
+      reachedShowdown: true,
+      chipsWon: 80,
+      netChips: 0,
+    });
+    expect(camdenFact).toMatchObject({
+      wonAnyPot: true,
+      reachedShowdown: true,
+      chipsWon: 80,
+      netChips: 0,
+    });
+
+    sayFn.mockClear();
+    await showStats(env, marcusContext, createGenericMessageEvent(MARCUS_USER_ID, "stats"));
+    expect(sayFn).toHaveBeenCalledWith({
+      text: expect.stringContaining("*Marcus*: hands 1, won 1"),
+    });
+    expect(sayFn).toHaveBeenCalledWith({
+      text: expect.stringContaining("*Camden*: hands 1, won 1"),
+    });
+  });
+
+  it("records the underlying action type for all-in raises", async () => {
+    const game = new TexasHoldem();
+    game.addPlayer(MARCUS_USER_ID);
+    game.addPlayer(CAMDEN_USER_ID);
+    game.addPlayer(YUVI_USER_ID);
+    game.buyIn(MARCUS_USER_ID, 100);
+    game.buyIn(CAMDEN_USER_ID, 200);
+    game.buyIn(YUVI_USER_ID, 200);
+
+    game.startRound(CAMDEN_USER_ID);
+    game.bet(CAMDEN_USER_ID, 100);
+    game.fold(YUVI_USER_ID);
+    game.allIn(MARCUS_USER_ID);
+
+    const marcusAllInAction = game
+      .getBettingHistory()
+      .find(
+        (action) =>
+          action.playerId === MARCUS_USER_ID && action.actionType === "all_in"
+      );
+
+    expect(marcusAllInAction).toMatchObject({
+      actionType: "all_in",
+      underlyingActionType: "raise",
+      contributionAmount: 100,
+      amount: 100,
+    });
   });
 
   it("does not create a hand row or increment game id when deal fails to start", async () => {
@@ -4630,6 +4830,202 @@ function getPokerGames(
         endedAt: row.endedAt === null ? null : Number(row.endedAt),
       }));
   });
+}
+
+function getPlayerHandFacts(
+  stub: DurableObjectStub,
+  workspaceId: string,
+  channelId: string
+) {
+  return runInDurableObject(stub, async (_instance, state) => {
+    return state.storage.sql
+      .exec(
+        `
+          SELECT
+            workspaceId, channelId, gameId, playerId, participated, wonAnyPot,
+            reachedShowdown, folded, checkCount, callCount, betCount, raiseCount,
+            allInCount, raiseToTotal, chipsCommitted, chipsWon, netChips
+          FROM PlayerHandFacts
+          WHERE workspaceId = ? AND channelId = ?
+          ORDER BY gameId ASC, playerId ASC
+        `,
+        workspaceId,
+        channelId
+      )
+      .toArray()
+      .map((row) => ({
+        workspaceId: row.workspaceId as string,
+        channelId: row.channelId as string,
+        gameId: Number(row.gameId),
+        playerId: row.playerId as string,
+        participated: Number(row.participated) === 1,
+        wonAnyPot: Number(row.wonAnyPot) === 1,
+        reachedShowdown: Number(row.reachedShowdown) === 1,
+        folded: Number(row.folded) === 1,
+        checkCount: Number(row.checkCount),
+        callCount: Number(row.callCount),
+        betCount: Number(row.betCount),
+        raiseCount: Number(row.raiseCount),
+        allInCount: Number(row.allInCount),
+        raiseToTotal: Number(row.raiseToTotal),
+        chipsCommitted: Number(row.chipsCommitted),
+        chipsWon: Number(row.chipsWon),
+        netChips: Number(row.netChips),
+      }));
+  });
+}
+
+function getPlayerHandStats(
+  stub: DurableObjectStub,
+  workspaceId: string,
+  channelId: string
+) {
+  return runInDurableObject(stub, async (instance) => {
+    return instance.getPlayerHandStats(workspaceId, channelId);
+  });
+}
+
+async function setActiveHandCards(
+  stub: DurableObjectStub,
+  workspaceId: string,
+  channelId: string,
+  playerCardsById: Record<string, Card[]>,
+  communityCards: Card[]
+) {
+  await runInDurableObject(stub, async (_instance, state) => {
+    const channelState = state.storage.sql
+      .exec(
+        "SELECT activeGameId FROM ChannelGameState WHERE workspaceId = ? AND channelId = ?",
+        workspaceId,
+        channelId
+      )
+      .one();
+
+    if (!channelState || channelState.activeGameId === null) {
+      throw new Error("No active hand found");
+    }
+
+    const activeHand = state.storage.sql
+      .exec(
+        "SELECT game FROM PokerGames WHERE workspaceId = ? AND channelId = ? AND gameId = ?",
+        workspaceId,
+        channelId,
+        channelState.activeGameId
+      )
+      .one();
+
+    const game = TexasHoldem.fromJson(JSON.parse(activeHand.game as string));
+    [...game.getActivePlayers(), ...game.getInactivePlayers()].forEach((player) => {
+      const cards = playerCardsById[player.getId()];
+      if (cards) {
+        (player as Player).setCards(cards);
+      }
+    });
+    game.setCommunityCards(communityCards);
+
+    state.storage.sql.exec(
+      "UPDATE PokerGames SET game = ? WHERE workspaceId = ? AND channelId = ? AND gameId = ?",
+      JSON.stringify(game.toJson()),
+      workspaceId,
+      channelId,
+      channelState.activeGameId
+    );
+  });
+}
+
+async function playHeadsUpToRiver(
+  stub: DurableObjectStub,
+  workspaceId: string,
+  channelId: string,
+  sayFn: ReturnType<typeof vi.fn>
+) {
+  const preflopState = await getGameState(stub, workspaceId, channelId);
+  const preflopFirst = preflopState.activePlayers[preflopState.currentPlayerIndex];
+  await call(
+    env,
+    createContext({
+      userId: preflopFirst.id,
+      sayFn,
+      workspaceId,
+      channelId,
+    }),
+    createGenericMessageEvent(preflopFirst.id, "call")
+  );
+
+  const preflopSecondState = await getGameState(stub, workspaceId, channelId);
+  const preflopSecond =
+    preflopSecondState.activePlayers[preflopSecondState.currentPlayerIndex];
+  await check(
+    env,
+    createContext({
+      userId: preflopSecond.id,
+      sayFn,
+      workspaceId,
+      channelId,
+    }),
+    createGenericMessageEvent(preflopSecond.id, "check")
+  );
+
+  for (let street = 0; street < 2; street++) {
+    const firstState = await getGameState(stub, workspaceId, channelId);
+    const firstPlayer = firstState.activePlayers[firstState.currentPlayerIndex];
+    await check(
+      env,
+      createContext({
+        userId: firstPlayer.id,
+        sayFn,
+        workspaceId,
+        channelId,
+      }),
+      createGenericMessageEvent(firstPlayer.id, "check")
+    );
+
+    const secondState = await getGameState(stub, workspaceId, channelId);
+    const secondPlayer = secondState.activePlayers[secondState.currentPlayerIndex];
+    await check(
+      env,
+      createContext({
+        userId: secondPlayer.id,
+        sayFn,
+        workspaceId,
+        channelId,
+      }),
+      createGenericMessageEvent(secondPlayer.id, "check")
+    );
+  }
+}
+
+async function finishHeadsUpRiver(
+  stub: DurableObjectStub,
+  workspaceId: string,
+  channelId: string,
+  sayFn: ReturnType<typeof vi.fn>
+) {
+  const firstState = await getGameState(stub, workspaceId, channelId);
+  const firstPlayer = firstState.activePlayers[firstState.currentPlayerIndex];
+  await check(
+    env,
+    createContext({
+      userId: firstPlayer.id,
+      sayFn,
+      workspaceId,
+      channelId,
+    }),
+    createGenericMessageEvent(firstPlayer.id, "check")
+  );
+
+  const secondState = await getGameState(stub, workspaceId, channelId);
+  const secondPlayer = secondState.activePlayers[secondState.currentPlayerIndex];
+  await check(
+    env,
+    createContext({
+      userId: secondPlayer.id,
+      sayFn,
+      workspaceId,
+      channelId,
+    }),
+    createGenericMessageEvent(secondPlayer.id, "check")
+  );
 }
 
 function createGenericMessageEvent(
