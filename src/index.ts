@@ -55,7 +55,6 @@ type CompletedHandHistoryRecord = {
   createdAt: number;
   endedAt: number;
   handHistory: {
-    handCounter: number;
     handStartSnapshot: SerializedGame["handHistory"]["handStartSnapshot"];
     actionHistory: SerializedGame["handHistory"]["actionHistory"];
     boardSnapshot: SerializedGame["handHistory"]["boardSnapshot"];
@@ -728,7 +727,6 @@ export class PokerDurableObject extends DurableObject<Env> {
       createdAt: pokerGame.createdAt,
       endedAt: pokerGame.endedAt,
       handHistory: {
-        handCounter: pokerGame.game.handHistory?.handCounter ?? 0,
         handStartSnapshot:
           pokerGame.game.handHistory?.handStartSnapshot ?? null,
         actionHistory: pokerGame.game.handHistory?.actionHistory ?? [],

@@ -150,7 +150,6 @@ test("Hand start snapshot records frozen context and blind actions", () => {
 
   const handStartSnapshot = game.getHandStartSnapshot();
   assert(handStartSnapshot);
-  assert.equal(handStartSnapshot.handId, 1);
   assert.equal(handStartSnapshot.dealerPosition, 0);
   assert.equal(handStartSnapshot.smallBlind, game.getSmallBlind());
   assert.equal(handStartSnapshot.bigBlind, game.getBigBlind());

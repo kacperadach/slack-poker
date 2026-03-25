@@ -63,7 +63,6 @@ export interface HandStartPlayerSnapshot {
 }
 
 export interface HandStartSnapshot {
-  handId: number;
   dealerPosition: number;
   smallBlind: number;
   bigBlind: number;
@@ -106,13 +105,11 @@ export interface HandEndPlayerSnapshot {
 }
 
 export interface HandEndSnapshot {
-  handId: number;
   players: HandEndPlayerSnapshot[];
   potResults: PotResult[];
 }
 
 export interface HandHistoryState {
-  handCounter: number;
   handStartSnapshot: HandStartSnapshot | null;
   actionHistory: HandAction[];
   boardSnapshot: BoardSnapshot;
@@ -138,7 +135,6 @@ export class TexasHoldem {
   private events: GameEvent[];
   private bettingHistory: BettingAction[];
   private handStartChips: Map<string, number>;
-  private handCounter: number;
   private handStartSnapshot: HandStartSnapshot | null;
   private actionHistory: HandAction[];
   private boardSnapshot: BoardSnapshot;
@@ -162,7 +158,6 @@ export class TexasHoldem {
     preDealId: string | undefined = undefined,
     bettingHistory: BettingAction[] = [],
     handStartChips: Map<string, number> = new Map(),
-    handCounter: number = 0,
     handStartSnapshot: HandStartSnapshot | null = null,
     actionHistory: HandAction[] = [],
     boardSnapshot: BoardSnapshot = { flop: [], turn: [], river: [] },
@@ -186,7 +181,6 @@ export class TexasHoldem {
     this.events = [];
     this.bettingHistory = bettingHistory;
     this.handStartChips = handStartChips;
-    this.handCounter = handCounter;
     this.handStartSnapshot = handStartSnapshot;
     this.actionHistory = actionHistory;
     this.boardSnapshot = boardSnapshot;
@@ -365,7 +359,6 @@ export class TexasHoldem {
     }
 
     this.handStartSnapshot = {
-      handId: this.handCounter,
       dealerPosition: this.dealerPosition,
       smallBlind: this.smallBlind,
       bigBlind: this.bigBlind,
@@ -411,7 +404,6 @@ export class TexasHoldem {
     });
 
     this.handEndSnapshot = {
-      handId: this.handStartSnapshot.handId,
       players: this.handStartSnapshot.players.map((playerSnapshot) => {
         const player = this.activePlayers.find(
           (activePlayer) => activePlayer.getId() === playerSnapshot.playerId
@@ -547,7 +539,6 @@ export class TexasHoldem {
     this.communityCards = [];
     this.foldedPlayers.clear();
     this.resetCompletedHandTracking();
-    this.handCounter += 1;
     this.handStartChips = new Map(
       this.activePlayers.map((activePlayer) => [
         activePlayer.getId(),
@@ -2000,7 +1991,6 @@ export class TexasHoldem {
     }
 
     return {
-      handId: this.handStartSnapshot.handId,
       dealerPosition: this.handStartSnapshot.dealerPosition,
       smallBlind: this.handStartSnapshot.smallBlind,
       bigBlind: this.handStartSnapshot.bigBlind,
@@ -2025,7 +2015,6 @@ export class TexasHoldem {
     }
 
     return {
-      handId: this.handEndSnapshot.handId,
       players: this.handEndSnapshot.players.map((player) => ({ ...player })),
       potResults: this.handEndSnapshot.potResults.map((potResult) => ({
         ...potResult,
@@ -2212,7 +2201,6 @@ export class TexasHoldem {
 
   private serializeHandHistory() {
     return {
-      handCounter: this.handCounter,
       handStartSnapshot: this.serializeHandStartSnapshot(),
       actionHistory: this.actionHistory,
       boardSnapshot: this.serializeBoardSnapshot(this.boardSnapshot),
@@ -2266,7 +2254,6 @@ export class TexasHoldem {
       }
 
       return {
-        handId: handStartSnapshot.handId,
         dealerPosition: handStartSnapshot.dealerPosition,
         smallBlind: handStartSnapshot.smallBlind,
         bigBlind: handStartSnapshot.bigBlind,
@@ -2299,7 +2286,6 @@ export class TexasHoldem {
       }
 
       return {
-        handId: handEndSnapshot.handId,
         players: (handEndSnapshot.players ?? []).map((player: any) => ({
           ...player,
         })),
@@ -2333,7 +2319,6 @@ export class TexasHoldem {
       data.preDealId,
       data.bettingHistory || [],
       new Map(data.handStartChips || []),
-      handHistory.handCounter ?? data.handCounter ?? 0,
       deserializeHandStartSnapshot(
         handHistory.handStartSnapshot ?? data.handStartSnapshot
       ),
