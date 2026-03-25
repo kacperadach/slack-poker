@@ -1707,7 +1707,7 @@ export default {
     env: Env,
     ctx: ExecutionContext
   ): Promise<Response> {
-    const app = new SlackApp({ env: env as any }).event(
+    const app = new SlackApp({ env }).event(
       "message",
       async ({ context, payload }) => {
         if (!isPostedMessageEvent(payload)) {
@@ -3904,6 +3904,16 @@ function getDurableObject(env: Env, context: SlackAppContextWithChannelId) {
   );
 
   return env.POKER_DURABLE_OBJECT.get(id);
+}
+
+async function fetchStoredGameFromStub(
+  stub: {
+    fetchGame(workspaceId: string, channelId: string): Promise<SerializedGame | null>;
+  },
+  workspaceId: string,
+  channelId: string
+): Promise<SerializedGame | null> {
+  return stub.fetchGame(workspaceId, channelId);
 }
 
 async function sendGameEventMessages(
