@@ -1158,7 +1158,12 @@ export class PokerDurableObject extends DurableObject<Env> {
     slackMessageTs: string;
     timestamp: number;
   }): Promise<
-    | { ok: true; game: ReturnType<TexasHoldem["getState"]>; gameId: number }
+    | {
+        ok: true;
+        game: ReturnType<TexasHoldem["getState"]>;
+        started: boolean;
+        gameId: number | null;
+      }
     | { ok: false; reason: "no_game" }
   > {
     const existingActiveGame = this.loadActiveGame(
@@ -1180,7 +1185,12 @@ export class PokerDurableObject extends DurableObject<Env> {
         channelState,
         data.timestamp
       );
-      return { ok: true, game: game.getState(), gameId: existingActiveGame.gameId };
+      return {
+        ok: true,
+        game: game.getState(),
+        started: false,
+        gameId: existingActiveGame.gameId,
+      };
     }
 
     const hand = this.createHandFromChannelState(
@@ -1192,36 +1202,45 @@ export class PokerDurableObject extends DurableObject<Env> {
     }
 
     hand.game.startRound(data.playerId);
+    if (hand.game.getGameState() === GameState.WaitingForPlayers) {
+      this.saveChannelGameState(
+        data.workspaceId,
+        data.channelId,
+        JSON.stringify(hand.game.toJson()),
+        hand.channelState.nextGameId,
+        null
+      );
+
+      return {
+        ok: true,
+        game: hand.game.getState(),
+        started: false,
+        gameId: null,
+      };
+    }
+
     this.insertPokerGame(
       data.workspaceId,
       data.channelId,
       hand.gameId,
       JSON.stringify(hand.game.toJson()),
       data.timestamp,
-      hand.game.getGameState() === GameState.WaitingForPlayers
-        ? data.timestamp
-        : null
+      null
     );
     this.saveChannelGameState(
       data.workspaceId,
       data.channelId,
       JSON.stringify(hand.channelState.game),
       hand.channelState.nextGameId + 1,
-      hand.game.getGameState() === GameState.WaitingForPlayers
-        ? null
-        : hand.gameId
+      hand.gameId
     );
-    if (hand.game.getGameState() === GameState.WaitingForPlayers) {
-      this.saveChannelGameState(
-        data.workspaceId,
-        data.channelId,
-        JSON.stringify(hand.game.toJson()),
-        hand.channelState.nextGameId + 1,
-        null
-      );
-    }
 
-    return { ok: true, game: hand.game.getState(), gameId: hand.gameId };
+    return {
+      ok: true,
+      game: hand.game.getState(),
+      started: true,
+      gameId: hand.gameId,
+    };
   }
 
   async takeHerToThe(data: {
@@ -1327,7 +1346,12 @@ export class PokerDurableObject extends DurableObject<Env> {
     slackMessageTs: string;
     timestamp: number;
   }): Promise<
-    | { ok: true; game: ReturnType<TexasHoldem["getState"]> }
+    | {
+        ok: true;
+        game: ReturnType<TexasHoldem["getState"]>;
+        started: boolean;
+        gameId: number | null;
+      }
     | { ok: false; reason: "no_game" }
   > {
     const activeGame = this.loadActiveGame(data.workspaceId, data.channelId);
@@ -1341,29 +1365,45 @@ export class PokerDurableObject extends DurableObject<Env> {
       }
 
       hand.game.preDeal(data.playerId);
+      if (hand.game.getGameState() === GameState.WaitingForPlayers) {
+        this.saveChannelGameState(
+          data.workspaceId,
+          data.channelId,
+          JSON.stringify(hand.game.toJson()),
+          hand.channelState.nextGameId,
+          null
+        );
+
+        return {
+          ok: true,
+          game: hand.game.getState(),
+          started: false,
+          gameId: null,
+        };
+      }
+
       this.insertPokerGame(
         data.workspaceId,
         data.channelId,
         hand.gameId,
         JSON.stringify(hand.game.toJson()),
         data.timestamp,
-        hand.game.getGameState() === GameState.WaitingForPlayers
-          ? data.timestamp
-          : null
+        null
       );
       this.saveChannelGameState(
         data.workspaceId,
         data.channelId,
-        hand.game.getGameState() === GameState.WaitingForPlayers
-          ? JSON.stringify(hand.game.toJson())
-          : JSON.stringify(hand.channelState.game),
+        JSON.stringify(hand.channelState.game),
         hand.channelState.nextGameId + 1,
-        hand.game.getGameState() === GameState.WaitingForPlayers
-          ? null
-          : hand.gameId
+        hand.gameId
       );
 
-      return { ok: true, game: hand.game.getState() };
+      return {
+        ok: true,
+        game: hand.game.getState(),
+        started: true,
+        gameId: hand.gameId,
+      };
     }
 
     const channelState = this.loadChannelGameState(
@@ -1381,7 +1421,12 @@ export class PokerDurableObject extends DurableObject<Env> {
       data.timestamp
     );
 
-    return { ok: true, game: game.getState() };
+    return {
+      ok: true,
+      game: game.getState(),
+      started: false,
+      gameId: activeGame.gameId,
+    };
   }
 
   async preNH(data: {
@@ -3270,11 +3315,13 @@ export async function startRound(
     return;
   }
 
-  await context.say({ text: `Starting game #${result.gameId}!` });
+  if (result.started && result.gameId !== null) {
+    await context.say({ text: `Starting game #${result.gameId}!` });
+  }
 
   // Display stock price when a hand starts (non-blocking, graceful failure)
   // Check if a round actually started (gameState is PreFlop)
-  if (result.game.gameState === GameState.PreFlop) {
+  if (result.started && result.game.gameState === GameState.PreFlop) {
     const stockPriceMessage = await getHubsStockPriceMessage();
     if (stockPriceMessage) {
       await context.say({ text: stockPriceMessage });

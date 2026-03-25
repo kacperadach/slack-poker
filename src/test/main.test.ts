@@ -263,6 +263,72 @@ describe("Poker Durable Object", () => {
     expect(hands.map((hand) => hand.gameId)).toEqual([1, 2]);
   });
 
+  it("does not create a hand row or increment game id when deal fails to start", async () => {
+    const workspaceId = "failed-start-workspace";
+    const channelId = "failed-start-channel";
+    const sayFn = vi.fn();
+    const contextUser1 = createContext({
+      userId: "solo",
+      sayFn,
+      workspaceId,
+      channelId,
+    });
+    const stub = getStub({ workspaceId, channelId });
+
+    await newGame(env, contextUser1, createGenericMessageEvent("solo"));
+    await joinGame(env, contextUser1, createGenericMessageEvent("solo"));
+    sayFn.mockClear();
+
+    await startRound(env, contextUser1, createGenericMessageEvent("solo", "deal"));
+
+    const channelState = await getChannelGameState(stub, workspaceId, channelId);
+    const hands = await getPokerGames(stub, workspaceId, channelId);
+    expect(channelState?.activeGameId).toBeNull();
+    expect(channelState?.nextGameId).toBe(1);
+    expect(hands).toHaveLength(0);
+    expect(sayFn).not.toHaveBeenCalledWith({
+      text: expect.stringContaining("Starting game #"),
+    });
+  });
+
+  it("does not announce a new game id when deal is attempted mid-hand", async () => {
+    const workspaceId = "midhand-start-workspace";
+    const channelId = "midhand-start-channel";
+    const sayFn = vi.fn();
+    const contextUser1 = createContext({
+      userId: "user1",
+      sayFn,
+      workspaceId,
+      channelId,
+    });
+    const contextUser2 = createContext({
+      userId: "user2",
+      sayFn,
+      workspaceId,
+      channelId,
+    });
+    const stub = getStub({ workspaceId, channelId });
+
+    await newGame(env, contextUser1, createGenericMessageEvent("user1"));
+    await joinGame(env, contextUser1, createGenericMessageEvent("user1"));
+    await joinGame(env, contextUser2, createGenericMessageEvent("user2"));
+    await buyIn(env, contextUser1, createGenericMessageEvent("user1", "buy in 100"));
+    await buyIn(env, contextUser2, createGenericMessageEvent("user2", "buy in 100"));
+    await startRound(env, contextUser1, createGenericMessageEvent("user1", "deal"));
+    sayFn.mockClear();
+
+    await startRound(env, contextUser1, createGenericMessageEvent("user1", "deal"));
+
+    const channelState = await getChannelGameState(stub, workspaceId, channelId);
+    const hands = await getPokerGames(stub, workspaceId, channelId);
+    expect(channelState?.activeGameId).toBe(1);
+    expect(channelState?.nextGameId).toBe(2);
+    expect(hands).toHaveLength(1);
+    expect(sayFn).not.toHaveBeenCalledWith({
+      text: expect.stringContaining("Starting game #"),
+    });
+  });
+
   it("migrates legacy waiting-state rows into ChannelGameState lazily", async () => {
     const workspaceId = "legacy-waiting-workspace";
     const channelId = "legacy-waiting-channel";
@@ -546,11 +612,6 @@ describe("Poker Durable Object", () => {
       [
         [
           {
-            "text": "Starting game #1!",
-          },
-        ],
-        [
-          {
             "text": ":narp-brain: *user1* is being removed from the game for having no chips
       *user1* has left the table!
       :narp-brain: How about you get some friends first",
@@ -645,7 +706,7 @@ describe("Poker Durable Object", () => {
       [
         [
           {
-            "text": "Starting game #2!",
+            "text": "Starting game #1!",
           },
         ],
         [
@@ -859,7 +920,7 @@ describe("Poker Durable Object", () => {
       [
         [
           {
-            "text": "Starting game #3!",
+            "text": "Starting game #2!",
           },
         ],
         [
