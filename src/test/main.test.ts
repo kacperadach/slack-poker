@@ -43,7 +43,11 @@ import {
   nudgePlayer,
   takeHerToThe,
   context,
+  removePlayer,
+  enableHubsOnlyMode,
+  disableHubsOnlyMode,
 } from "..";
+import { ensureNarpBrainOnError } from "../slackErrorEmoji";
 import { MARCUS_USER_ID, CAMDEN_USER_ID, YUVI_USER_ID } from "../users";
 import {
   GenericMessageEvent,
@@ -75,6 +79,103 @@ describe("Poker Durable Object", () => {
   it("does not serve retired analytics endpoints", async () => {
     const response = await SELF.fetch("https://example.com/_analytics/logs");
     expect(response.status).toBe(401);
+  });
+
+  it("awaits hubs only mode write before acknowledging", async () => {
+    const sayFn = vi.fn();
+    const callOrder: string[] = [];
+    let resolveWrite: (() => void) | undefined;
+    const stub = {
+      setHubsOnlyMode: vi.fn(() => {
+        callOrder.push("stub-called");
+        return new Promise<void>((resolve) => {
+          resolveWrite = () => {
+            callOrder.push("stub-resolved");
+            resolve();
+          };
+        });
+      }),
+    };
+    const fakeEnv = createFakeDurableObjectEnv(stub);
+    const fakeContext = createContext({
+      userId: "user1",
+      sayFn,
+    });
+
+    const enablePromise = enableHubsOnlyMode(
+      fakeEnv,
+      fakeContext,
+      createGenericMessageEvent("user1", "hubs only")
+    );
+
+    await Promise.resolve();
+    expect(sayFn).not.toHaveBeenCalled();
+    expect(stub.setHubsOnlyMode).toHaveBeenCalledWith(
+      "test-workspace",
+      "test-channel",
+      true
+    );
+
+    resolveWrite?.();
+    await enablePromise;
+
+    expect(callOrder).toEqual(["stub-called", "stub-resolved"]);
+    expect(sayFn).toHaveBeenCalledWith({
+      text: ":lock: HUBS only mode enabled for this channel. Only the HUBS command will work until 'all commands' is typed.",
+    });
+
+    sayFn.mockClear();
+    callOrder.length = 0;
+    resolveWrite = undefined;
+
+    const disablePromise = disableHubsOnlyMode(
+      fakeEnv,
+      fakeContext,
+      createGenericMessageEvent("user1", "all commands")
+    );
+
+    await Promise.resolve();
+    expect(sayFn).not.toHaveBeenCalled();
+    expect(stub.setHubsOnlyMode).toHaveBeenLastCalledWith(
+      "test-workspace",
+      "test-channel",
+      false
+    );
+
+    resolveWrite?.();
+    await disablePromise;
+
+    expect(callOrder).toEqual(["stub-called", "stub-resolved"]);
+    expect(sayFn).toHaveBeenCalledWith({
+      text: ":unlock: All commands are now enabled for this channel.",
+    });
+  });
+
+  it("surfaces delete player validation errors from the durable object", async () => {
+    const sayFn = vi.fn();
+    const stub = {
+      deletePlayer: vi.fn().mockResolvedValue({
+        ok: false,
+        reason: "delete_failed",
+        message: "Cannot remove player during active hand",
+      }),
+    };
+    const fakeEnv = createFakeDurableObjectEnv(stub);
+    const fakeContext = createContext({
+      userId: "requester",
+      sayFn,
+    });
+
+    await removePlayer(
+      fakeEnv,
+      fakeContext,
+      createGenericMessageEvent("requester", "remove player <@TARGET123>")
+    );
+
+    expect(stub.deletePlayer).toHaveBeenCalled();
+    expect(sayFn).toHaveBeenCalledWith({
+      text: ensureNarpBrainOnError("Cannot remove player during active hand"),
+    });
   });
 
   it("starts new game", async () => {
@@ -3894,6 +3995,37 @@ describe("Poker Durable Object", () => {
     `);
   });
 
+  it("context command shows inactive player message", async () => {
+    const sayFn = vi.fn();
+    const postEphemeralFn = vi.fn();
+    const game = new TexasHoldem();
+    game.addPlayer("inactive-user");
+    game.buyIn("inactive-user", 500);
+    game.removePlayer("inactive-user");
+
+    const stub = {
+      fetchGame: vi.fn().mockResolvedValue(game.toJson()),
+    };
+    const fakeEnv = createFakeDurableObjectEnv(stub);
+    const fakeContext = createContext({
+      userId: "inactive-user",
+      sayFn,
+      postEphemeralFn,
+    });
+
+    await context(
+      fakeEnv,
+      fakeContext,
+      createGenericMessageEvent("inactive-user", "context")
+    );
+
+    expect(postEphemeralFn).toHaveBeenCalledWith({
+      channel: "test-channel",
+      user: "inactive-user",
+      text: ensureNarpBrainOnError("You are inactive. You are not at the table."),
+    });
+  });
+
   it("builds showdown win percentage message from street calculations", async () => {
     const winPctByCommunityCount: Record<number, [number, number]> = {
       0: [60, 40],
@@ -4133,6 +4265,15 @@ function createContext({
       },
     },
   } as unknown as SlackAppContextWithChannelId;
+}
+
+function createFakeDurableObjectEnv(stub: Record<string, unknown>) {
+  return {
+    POKER_DURABLE_OBJECT: {
+      idFromName: vi.fn().mockReturnValue("fake-do-id"),
+      get: vi.fn().mockReturnValue(stub),
+    },
+  } as unknown as Env;
 }
 
 afterAll(() => {

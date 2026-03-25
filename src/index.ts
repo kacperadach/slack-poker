@@ -407,7 +407,7 @@ export class PokerDurableObject extends DurableObject<Env> {
     return JSON.parse(game.value.game as string);
   }
 
-  async newGameWithAction(data: {
+  async newGame(data: {
     workspaceId: string;
     channelId: string;
     playerId: string;
@@ -442,7 +442,7 @@ export class PokerDurableObject extends DurableObject<Env> {
     return { ok: true };
   }
 
-  async joinGameWithAction(data: {
+  async joinGame(data: {
     workspaceId: string;
     channelId: string;
     playerId: string;
@@ -467,7 +467,7 @@ export class PokerDurableObject extends DurableObject<Env> {
     return { ok: true, game: game.getState() };
   }
 
-  async buyInWithAction(data: {
+  async buyIn(data: {
     workspaceId: string;
     channelId: string;
     playerId: string;
@@ -494,7 +494,7 @@ export class PokerDurableObject extends DurableObject<Env> {
     return { ok: true, game: game.getState() };
   }
 
-  async setStacksWithAction(data: {
+  async setStacks(data: {
     workspaceId: string;
     channelId: string;
     playerId: string;
@@ -557,7 +557,7 @@ export class PokerDurableObject extends DurableObject<Env> {
     return { ok: true, game: game.getState(), adjustments };
   }
 
-  async foldWithAction(data: {
+  async fold(data: {
     workspaceId: string;
     channelId: string;
     playerId: string;
@@ -582,7 +582,7 @@ export class PokerDurableObject extends DurableObject<Env> {
     return { ok: true, game: game.getState() };
   }
 
-  async checkWithAction(data: {
+  async check(data: {
     workspaceId: string;
     channelId: string;
     playerId: string;
@@ -607,7 +607,7 @@ export class PokerDurableObject extends DurableObject<Env> {
     return { ok: true, game: game.getState() };
   }
 
-  async callWithAction(data: {
+  async call(data: {
     workspaceId: string;
     channelId: string;
     playerId: string;
@@ -632,7 +632,7 @@ export class PokerDurableObject extends DurableObject<Env> {
     return { ok: true, game: game.getState() };
   }
 
-  async betWithAction(data: {
+  async bet(data: {
     workspaceId: string;
     channelId: string;
     playerId: string;
@@ -658,7 +658,7 @@ export class PokerDurableObject extends DurableObject<Env> {
     return { ok: true, game: game.getState() };
   }
 
-  async allInWithAction(data: {
+  async allIn(data: {
     workspaceId: string;
     channelId: string;
     playerId: string;
@@ -683,7 +683,7 @@ export class PokerDurableObject extends DurableObject<Env> {
     return { ok: true, game: game.getState() };
   }
 
-  async startRoundWithAction(data: {
+  async startRound(data: {
     workspaceId: string;
     channelId: string;
     playerId: string;
@@ -708,7 +708,7 @@ export class PokerDurableObject extends DurableObject<Env> {
     return { ok: true, game: game.getState() };
   }
 
-  async takeHerToTheWithAction(data: {
+  async takeHerToThe(data: {
     workspaceId: string;
     channelId: string;
     playerId: string;
@@ -748,7 +748,7 @@ export class PokerDurableObject extends DurableObject<Env> {
     return { ok: true, game: game.getState() };
   }
 
-  async thisPotAintBigEnoughWithAction(data: {
+  async thisPotAintBigEnough(data: {
     workspaceId: string;
     channelId: string;
     playerId: string;
@@ -779,7 +779,7 @@ export class PokerDurableObject extends DurableObject<Env> {
     return { ok: true, game: game.getState() };
   }
 
-  async preDealWithAction(data: {
+  async preDeal(data: {
     workspaceId: string;
     channelId: string;
     playerId: string;
@@ -804,7 +804,7 @@ export class PokerDurableObject extends DurableObject<Env> {
     return { ok: true, game: game.getState() };
   }
 
-  async preNHWithAction(data: {
+  async preNH(data: {
     workspaceId: string;
     channelId: string;
     playerId: string;
@@ -833,7 +833,7 @@ export class PokerDurableObject extends DurableObject<Env> {
     return { ok: true, game: game.getState() };
   }
 
-  async preAHWithAction(data: {
+  async preAH(data: {
     workspaceId: string;
     channelId: string;
     playerId: string;
@@ -862,7 +862,7 @@ export class PokerDurableObject extends DurableObject<Env> {
     return { ok: true, game: game.getState() };
   }
 
-  async preCheckWithAction(data: {
+  async preCheck(data: {
     workspaceId: string;
     channelId: string;
     playerId: string;
@@ -891,7 +891,7 @@ export class PokerDurableObject extends DurableObject<Env> {
     return { ok: true, game: game.getState() };
   }
 
-  async preFoldWithAction(data: {
+  async preFold(data: {
     workspaceId: string;
     channelId: string;
     playerId: string;
@@ -920,7 +920,7 @@ export class PokerDurableObject extends DurableObject<Env> {
     return { ok: true, game: game.getState() };
   }
 
-  async preCallWithAction(data: {
+  async preCall(data: {
     workspaceId: string;
     channelId: string;
     playerId: string;
@@ -949,7 +949,7 @@ export class PokerDurableObject extends DurableObject<Env> {
     return { ok: true, game: game.getState() };
   }
 
-  async preBetWithAction(data: {
+  async preBet(data: {
     workspaceId: string;
     channelId: string;
     playerId: string;
@@ -979,7 +979,7 @@ export class PokerDurableObject extends DurableObject<Env> {
     return { ok: true, game: game.getState() };
   }
 
-  async cashOutWithAction(data: {
+  async cashOut(data: {
     workspaceId: string;
     channelId: string;
     playerId: string;
@@ -1004,7 +1004,7 @@ export class PokerDurableObject extends DurableObject<Env> {
     return { ok: true, game: game.getState() };
   }
 
-  async leaveGameWithAction(data: {
+  async leaveGame(data: {
     workspaceId: string;
     channelId: string;
     playerId: string;
@@ -1029,7 +1029,7 @@ export class PokerDurableObject extends DurableObject<Env> {
     return { ok: true, game: game.getState() };
   }
 
-  async deletePlayerWithAction(data: {
+  async deletePlayer(data: {
     workspaceId: string;
     channelId: string;
     requestingPlayerId: string;
@@ -1485,15 +1485,6 @@ export async function context(
     (p) => p.getId() === context.userId
   );
 
-  if (!activePlayer) {
-    await context.client.chat.postEphemeral({
-      channel: context.channelId,
-      user: context.userId!,
-      text: ensureNarpBrainOnError("You are not in the game!"),
-    });
-    return;
-  }
-
   if (inactivePlayer) {
     await context.client.chat.postEphemeral({
       channel: context.channelId,
@@ -1501,6 +1492,15 @@ export async function context(
       text: ensureNarpBrainOnError(
         "You are inactive. You are not at the table."
       ),
+    });
+    return;
+  }
+
+  if (!activePlayer) {
+    await context.client.chat.postEphemeral({
+      channel: context.channelId,
+      user: context.userId!,
+      text: ensureNarpBrainOnError("You are not in the game!"),
     });
     return;
   }
@@ -1751,25 +1751,25 @@ async function hubsStockPrice(
   }
 }
 
-async function enableHubsOnlyMode(
+export async function enableHubsOnlyMode(
   env: Env,
   context: SlackAppContextWithChannelId,
   _payload: PostedMessage
 ) {
   const stub = getDurableObject(env, context);
-  stub.setHubsOnlyMode(context.teamId!, context.channelId, true);
+  await stub.setHubsOnlyMode(context.teamId!, context.channelId, true);
   await context.say({
     text: ":lock: HUBS only mode enabled for this channel. Only the HUBS command will work until 'all commands' is typed.",
   });
 }
 
-async function disableHubsOnlyMode(
+export async function disableHubsOnlyMode(
   env: Env,
   context: SlackAppContextWithChannelId,
   _payload: PostedMessage
 ) {
   const stub = getDurableObject(env, context);
-  stub.setHubsOnlyMode(context.teamId!, context.channelId, false);
+  await stub.setHubsOnlyMode(context.teamId!, context.channelId, false);
   await context.say({
     text: ":unlock: All commands are now enabled for this channel.",
   });
@@ -2085,7 +2085,7 @@ export async function preDeal(
   const slackMessageTs = meta?.slackMessageTs ?? payload.ts ?? "";
   const timestamp = meta?.timestamp ?? Date.now();
 
-  const result = await stub.preDealWithAction({
+  const result = await stub.preDeal({
     workspaceId: context.teamId!,
     channelId: context.channelId,
     playerId: context.userId!,
@@ -2118,7 +2118,7 @@ export async function preNH(
   const slackMessageTs = meta?.slackMessageTs ?? payload.ts ?? "";
   const timestamp = meta?.timestamp ?? Date.now();
 
-  const result = await stub.preNHWithAction({
+  const result = await stub.preNH({
     workspaceId: context.teamId!,
     channelId: context.channelId,
     playerId: context.userId!,
@@ -2151,7 +2151,7 @@ export async function preAH(
   const slackMessageTs = meta?.slackMessageTs ?? payload.ts ?? "";
   const timestamp = meta?.timestamp ?? Date.now();
 
-  const result = await stub.preAHWithAction({
+  const result = await stub.preAH({
     workspaceId: context.teamId!,
     channelId: context.channelId,
     playerId: context.userId!,
@@ -2184,7 +2184,7 @@ export async function preCheck(
   const slackMessageTs = meta?.slackMessageTs ?? payload.ts ?? "";
   const timestamp = meta?.timestamp ?? Date.now();
 
-  const result = await stub.preCheckWithAction({
+  const result = await stub.preCheck({
     workspaceId: context.teamId!,
     channelId: context.channelId,
     playerId: context.userId!,
@@ -2217,7 +2217,7 @@ export async function preFold(
   const slackMessageTs = meta?.slackMessageTs ?? payload.ts ?? "";
   const timestamp = meta?.timestamp ?? Date.now();
 
-  const result = await stub.preFoldWithAction({
+  const result = await stub.preFold({
     workspaceId: context.teamId!,
     channelId: context.channelId,
     playerId: context.userId!,
@@ -2250,7 +2250,7 @@ export async function preCall(
   const slackMessageTs = meta?.slackMessageTs ?? payload.ts ?? "";
   const timestamp = meta?.timestamp ?? Date.now();
 
-  const result = await stub.preCallWithAction({
+  const result = await stub.preCall({
     workspaceId: context.teamId!,
     channelId: context.channelId,
     playerId: context.userId!,
@@ -2302,7 +2302,7 @@ export async function preBet(
   const slackMessageTs = meta?.slackMessageTs ?? payload.ts ?? "";
   const timestamp = meta?.timestamp ?? Date.now();
 
-  const result = await stub.preBetWithAction({
+  const result = await stub.preBet({
     workspaceId: context.teamId!,
     channelId: context.channelId,
     playerId: context.userId!,
@@ -2360,7 +2360,7 @@ export async function bet(
   const slackMessageTs = meta?.slackMessageTs ?? payload.ts ?? "";
   const timestamp = meta?.timestamp ?? Date.now();
 
-  const result = await stub.betWithAction({
+  const result = await stub.bet({
     workspaceId: context.teamId!,
     channelId: context.channelId,
     playerId: context.userId!,
@@ -2394,7 +2394,7 @@ export async function call(
   const slackMessageTs = meta?.slackMessageTs ?? payload.ts ?? "";
   const timestamp = meta?.timestamp ?? Date.now();
 
-  const result = await stub.callWithAction({
+  const result = await stub.call({
     workspaceId: context.teamId!,
     channelId: context.channelId,
     playerId: context.userId!,
@@ -2427,7 +2427,7 @@ export async function allIn(
   const slackMessageTs = meta?.slackMessageTs ?? payload.ts ?? "";
   const timestamp = meta?.timestamp ?? Date.now();
 
-  const result = await stub.allInWithAction({
+  const result = await stub.allIn({
     workspaceId: context.teamId!,
     channelId: context.channelId,
     playerId: context.userId!,
@@ -2460,7 +2460,7 @@ export async function check(
   const slackMessageTs = meta?.slackMessageTs ?? payload.ts ?? "";
   const timestamp = meta?.timestamp ?? Date.now();
 
-  const result = await stub.checkWithAction({
+  const result = await stub.check({
     workspaceId: context.teamId!,
     channelId: context.channelId,
     playerId: context.userId!,
@@ -2493,7 +2493,7 @@ export async function thisPotAintBigEnough(
   const slackMessageTs = meta?.slackMessageTs ?? payload.ts ?? "";
   const timestamp = meta?.timestamp ?? Date.now();
 
-  const result = await stub.thisPotAintBigEnoughWithAction({
+  const result = await stub.thisPotAintBigEnough({
     workspaceId: context.teamId!,
     channelId: context.channelId,
     playerId: context.userId!,
@@ -2544,7 +2544,7 @@ export async function takeHerToThe(
     return;
   }
 
-  const result = await stub.takeHerToTheWithAction({
+  const result = await stub.takeHerToThe({
     workspaceId: context.teamId!,
     channelId: context.channelId,
     playerId: context.userId!,
@@ -2600,7 +2600,7 @@ export async function fold(
   const slackMessageTs = meta?.slackMessageTs ?? payload.ts ?? "";
   const timestamp = meta?.timestamp ?? Date.now();
 
-  const result = await stub.foldWithAction({
+  const result = await stub.fold({
     workspaceId: context.teamId!,
     channelId: context.channelId,
     playerId: context.userId!,
@@ -2633,7 +2633,7 @@ export async function startRound(
   const slackMessageTs = meta?.slackMessageTs ?? payload.ts ?? "";
   const timestamp = meta?.timestamp ?? Date.now();
 
-  const result = await stub.startRoundWithAction({
+  const result = await stub.startRound({
     workspaceId: context.teamId!,
     channelId: context.channelId,
     playerId: context.userId!,
@@ -2751,7 +2751,7 @@ export async function setStacks(
   const slackMessageTs = meta?.slackMessageTs ?? payload.ts ?? "";
   const timestamp = meta?.timestamp ?? Date.now();
 
-  const result = await stub.setStacksWithAction({
+  const result = await stub.setStacks({
     workspaceId: context.teamId!,
     channelId: context.channelId,
     playerId: context.userId!,
@@ -2842,7 +2842,7 @@ export async function cashOut(
   const slackMessageTs = meta?.slackMessageTs ?? payload.ts ?? "";
   const timestamp = meta?.timestamp ?? Date.now();
 
-  const result = await stub.cashOutWithAction({
+  const result = await stub.cashOut({
     workspaceId: context.teamId!,
     channelId: context.channelId,
     playerId: context.userId!,
@@ -2887,7 +2887,7 @@ export async function buyIn(
   const slackMessageTs = meta?.slackMessageTs ?? payload.ts ?? "";
   const timestamp = meta?.timestamp ?? Date.now();
 
-  const result = await stub.buyInWithAction({
+  const result = await stub.buyIn({
     workspaceId: context.teamId!,
     channelId: context.channelId,
     playerId: context.userId!,
@@ -2921,7 +2921,7 @@ export async function leaveGame(
   const slackMessageTs = meta?.slackMessageTs ?? payload.ts ?? "";
   const timestamp = meta?.timestamp ?? Date.now();
 
-  const result = await stub.leaveGameWithAction({
+  const result = await stub.leaveGame({
     workspaceId: context.teamId!,
     channelId: context.channelId,
     playerId: context.userId!,
@@ -2970,7 +2970,7 @@ export async function removePlayer(
   const slackMessageTs = meta?.slackMessageTs ?? payload.ts ?? "";
   const timestamp = meta?.timestamp ?? Date.now();
 
-  const result = await stub.deletePlayerWithAction({
+  const result = await stub.deletePlayer({
     workspaceId: context.teamId!,
     channelId: context.channelId,
     requestingPlayerId: context.userId!,
@@ -2985,6 +2985,10 @@ export async function removePlayer(
   if (!result.ok) {
     if (result.reason === "no_game") {
       await context.say({ text: NO_GAME_EXISTS_MESSAGE });
+    } else if (result.reason === "delete_failed" && result.message) {
+      await context.say({
+        text: ensureNarpBrainOnError(result.message),
+      });
     }
     return;
   }
@@ -3005,7 +3009,7 @@ export async function joinGame(
   const slackMessageTs = meta?.slackMessageTs ?? payload.ts ?? "";
   const timestamp = meta?.timestamp ?? Date.now();
 
-  const result = await stub.joinGameWithAction({
+  const result = await stub.joinGame({
     workspaceId: context.teamId!,
     channelId: context.channelId,
     playerId: context.userId!,
@@ -3037,7 +3041,7 @@ export async function newGame(
   const slackMessageTs = meta?.slackMessageTs ?? payload.ts ?? "";
   const timestamp = meta?.timestamp ?? Date.now();
 
-  const result = await stub.newGameWithAction({
+  const result = await stub.newGame({
     workspaceId: context.teamId!,
     channelId: context.channelId,
     playerId: context.userId!,
