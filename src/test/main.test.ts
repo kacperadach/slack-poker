@@ -19,6 +19,7 @@ import { GameState, TexasHoldem } from "../Game";
 import { Card } from "../Card";
 import { Player } from "../Player";
 import {
+  default as worker,
   buyIn,
   joinGame,
   newGame,
@@ -4929,6 +4930,225 @@ describe("Poker Durable Object", () => {
   });
 });
 
+describe("Public hand history API", () => {
+  it("serves visible channel summary, hand detail, and grace-filtered stats", async () => {
+    const workspaceId = "TDUQJ4MMY";
+    const channelId = "public-api-channel-1";
+    const sayFn = vi.fn();
+    const marcusContext = createContext({
+      userId: MARCUS_USER_ID,
+      sayFn,
+      workspaceId,
+      channelId,
+    });
+    const camdenContext = createContext({
+      userId: CAMDEN_USER_ID,
+      sayFn,
+      workspaceId,
+      channelId,
+    });
+    const stub = getStub({ workspaceId, channelId });
+
+    await newGame(env, marcusContext, createGenericMessageEvent(MARCUS_USER_ID));
+    await joinGame(env, marcusContext, createGenericMessageEvent(MARCUS_USER_ID));
+    await joinGame(env, camdenContext, createGenericMessageEvent(CAMDEN_USER_ID));
+    await buyIn(
+      env,
+      marcusContext,
+      createGenericMessageEvent(MARCUS_USER_ID, "buy in 100")
+    );
+    await buyIn(
+      env,
+      camdenContext,
+      createGenericMessageEvent(CAMDEN_USER_ID, "buy in 100")
+    );
+
+    await completeFoldWinHand({
+      workspaceId,
+      channelId,
+      sayFn,
+    });
+    await completeFoldWinHand({
+      workspaceId,
+      channelId,
+      sayFn,
+    });
+
+    await setHandEndedAt(stub, workspaceId, channelId, 1, hoursAgoMs(8));
+    await setHandEndedAt(stub, workspaceId, channelId, 2, hoursAgoMs(2));
+
+    const summaryResponse = await fetchPublicApi(
+      `/api/channels/${channelId}`
+    );
+    expect(summaryResponse.status).toBe(200);
+    expect(summaryResponse.body.data).toMatchObject({
+      channelId,
+      visibleHandsCount: 1,
+      firstHandEndedAt: hoursAgoMs(8),
+      lastHandEndedAt: hoursAgoMs(8),
+      playersWithTrackedStats: expect.arrayContaining([
+        MARCUS_USER_ID,
+        CAMDEN_USER_ID,
+      ]),
+    });
+
+    const handsResponse = await fetchPublicApi(
+      `/api/channels/${channelId}/hands`
+    );
+    expect(handsResponse.status).toBe(200);
+    expect(handsResponse.body.pagination.nextCursor).toBeNull();
+    expect(handsResponse.body.data).toHaveLength(1);
+    expect(handsResponse.body.data[0]).toMatchObject({
+      gameId: 1,
+      endedAt: hoursAgoMs(8),
+      playerIds: expect.arrayContaining([MARCUS_USER_ID, CAMDEN_USER_ID]),
+      playerCount: 2,
+      totalPot: 120,
+      reachedShowdown: false,
+    });
+    expect(handsResponse.body.data[0].winners).toHaveLength(1);
+
+    const detailResponse = await fetchPublicApi(
+      `/api/channels/${channelId}/hands/1`
+    );
+    expect(detailResponse.status).toBe(200);
+    expect(detailResponse.body.data.gameId).toBe(1);
+    expect(detailResponse.body.data.handStartSnapshot.players).toHaveLength(2);
+    expect(detailResponse.body.data.handStartSnapshot.players[0].holeCards).toHaveLength(
+      2
+    );
+    expect(detailResponse.body.data.actionHistory).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          actionType: "fold",
+        }),
+      ])
+    );
+    expect(detailResponse.body.data.handEndSnapshot.potResults).toHaveLength(1);
+
+    const hiddenHandResponse = await fetchPublicApi(
+      `/api/channels/${channelId}/hands/2`
+    );
+    expect(hiddenHandResponse.status).toBe(404);
+
+    const statsResponse = await fetchPublicApi(
+      `/api/channels/${channelId}/players/stats`
+    );
+    expect(statsResponse.status).toBe(200);
+    expect(statsResponse.body.data).toHaveLength(2);
+    statsResponse.body.data.forEach((row: any) => {
+      expect(row.handsCount).toBe(1);
+    });
+
+    const winnerId = handsResponse.body.data[0].winners[0];
+    const playerStatsResponse = await fetchPublicApi(
+      `/api/channels/${channelId}/players/${winnerId}/stats`
+    );
+    expect(playerStatsResponse.status).toBe(200);
+    expect(playerStatsResponse.body.data.playerId).toBe(winnerId);
+    expect(playerStatsResponse.body.data.recentVisibleHands).toHaveLength(1);
+    expect(playerStatsResponse.body.data.recentVisibleHands[0].gameId).toBe(1);
+  });
+
+  it("supports cursor pagination and player filtering on visible hands", async () => {
+    const workspaceId = "TDUQJ4MMY";
+    const channelId = "public-api-channel-2";
+    const sayFn = vi.fn();
+    const marcusContext = createContext({
+      userId: MARCUS_USER_ID,
+      sayFn,
+      workspaceId,
+      channelId,
+    });
+    const camdenContext = createContext({
+      userId: CAMDEN_USER_ID,
+      sayFn,
+      workspaceId,
+      channelId,
+    });
+    const stub = getStub({ workspaceId, channelId });
+
+    await newGame(env, marcusContext, createGenericMessageEvent(MARCUS_USER_ID));
+    await joinGame(env, marcusContext, createGenericMessageEvent(MARCUS_USER_ID));
+    await joinGame(env, camdenContext, createGenericMessageEvent(CAMDEN_USER_ID));
+    await buyIn(
+      env,
+      marcusContext,
+      createGenericMessageEvent(MARCUS_USER_ID, "buy in 100")
+    );
+    await buyIn(
+      env,
+      camdenContext,
+      createGenericMessageEvent(CAMDEN_USER_ID, "buy in 100")
+    );
+
+    await completeFoldWinHand({
+      workspaceId,
+      channelId,
+      sayFn,
+    });
+    await completeFoldWinHand({
+      workspaceId,
+      channelId,
+      sayFn,
+    });
+
+    await setHandEndedAt(stub, workspaceId, channelId, 1, hoursAgoMs(9));
+    await setHandEndedAt(stub, workspaceId, channelId, 2, hoursAgoMs(8));
+
+    const firstPage = await fetchPublicApi(
+      `/api/channels/${channelId}/hands?limit=1`
+    );
+    expect(firstPage.status).toBe(200);
+    expect(firstPage.body.data).toHaveLength(1);
+    expect(firstPage.body.data[0].gameId).toBe(2);
+    expect(firstPage.body.pagination.nextCursor).toEqual(expect.any(String));
+
+    const secondPage = await fetchPublicApi(
+      `/api/channels/${channelId}/hands?limit=1&cursor=${encodeURIComponent(
+        firstPage.body.pagination.nextCursor
+      )}`
+    );
+    expect(secondPage.status).toBe(200);
+    expect(secondPage.body.data).toHaveLength(1);
+    expect(secondPage.body.data[0].gameId).toBe(1);
+    expect(secondPage.body.pagination.nextCursor).toBeNull();
+
+    const filtered = await fetchPublicApi(
+      `/api/channels/${channelId}/hands?playerId=${YUVI_USER_ID}`
+    );
+    expect(filtered.status).toBe(200);
+    expect(filtered.body.data).toEqual([]);
+  });
+
+  it("returns errors for nonexistent channels and invalid cursors", async () => {
+    const missingChannel = await fetchPublicApi("/api/channels/no-such-channel");
+    expect(missingChannel.status).toBe(404);
+
+    const invalidCursor = await fetchPublicApi(
+      "/api/channels/no-such-channel/hands?cursor=not-a-cursor"
+    );
+    expect(invalidCursor.status).toBe(400);
+
+    const workspaceId = "TDUQJ4MMY";
+    const channelId = "public-api-channel-3";
+    const sayFn = vi.fn();
+    const marcusContext = createContext({
+      userId: MARCUS_USER_ID,
+      sayFn,
+      workspaceId,
+      channelId,
+    });
+
+    await newGame(env, marcusContext, createGenericMessageEvent(MARCUS_USER_ID));
+
+    const badCursor = await fetchPublicApi(
+      `/api/channels/${channelId}/hands?cursor=not-a-cursor`
+    );
+    expect(badCursor.status).toBe(400);
+  });
+});
+
 function getStub({
   workspaceId,
   channelId,
@@ -5083,6 +5303,83 @@ function getPlayerHandStats(
   return runInDurableObject(stub, async (instance) => {
     return instance.getPlayerHandStats(workspaceId, channelId);
   });
+}
+
+async function setHandEndedAt(
+  stub: DurableObjectStub,
+  workspaceId: string,
+  channelId: string,
+  gameId: number,
+  endedAt: number
+) {
+  return runInDurableObject(stub, async (_instance, state) => {
+    state.storage.sql.exec(
+      `
+        UPDATE PokerGames
+        SET endedAt = ?
+        WHERE workspaceId = ? AND channelId = ? AND gameId = ?
+      `,
+      endedAt,
+      workspaceId,
+      channelId,
+      gameId
+    );
+  });
+}
+
+async function fetchPublicApi(path: string) {
+  const response = await worker.fetch(
+    new Request(`https://example.com${path}`),
+    env,
+    {
+      waitUntil: vi.fn(),
+      passThroughOnException: vi.fn(),
+    } as unknown as ExecutionContext
+  );
+
+  return {
+    status: response.status,
+    body: (await response.json()) as any,
+  };
+}
+
+function hoursAgoMs(hours: number) {
+  return Date.now() - hours * 60 * 60 * 1000;
+}
+
+async function completeFoldWinHand({
+  workspaceId,
+  channelId,
+  sayFn,
+}: {
+  workspaceId: string;
+  channelId: string;
+  sayFn: ReturnType<typeof vi.fn>;
+}) {
+  const stub = getStub({ workspaceId, channelId });
+  await startRound(
+    env,
+    createContext({
+      userId: MARCUS_USER_ID,
+      sayFn,
+      workspaceId,
+      channelId,
+    }),
+    createGenericMessageEvent(MARCUS_USER_ID, "deal")
+  );
+
+  const gameState = await getGameState(stub, workspaceId, channelId);
+  const currentPlayer = gameState.activePlayers[gameState.currentPlayerIndex];
+  await fold(
+    env,
+    createContext({
+      userId: currentPlayer.id,
+      sayFn,
+      workspaceId,
+      channelId,
+    }),
+    createGenericMessageEvent(currentPlayer.id, "fold")
+  );
 }
 
 function requestResetStatsAndHistory(

@@ -95,6 +95,150 @@ type AggregatedPlayerHandStats = {
   netChips: number;
 };
 
+type PublicApiResponse<T> = {
+  data: T;
+  pagination?: {
+    nextCursor: string | null;
+  };
+  meta?: Record<string, unknown>;
+};
+
+type ChannelSummaryResponse = {
+  channelId: string;
+  visibleHandsCount: number;
+  firstHandEndedAt: number | null;
+  lastHandEndedAt: number | null;
+  playersWithTrackedStats: string[];
+};
+
+type ChannelHandPotResultSummary = {
+  potIndex: number;
+  potType: "main" | "side";
+  potSize: number;
+  splitAmount: number;
+  winnerPlayerIds: string[];
+};
+
+type ChannelHandIndexItem = {
+  gameId: number;
+  createdAt: number;
+  endedAt: number;
+  playerIds: string[];
+  playerCount: number;
+  smallBlind: number | null;
+  bigBlind: number | null;
+  board: {
+    flop: unknown[];
+    turn: unknown[];
+    river: unknown[];
+  };
+  winners: string[];
+  totalPot: number;
+  potResultsSummary: ChannelHandPotResultSummary[];
+  reachedShowdown: boolean;
+};
+
+type ChannelHandListResponse = PublicApiResponse<ChannelHandIndexItem[]>;
+
+type ChannelHandDetailResponse = {
+  gameId: number;
+  createdAt: number;
+  endedAt: number;
+  handStartSnapshot: SerializedGame["handHistory"]["handStartSnapshot"] | null;
+  actionHistory: SerializedGame["handHistory"]["actionHistory"];
+  boardSnapshot: SerializedGame["handHistory"]["boardSnapshot"];
+  handEndSnapshot: SerializedGame["handHistory"]["handEndSnapshot"] | null;
+  communityCards: SerializedGame["communityCards"];
+  activePlayers: SerializedGame["activePlayers"];
+  inactivePlayers: SerializedGame["inactivePlayers"];
+  foldedPlayers: SerializedGame["foldedPlayers"];
+  bettingHistory: SerializedGame["bettingHistory"];
+  dealerPosition: SerializedGame["dealerPosition"];
+  smallBlind: SerializedGame["smallBlind"];
+  bigBlind: SerializedGame["bigBlind"];
+  playerPositions: SerializedGame["playerPositions"];
+  currentPot: SerializedGame["currentPot"];
+  currentBetAmount: SerializedGame["currentBetAmount"];
+  lastRaiseAmount: SerializedGame["lastRaiseAmount"];
+  gameState: SerializedGame["gameState"];
+  preDealId: SerializedGame["preDealId"];
+  handStartChips: SerializedGame["handStartChips"];
+};
+
+type ChannelPlayerStatsRow = {
+  playerId: string;
+  handsCount: number;
+  wonAnyPot: number;
+  reachedShowdown: number;
+  folded: number;
+  checkCount: number;
+  callCount: number;
+  betCount: number;
+  raiseCount: number;
+  allInCount: number;
+  raiseToTotal: number;
+  chipsCommitted: number;
+  chipsWon: number;
+  netChips: number;
+};
+
+type ChannelPlayerStatsListResponse = PublicApiResponse<ChannelPlayerStatsRow[]>;
+
+type ChannelPlayerStatsDetailResponse = {
+  playerId: string;
+  handsCount: number;
+  wonAnyPot: number;
+  reachedShowdown: number;
+  folded: number;
+  checkCount: number;
+  callCount: number;
+  betCount: number;
+  raiseCount: number;
+  allInCount: number;
+  raiseToTotal: number;
+  chipsCommitted: number;
+  chipsWon: number;
+  netChips: number;
+  recentVisibleHands: ChannelHandIndexItem[];
+};
+
+type DecodedCursor = {
+  endedAt: number;
+  gameId: number;
+};
+
+const PUBLIC_WORKSPACE_ID = "TDUQJ4MMY";
+const PUBLIC_HAND_VISIBILITY_WINDOW_MS = 6 * 60 * 60 * 1000;
+
+function getPublicVisibilityCutoffMs(now: number = Date.now()): number {
+  return now - PUBLIC_HAND_VISIBILITY_WINDOW_MS;
+}
+
+function encodeCursor(cursor: DecodedCursor): string {
+  return Buffer.from(JSON.stringify(cursor)).toString("base64url");
+}
+
+function decodeCursor(cursor: string | null): DecodedCursor | null {
+  if (!cursor) {
+    return null;
+  }
+
+  try {
+    const decoded = JSON.parse(
+      Buffer.from(cursor, "base64url").toString("utf8")
+    ) as Partial<DecodedCursor>;
+    if (
+      typeof decoded.endedAt !== "number" ||
+      typeof decoded.gameId !== "number"
+    ) {
+      return null;
+    }
+    return { endedAt: decoded.endedAt, gameId: decoded.gameId };
+  } catch {
+    return null;
+  }
+}
+
 /** A Durable Object's behavior is defined in an exported Javascript class */
 export class PokerDurableObject extends DurableObject<Env> {
   sql: SqlStorage;
@@ -1072,6 +1216,404 @@ export class PokerDurableObject extends DurableObject<Env> {
         netChips: Number(row?.netChips ?? 0),
       };
     });
+  }
+
+  private channelExists(workspaceId: string, channelId: string): boolean {
+    if (this.getChannelGameState(workspaceId, channelId)) {
+      return true;
+    }
+
+    return (
+      this.sql.exec(
+        `
+          SELECT 1
+          FROM PokerGames
+          WHERE workspaceId = ? AND channelId = ?
+          LIMIT 1
+        `,
+        workspaceId,
+        channelId
+      ).next().done === false
+    );
+  }
+
+  private getVisiblePublicGameRows(
+    workspaceId: string,
+    channelId: string,
+    options?: {
+      limit?: number;
+      cursor?: DecodedCursor | null;
+    }
+  ): ActiveGameRecord[] {
+    const limit = Math.max(1, Math.min(options?.limit ?? 25, 100));
+    const cutoffMs = getPublicVisibilityCutoffMs();
+    const params: Array<string | number> = [workspaceId, channelId, cutoffMs];
+    let cursorClause = "";
+
+    if (options?.cursor) {
+      cursorClause = `
+        AND (
+          endedAt < ?
+          OR (endedAt = ? AND gameId < ?)
+        )
+      `;
+      params.push(
+        options.cursor.endedAt,
+        options.cursor.endedAt,
+        options.cursor.gameId
+      );
+    }
+
+    params.push(limit);
+
+    return this.sql
+      .exec(
+        `
+          SELECT gameId, game, createdAt, endedAt
+          FROM PokerGames
+          WHERE workspaceId = ?
+            AND channelId = ?
+            AND endedAt IS NOT NULL
+            AND endedAt <= ?
+            ${cursorClause}
+          ORDER BY endedAt DESC, gameId DESC
+          LIMIT ?
+        `,
+        ...params
+      )
+      .toArray()
+      .map((row) => ({
+        gameId: Number(row.gameId),
+        game: JSON.parse(row.game as string) as SerializedGame,
+        createdAt: Number(row.createdAt),
+        endedAt: Number(row.endedAt),
+      }));
+  }
+
+  private buildChannelHandIndexItem(record: ActiveGameRecord): ChannelHandIndexItem {
+    const handHistory = record.game.handHistory ?? {
+      handStartSnapshot: null,
+      actionHistory: [],
+      boardSnapshot: { flop: [], turn: [], river: [] },
+      handEndSnapshot: null,
+    };
+    const handStartSnapshot = handHistory.handStartSnapshot as
+      | {
+          smallBlind?: number;
+          bigBlind?: number;
+          players?: Array<{ playerId: string }>;
+        }
+      | null;
+    const handEndSnapshot = handHistory.handEndSnapshot as
+      | {
+          players?: Array<{ reachedShowdown: boolean }>;
+          potResults?: Array<{
+            potIndex: number;
+            potType: "main" | "side";
+            potSize: number;
+            splitAmount: number;
+            winnerPlayerIds: string[];
+          }>;
+        }
+      | null;
+    const playerIds: string[] =
+      handStartSnapshot?.players?.map((player: { playerId: string }) => player.playerId) ??
+      [
+        ...record.game.activePlayers.map((player: { id: string }) => player.id),
+        ...record.game.inactivePlayers.map((player: { id: string }) => player.id),
+      ];
+    const winners: string[] = Array.from(
+      new Set(
+        (handEndSnapshot?.potResults ?? []).flatMap(
+          (potResult: { winnerPlayerIds: string[] }) => potResult.winnerPlayerIds
+        )
+      )
+    );
+    const potResultsSummary: ChannelHandPotResultSummary[] = (
+      handEndSnapshot?.potResults ?? []
+    ).map((potResult) => ({
+        potIndex: potResult.potIndex,
+        potType: potResult.potType,
+        potSize: potResult.potSize,
+        splitAmount: potResult.splitAmount,
+        winnerPlayerIds: [...potResult.winnerPlayerIds],
+      }));
+
+    return {
+      gameId: record.gameId,
+      createdAt: record.createdAt,
+      endedAt: record.endedAt ?? record.createdAt,
+      playerIds,
+      playerCount: playerIds.length,
+      smallBlind: handStartSnapshot?.smallBlind ?? record.game.smallBlind ?? null,
+      bigBlind: handStartSnapshot?.bigBlind ?? record.game.bigBlind ?? null,
+      board: {
+        flop: [...(handHistory.boardSnapshot?.flop ?? [])],
+        turn: [...(handHistory.boardSnapshot?.turn ?? [])],
+        river: [...(handHistory.boardSnapshot?.river ?? [])],
+      },
+      winners,
+      totalPot: potResultsSummary.reduce(
+        (total: number, potResult: ChannelHandPotResultSummary) =>
+          total + potResult.potSize,
+        0
+      ),
+      potResultsSummary,
+      reachedShowdown: (handEndSnapshot?.players ?? []).some(
+        (player: { reachedShowdown: boolean }) => player.reachedShowdown
+      ),
+    };
+  }
+
+  private getVisiblePublicPlayerStats(
+    workspaceId: string,
+    channelId: string
+  ): ChannelPlayerStatsRow[] {
+    const rows = this.sql
+      .exec(
+        `
+          SELECT
+            facts.playerId AS playerId,
+            COUNT(*) AS handsCount,
+            SUM(facts.wonAnyPot) AS wonAnyPot,
+            SUM(facts.reachedShowdown) AS reachedShowdown,
+            SUM(facts.folded) AS folded,
+            SUM(facts.checkCount) AS checkCount,
+            SUM(facts.callCount) AS callCount,
+            SUM(facts.betCount) AS betCount,
+            SUM(facts.raiseCount) AS raiseCount,
+            SUM(facts.allInCount) AS allInCount,
+            SUM(facts.raiseToTotal) AS raiseToTotal,
+            SUM(facts.chipsCommitted) AS chipsCommitted,
+            SUM(facts.chipsWon) AS chipsWon,
+            SUM(facts.netChips) AS netChips
+          FROM PlayerHandFacts facts
+          INNER JOIN PokerGames games
+            ON games.workspaceId = facts.workspaceId
+            AND games.channelId = facts.channelId
+            AND games.gameId = facts.gameId
+          WHERE facts.workspaceId = ?
+            AND facts.channelId = ?
+            AND games.endedAt IS NOT NULL
+            AND games.endedAt <= ?
+          GROUP BY facts.playerId
+        `,
+        workspaceId,
+        channelId,
+        getPublicVisibilityCutoffMs()
+      )
+      .toArray();
+
+    return rows
+      .map((row) => ({
+        playerId: row.playerId as string,
+        handsCount: Number(row.handsCount),
+        wonAnyPot: Number(row.wonAnyPot),
+        reachedShowdown: Number(row.reachedShowdown),
+        folded: Number(row.folded),
+        checkCount: Number(row.checkCount),
+        callCount: Number(row.callCount),
+        betCount: Number(row.betCount),
+        raiseCount: Number(row.raiseCount),
+        allInCount: Number(row.allInCount),
+        raiseToTotal: Number(row.raiseToTotal),
+        chipsCommitted: Number(row.chipsCommitted),
+        chipsWon: Number(row.chipsWon),
+        netChips: Number(row.netChips),
+      }))
+      .sort(
+        (a, b) =>
+          b.netChips - a.netChips ||
+          b.handsCount - a.handsCount ||
+          a.playerId.localeCompare(b.playerId)
+      );
+  }
+
+  async getPublicChannelSummary(
+    workspaceId: string,
+    channelId: string
+  ): Promise<ChannelSummaryResponse | null> {
+    if (!this.channelExists(workspaceId, channelId)) {
+      return null;
+    }
+
+    const summaryRow = this.sql
+      .exec(
+        `
+          SELECT
+            COUNT(*) AS visibleHandsCount,
+            MIN(endedAt) AS firstHandEndedAt,
+            MAX(endedAt) AS lastHandEndedAt
+          FROM PokerGames
+          WHERE workspaceId = ?
+            AND channelId = ?
+            AND endedAt IS NOT NULL
+            AND endedAt <= ?
+        `,
+        workspaceId,
+        channelId,
+        getPublicVisibilityCutoffMs()
+      )
+      .one();
+    const playersWithTrackedStats = this.getVisiblePublicPlayerStats(
+      workspaceId,
+      channelId
+    ).map((player) => player.playerId);
+
+    return {
+      channelId,
+      visibleHandsCount: Number(summaryRow?.visibleHandsCount ?? 0),
+      firstHandEndedAt:
+        summaryRow?.firstHandEndedAt === null ||
+        typeof summaryRow?.firstHandEndedAt === "undefined"
+          ? null
+          : Number(summaryRow.firstHandEndedAt),
+      lastHandEndedAt:
+        summaryRow?.lastHandEndedAt === null ||
+        typeof summaryRow?.lastHandEndedAt === "undefined"
+          ? null
+          : Number(summaryRow.lastHandEndedAt),
+      playersWithTrackedStats,
+    };
+  }
+
+  async getPublicChannelHands(
+    workspaceId: string,
+    channelId: string,
+    options?: {
+      limit?: number;
+      cursor?: DecodedCursor | null;
+      playerId?: string | null;
+    }
+  ): Promise<ChannelHandListResponse | null> {
+    if (!this.channelExists(workspaceId, channelId)) {
+      return null;
+    }
+
+    const limit = Math.max(1, Math.min(options?.limit ?? 25, 100));
+    const visibleRows = this.getVisiblePublicGameRows(workspaceId, channelId, {
+      limit: 100,
+      cursor: options?.cursor ?? null,
+    });
+    const filteredRows = options?.playerId
+      ? visibleRows.filter((row) => {
+          const players =
+            row.game.handHistory?.handStartSnapshot?.players.map(
+              (player: { playerId: string }) => player.playerId
+            ) ??
+            [];
+          return players.includes(options.playerId!);
+        })
+      : visibleRows;
+    const pageRows = filteredRows.slice(0, limit + 1);
+    const data = pageRows
+      .slice(0, limit)
+      .map((row) => this.buildChannelHandIndexItem(row));
+    const nextCursor =
+      pageRows.length > limit
+        ? encodeCursor({
+            endedAt: pageRows[limit - 1].endedAt ?? pageRows[limit - 1].createdAt,
+            gameId: pageRows[limit - 1].gameId,
+          })
+        : null;
+
+    return {
+      data,
+      pagination: {
+        nextCursor,
+      },
+    };
+  }
+
+  async getPublicHandDetail(
+    workspaceId: string,
+    channelId: string,
+    gameId: number
+  ): Promise<ChannelHandDetailResponse | null> {
+    const gameRecord = this.getPokerGame(workspaceId, channelId, gameId);
+    if (!gameRecord || gameRecord.endedAt === null) {
+      return null;
+    }
+
+    if (gameRecord.endedAt > getPublicVisibilityCutoffMs()) {
+      return null;
+    }
+
+    const handHistory = gameRecord.game.handHistory ?? {
+      handStartSnapshot: null,
+      actionHistory: [],
+      boardSnapshot: { flop: [], turn: [], river: [] },
+      handEndSnapshot: null,
+    };
+
+    return {
+      gameId: gameRecord.gameId,
+      createdAt: gameRecord.createdAt,
+      endedAt: gameRecord.endedAt,
+      handStartSnapshot: handHistory.handStartSnapshot ?? null,
+      actionHistory: handHistory.actionHistory ?? [],
+      boardSnapshot: handHistory.boardSnapshot ?? {
+        flop: [],
+        turn: [],
+        river: [],
+      },
+      handEndSnapshot: handHistory.handEndSnapshot ?? null,
+      communityCards: gameRecord.game.communityCards,
+      activePlayers: gameRecord.game.activePlayers,
+      inactivePlayers: gameRecord.game.inactivePlayers,
+      foldedPlayers: gameRecord.game.foldedPlayers,
+      bettingHistory: gameRecord.game.bettingHistory,
+      dealerPosition: gameRecord.game.dealerPosition,
+      smallBlind: gameRecord.game.smallBlind,
+      bigBlind: gameRecord.game.bigBlind,
+      playerPositions: gameRecord.game.playerPositions,
+      currentPot: gameRecord.game.currentPot,
+      currentBetAmount: gameRecord.game.currentBetAmount,
+      lastRaiseAmount: gameRecord.game.lastRaiseAmount,
+      gameState: gameRecord.game.gameState,
+      preDealId: gameRecord.game.preDealId,
+      handStartChips: gameRecord.game.handStartChips,
+    };
+  }
+
+  async getPublicPlayerStats(
+    workspaceId: string,
+    channelId: string
+  ): Promise<ChannelPlayerStatsListResponse | null> {
+    if (!this.channelExists(workspaceId, channelId)) {
+      return null;
+    }
+
+    return {
+      data: this.getVisiblePublicPlayerStats(workspaceId, channelId),
+    };
+  }
+
+  async getPublicPlayerStatsDetail(
+    workspaceId: string,
+    channelId: string,
+    playerId: string
+  ): Promise<ChannelPlayerStatsDetailResponse | null> {
+    if (!this.channelExists(workspaceId, channelId)) {
+      return null;
+    }
+
+    const row = this.getVisiblePublicPlayerStats(workspaceId, channelId).find(
+      (player) => player.playerId === playerId
+    );
+    if (!row) {
+      return null;
+    }
+
+    const recentHands = await this.getPublicChannelHands(workspaceId, channelId, {
+      limit: 10,
+      playerId,
+    });
+
+    return {
+      ...row,
+      recentVisibleHands: recentHands?.data ?? [],
+    };
   }
 
   async resetStatsAndHistory(data: {
@@ -2173,12 +2715,151 @@ type PostedMessage = typeof isPostedMessageEvent extends (
   ? R
   : never;
 
+function jsonResponse(body: unknown, init?: ResponseInit): Response {
+  return new Response(JSON.stringify(body), {
+    ...init,
+    headers: {
+      "content-type": "application/json; charset=utf-8",
+      ...(init?.headers ?? {}),
+    },
+  });
+}
+
+function notFoundResponse(message: string): Response {
+  return jsonResponse({ error: message }, { status: 404 });
+}
+
+function methodNotAllowedResponse(): Response {
+  return jsonResponse({ error: "Method not allowed" }, { status: 405 });
+}
+
+function badRequestResponse(message: string): Response {
+  return jsonResponse({ error: message }, { status: 400 });
+}
+
+function getPublicDurableObject(env: Env, channelId: string) {
+  const id = env.POKER_DURABLE_OBJECT.idFromName(
+    `${PUBLIC_WORKSPACE_ID}-${channelId}`
+  );
+  return env.POKER_DURABLE_OBJECT.get(id);
+}
+
+async function handlePublicApiRequest(
+  request: Request,
+  env: Env
+): Promise<Response> {
+  if (request.method !== "GET") {
+    return methodNotAllowedResponse();
+  }
+
+  const url = new URL(request.url);
+  const segments = url.pathname.split("/").filter(Boolean);
+  const channelId = segments[2] ? decodeURIComponent(segments[2]) : null;
+
+  if (segments[0] !== "api" || segments[1] !== "channels" || !channelId) {
+    return notFoundResponse("Not found");
+  }
+
+  const stub = getPublicDurableObject(env, channelId);
+
+  if (segments.length === 3) {
+    const summary = await stub.getPublicChannelSummary(
+      PUBLIC_WORKSPACE_ID,
+      channelId
+    );
+    if (!summary) {
+      return notFoundResponse("Channel not found");
+    }
+    return jsonResponse({ data: summary } satisfies PublicApiResponse<ChannelSummaryResponse>);
+  }
+
+  if (segments[3] === "hands" && segments.length === 4) {
+    const limitParam = url.searchParams.get("limit");
+    const parsedLimit = limitParam ? Number(limitParam) : undefined;
+    const cursorParam = url.searchParams.get("cursor");
+    const decodedCursor = decodeCursor(cursorParam);
+    if (
+      typeof parsedLimit !== "undefined" &&
+      (!Number.isFinite(parsedLimit) || parsedLimit < 1)
+    ) {
+      return badRequestResponse("Invalid limit");
+    }
+    if (cursorParam && !decodedCursor) {
+      return badRequestResponse("Invalid cursor");
+    }
+
+    const response = await stub.getPublicChannelHands(
+      PUBLIC_WORKSPACE_ID,
+      channelId,
+      {
+        limit: parsedLimit,
+        cursor: decodedCursor,
+        playerId: url.searchParams.get("playerId"),
+      }
+    );
+    if (!response) {
+      return notFoundResponse("Channel not found");
+    }
+    return jsonResponse(response);
+  }
+
+  if (segments[3] === "hands" && segments.length === 5) {
+    const gameId = Number(segments[4]);
+    if (!Number.isInteger(gameId) || gameId < 1) {
+      return badRequestResponse("Invalid gameId");
+    }
+
+    const detail = await stub.getPublicHandDetail(
+      PUBLIC_WORKSPACE_ID,
+      channelId,
+      gameId
+    );
+    if (!detail) {
+      return notFoundResponse("Hand not found");
+    }
+    const body: PublicApiResponse<ChannelHandDetailResponse> = {
+      data: detail,
+    };
+    return jsonResponse(body);
+  }
+
+  if (segments[3] === "players" && segments[4] === "stats" && segments.length === 5) {
+    const stats = await stub.getPublicPlayerStats(PUBLIC_WORKSPACE_ID, channelId);
+    if (!stats) {
+      return notFoundResponse("Channel not found");
+    }
+    return jsonResponse(stats);
+  }
+
+  if (segments[3] === "players" && segments[5] === "stats" && segments.length === 6) {
+    const playerId = decodeURIComponent(segments[4]);
+    const stats = await stub.getPublicPlayerStatsDetail(
+      PUBLIC_WORKSPACE_ID,
+      channelId,
+      playerId
+    );
+    if (!stats) {
+      return notFoundResponse("Player not found");
+    }
+    const body: PublicApiResponse<ChannelPlayerStatsDetailResponse> = {
+      data: stats,
+    };
+    return jsonResponse(body);
+  }
+
+  return notFoundResponse("Not found");
+}
+
 export default {
   async fetch(
     request: Request,
     env: Env,
     ctx: ExecutionContext
   ): Promise<Response> {
+    if (new URL(request.url).pathname.startsWith("/api/")) {
+      return handlePublicApiRequest(request, env);
+    }
+
     const app = new SlackApp({ env }).event(
       "message",
       async ({ context, payload }) => {
