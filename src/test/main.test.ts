@@ -4931,7 +4931,7 @@ describe("Poker Durable Object", () => {
 });
 
 describe("Public hand history API", () => {
-  it("serves visible channel summary, hand detail, and grace-filtered stats", async () => {
+  it("serves visible channel summary and hand detail while keeping stats live", async () => {
     const workspaceId = "TDUQJ4MMY";
     const channelId = "public-api-channel-1";
     const sayFn = vi.fn();
@@ -5037,7 +5037,7 @@ describe("Public hand history API", () => {
     expect(statsResponse.status).toBe(200);
     expect(statsResponse.body.data).toHaveLength(2);
     statsResponse.body.data.forEach((row: any) => {
-      expect(row.handsCount).toBe(1);
+      expect(row.handsCount).toBe(2);
     });
 
     const winnerId = handsResponse.body.data[0].winners[0];
@@ -5046,6 +5046,7 @@ describe("Public hand history API", () => {
     );
     expect(playerStatsResponse.status).toBe(200);
     expect(playerStatsResponse.body.data.playerId).toBe(winnerId);
+    expect(playerStatsResponse.body.data.handsCount).toBe(2);
     expect(playerStatsResponse.body.data.recentVisibleHands).toHaveLength(1);
     expect(playerStatsResponse.body.data.recentVisibleHands[0].gameId).toBe(1);
   });

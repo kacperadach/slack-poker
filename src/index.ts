@@ -1365,10 +1365,14 @@ export class PokerDurableObject extends DurableObject<Env> {
     };
   }
 
-  private getVisiblePublicPlayerStats(
+  private getPublicPlayerStatsRows(
     workspaceId: string,
-    channelId: string
+    channelId: string,
+    options?: {
+      visibleOnly?: boolean;
+    }
   ): ChannelPlayerStatsRow[] {
+    const endedAtClause = options?.visibleOnly ? "AND games.endedAt <= ?" : "";
     const rows = this.sql
       .exec(
         `
@@ -1395,12 +1399,12 @@ export class PokerDurableObject extends DurableObject<Env> {
           WHERE facts.workspaceId = ?
             AND facts.channelId = ?
             AND games.endedAt IS NOT NULL
-            AND games.endedAt <= ?
+            ${endedAtClause}
           GROUP BY facts.playerId
         `,
         workspaceId,
         channelId,
-        getPublicVisibilityCutoffMs()
+        ...(options?.visibleOnly ? [getPublicVisibilityCutoffMs()] : [])
       )
       .toArray();
 
@@ -1455,7 +1459,7 @@ export class PokerDurableObject extends DurableObject<Env> {
         getPublicVisibilityCutoffMs()
       )
       .one();
-    const playersWithTrackedStats = this.getVisiblePublicPlayerStats(
+    const playersWithTrackedStats = this.getPublicPlayerStatsRows(
       workspaceId,
       channelId
     ).map((player) => player.playerId);
@@ -1585,7 +1589,7 @@ export class PokerDurableObject extends DurableObject<Env> {
     }
 
     return {
-      data: this.getVisiblePublicPlayerStats(workspaceId, channelId),
+      data: this.getPublicPlayerStatsRows(workspaceId, channelId),
     };
   }
 
@@ -1598,7 +1602,7 @@ export class PokerDurableObject extends DurableObject<Env> {
       return null;
     }
 
-    const row = this.getVisiblePublicPlayerStats(workspaceId, channelId).find(
+    const row = this.getPublicPlayerStatsRows(workspaceId, channelId).find(
       (player) => player.playerId === playerId
     );
     if (!row) {
