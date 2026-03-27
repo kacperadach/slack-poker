@@ -103,6 +103,8 @@ type PublicApiResponse<T> = {
   meta?: Record<string, unknown>;
 };
 
+type HandVisibility = "embargoed" | "revealed";
+
 type ChannelSummaryResponse = {
   channelId: string;
   visibleHandsCount: number;
@@ -138,7 +140,22 @@ type ChannelHandIndexItem = {
   reachedShowdown: boolean;
 };
 
+type EmbargoedChannelHandIndexItem = ChannelHandIndexItem & {
+  visibility: "embargoed";
+};
+
+type RevealedChannelHandIndexItem = ChannelHandIndexItem & {
+  visibility: "revealed";
+};
+
+type ChannelHandHistoryIndexItem =
+  | EmbargoedChannelHandIndexItem
+  | RevealedChannelHandIndexItem;
+
 type ChannelHandListResponse = PublicApiResponse<ChannelHandIndexItem[]>;
+type ChannelHandHistoryListResponse = PublicApiResponse<
+  ChannelHandHistoryIndexItem[]
+>;
 
 type ChannelHandDetailResponse = {
   gameId: number;
@@ -164,6 +181,53 @@ type ChannelHandDetailResponse = {
   preDealId: SerializedGame["preDealId"];
   handStartChips: SerializedGame["handStartChips"];
 };
+
+type RevealedChannelHandDetailResponse = ChannelHandDetailResponse & {
+  visibility: "revealed";
+};
+
+type EmbargoedHandStartPlayerSnapshot = Omit<
+  NonNullable<ChannelHandDetailResponse["handStartSnapshot"]>["players"][number],
+  "holeCards"
+>;
+
+type EmbargoedHandStartSnapshot = Omit<
+  NonNullable<ChannelHandDetailResponse["handStartSnapshot"]>,
+  "players"
+> & {
+  players: EmbargoedHandStartPlayerSnapshot[];
+};
+
+type EmbargoedHandEndPlayerSnapshot = NonNullable<
+  ChannelHandDetailResponse["handEndSnapshot"]
+>["players"][number] & {
+  revealedHoleCards?: SerializedGame["communityCards"];
+};
+
+type EmbargoedHandEndSnapshot = Omit<
+  NonNullable<ChannelHandDetailResponse["handEndSnapshot"]>,
+  "players"
+> & {
+  players: EmbargoedHandEndPlayerSnapshot[];
+};
+
+type EmbargoedChannelHandDetailResponse = {
+  visibility: "embargoed";
+  gameId: number;
+  createdAt: number;
+  endedAt: number;
+  handStartSnapshot: EmbargoedHandStartSnapshot | null;
+  actionHistory: SerializedGame["handHistory"]["actionHistory"];
+  boardSnapshot: SerializedGame["handHistory"]["boardSnapshot"];
+  handEndSnapshot: EmbargoedHandEndSnapshot | null;
+  dealerPosition: SerializedGame["dealerPosition"];
+  smallBlind: SerializedGame["smallBlind"];
+  bigBlind: SerializedGame["bigBlind"];
+};
+
+type ChannelHandHistoryDetailResponse =
+  | EmbargoedChannelHandDetailResponse
+  | RevealedChannelHandDetailResponse;
 
 type ChannelPlayerStatsRow = {
   playerId: string;
@@ -208,10 +272,10 @@ type DecodedCursor = {
 };
 
 const PUBLIC_WORKSPACE_ID = "TDUQJ4MMY";
-const PUBLIC_HAND_VISIBILITY_WINDOW_MS = 6 * 60 * 60 * 1000;
+const PUBLIC_HAND_EMBARGO_WINDOW_MS = 7 * 24 * 60 * 60 * 1000;
 
-function getPublicVisibilityCutoffMs(now: number = Date.now()): number {
-  return now - PUBLIC_HAND_VISIBILITY_WINDOW_MS;
+function getPublicRevealCutoffMs(now: number = Date.now()): number {
+  return now - PUBLIC_HAND_EMBARGO_WINDOW_MS;
 }
 
 function encodeCursor(cursor: DecodedCursor): string {
@@ -1237,18 +1301,44 @@ export class PokerDurableObject extends DurableObject<Env> {
     );
   }
 
-  private getVisiblePublicGameRows(
+  private isHandFullyRevealed(endedAt: number, now: number = Date.now()): boolean {
+    return endedAt <= getPublicRevealCutoffMs(now);
+  }
+
+  private getCompletedPublicGameRows(
     workspaceId: string,
     channelId: string,
     options?: {
       limit?: number;
       cursor?: DecodedCursor | null;
+      revealedOnly?: boolean;
+      playerId?: string | null;
     }
   ): ActiveGameRecord[] {
     const limit = Math.max(1, Math.min(options?.limit ?? 25, 100));
-    const cutoffMs = getPublicVisibilityCutoffMs();
-    const params: Array<string | number> = [workspaceId, channelId, cutoffMs];
+    const params: Array<string | number> = [workspaceId, channelId];
+    let visibilityClause = "";
+    let playerClause = "";
     let cursorClause = "";
+
+    if (options?.revealedOnly) {
+      visibilityClause = `AND endedAt <= ?`;
+      params.push(getPublicRevealCutoffMs());
+    }
+
+    if (options?.playerId) {
+      playerClause = `
+        AND EXISTS (
+          SELECT 1
+          FROM PlayerHandFacts facts
+          WHERE facts.workspaceId = PokerGames.workspaceId
+            AND facts.channelId = PokerGames.channelId
+            AND facts.gameId = PokerGames.gameId
+            AND facts.playerId = ?
+        )
+      `;
+      params.push(options.playerId);
+    }
 
     if (options?.cursor) {
       cursorClause = `
@@ -1274,7 +1364,8 @@ export class PokerDurableObject extends DurableObject<Env> {
           WHERE workspaceId = ?
             AND channelId = ?
             AND endedAt IS NOT NULL
-            AND endedAt <= ?
+            ${visibilityClause}
+            ${playerClause}
             ${cursorClause}
           ORDER BY endedAt DESC, gameId DESC
           LIMIT ?
@@ -1365,6 +1456,135 @@ export class PokerDurableObject extends DurableObject<Env> {
     };
   }
 
+  private buildChannelHandHistoryIndexItem(
+    record: ActiveGameRecord
+  ): ChannelHandHistoryIndexItem {
+    const base = this.buildChannelHandIndexItem(record);
+    return {
+      ...base,
+      visibility: this.isHandFullyRevealed(record.endedAt ?? record.createdAt)
+        ? "revealed"
+        : "embargoed",
+    };
+  }
+
+  private buildRevealedHandDetail(
+    gameRecord: ActiveGameRecord
+  ): RevealedChannelHandDetailResponse {
+    const handHistory = gameRecord.game.handHistory ?? {
+      handStartSnapshot: null,
+      actionHistory: [],
+      boardSnapshot: { flop: [], turn: [], river: [] },
+      handEndSnapshot: null,
+    };
+
+    return {
+      visibility: "revealed",
+      gameId: gameRecord.gameId,
+      createdAt: gameRecord.createdAt,
+      endedAt: gameRecord.endedAt!,
+      handStartSnapshot: handHistory.handStartSnapshot ?? null,
+      actionHistory: handHistory.actionHistory ?? [],
+      boardSnapshot: handHistory.boardSnapshot ?? {
+        flop: [],
+        turn: [],
+        river: [],
+      },
+      handEndSnapshot: handHistory.handEndSnapshot ?? null,
+      communityCards: gameRecord.game.communityCards,
+      activePlayers: gameRecord.game.activePlayers,
+      inactivePlayers: gameRecord.game.inactivePlayers,
+      foldedPlayers: gameRecord.game.foldedPlayers,
+      bettingHistory: gameRecord.game.bettingHistory,
+      dealerPosition: gameRecord.game.dealerPosition,
+      smallBlind: gameRecord.game.smallBlind,
+      bigBlind: gameRecord.game.bigBlind,
+      playerPositions: gameRecord.game.playerPositions,
+      currentPot: gameRecord.game.currentPot,
+      currentBetAmount: gameRecord.game.currentBetAmount,
+      lastRaiseAmount: gameRecord.game.lastRaiseAmount,
+      gameState: gameRecord.game.gameState,
+      preDealId: gameRecord.game.preDealId,
+      handStartChips: gameRecord.game.handStartChips,
+    };
+  }
+
+  private buildEmbargoedHandDetail(
+    gameRecord: ActiveGameRecord
+  ): EmbargoedChannelHandDetailResponse {
+    const handHistory = gameRecord.game.handHistory ?? {
+      handStartSnapshot: null,
+      actionHistory: [],
+      boardSnapshot: { flop: [], turn: [], river: [] },
+      handEndSnapshot: null,
+    };
+    const allPlayers = [
+      ...gameRecord.game.activePlayers,
+      ...gameRecord.game.inactivePlayers,
+    ];
+    const holeCardsByPlayerId = new Map(
+      allPlayers.map((player: { id: string; cards?: unknown[] }) => [
+        player.id,
+        [...(player.cards ?? [])],
+      ])
+    );
+
+    return {
+      visibility: "embargoed",
+      gameId: gameRecord.gameId,
+      createdAt: gameRecord.createdAt,
+      endedAt: gameRecord.endedAt!,
+      handStartSnapshot: handHistory.handStartSnapshot
+        ? {
+            ...handHistory.handStartSnapshot,
+            players: handHistory.handStartSnapshot.players.map(
+              (
+                player
+              ): EmbargoedHandStartPlayerSnapshot => ({
+                playerId: player.playerId,
+                seatIndex: player.seatIndex,
+                roleFlags: player.roleFlags,
+                startingStack: player.startingStack,
+              })
+            ),
+          }
+        : null,
+      actionHistory: handHistory.actionHistory ?? [],
+      boardSnapshot: handHistory.boardSnapshot ?? {
+        flop: [],
+        turn: [],
+        river: [],
+      },
+      handEndSnapshot: handHistory.handEndSnapshot
+        ? {
+            ...handHistory.handEndSnapshot,
+            players: handHistory.handEndSnapshot.players.map(
+              (player): EmbargoedHandEndPlayerSnapshot => ({
+                ...player,
+                ...(player.reachedShowdown && player.revealedCards
+                  ? {
+                      revealedHoleCards:
+                        holeCardsByPlayerId.get(player.playerId) ?? [],
+                    }
+                  : {}),
+              })
+            ),
+          }
+        : null,
+      dealerPosition: gameRecord.game.dealerPosition,
+      smallBlind: gameRecord.game.smallBlind,
+      bigBlind: gameRecord.game.bigBlind,
+    };
+  }
+
+  private buildChannelHandHistoryDetail(
+    gameRecord: ActiveGameRecord
+  ): ChannelHandHistoryDetailResponse {
+    return this.isHandFullyRevealed(gameRecord.endedAt ?? gameRecord.createdAt)
+      ? this.buildRevealedHandDetail(gameRecord)
+      : this.buildEmbargoedHandDetail(gameRecord);
+  }
+
   private getPublicPlayerStatsRows(
     workspaceId: string,
     channelId: string,
@@ -1404,7 +1624,7 @@ export class PokerDurableObject extends DurableObject<Env> {
         `,
         workspaceId,
         channelId,
-        ...(options?.visibleOnly ? [getPublicVisibilityCutoffMs()] : [])
+        ...(options?.visibleOnly ? [getPublicRevealCutoffMs()] : [])
       )
       .toArray();
 
@@ -1456,7 +1676,7 @@ export class PokerDurableObject extends DurableObject<Env> {
         `,
         workspaceId,
         channelId,
-        getPublicVisibilityCutoffMs()
+        getPublicRevealCutoffMs()
       )
       .one();
     const playersWithTrackedStats = this.getPublicPlayerStatsRows(
@@ -1495,21 +1715,13 @@ export class PokerDurableObject extends DurableObject<Env> {
     }
 
     const limit = Math.max(1, Math.min(options?.limit ?? 25, 100));
-    const visibleRows = this.getVisiblePublicGameRows(workspaceId, channelId, {
-      limit: 100,
+    const visibleRows = this.getCompletedPublicGameRows(workspaceId, channelId, {
+      limit: limit + 1,
       cursor: options?.cursor ?? null,
+      revealedOnly: true,
+      playerId: options?.playerId ?? null,
     });
-    const filteredRows = options?.playerId
-      ? visibleRows.filter((row) => {
-          const players =
-            row.game.handHistory?.handStartSnapshot?.players.map(
-              (player: { playerId: string }) => player.playerId
-            ) ??
-            [];
-          return players.includes(options.playerId!);
-        })
-      : visibleRows;
-    const pageRows = filteredRows.slice(0, limit + 1);
+    const pageRows = visibleRows;
     const data = pageRows
       .slice(0, limit)
       .map((row) => this.buildChannelHandIndexItem(row));
@@ -1539,45 +1751,65 @@ export class PokerDurableObject extends DurableObject<Env> {
       return null;
     }
 
-    if (gameRecord.endedAt > getPublicVisibilityCutoffMs()) {
+    if (!this.isHandFullyRevealed(gameRecord.endedAt)) {
       return null;
     }
 
-    const handHistory = gameRecord.game.handHistory ?? {
-      handStartSnapshot: null,
-      actionHistory: [],
-      boardSnapshot: { flop: [], turn: [], river: [] },
-      handEndSnapshot: null,
-    };
+    const detail = this.buildRevealedHandDetail(gameRecord);
+    const { visibility, ...legacyDetail } = detail;
+    return legacyDetail;
+  }
+
+  async getPublicChannelHandHistory(
+    workspaceId: string,
+    channelId: string,
+    options?: {
+      limit?: number;
+      cursor?: DecodedCursor | null;
+      playerId?: string | null;
+    }
+  ): Promise<ChannelHandHistoryListResponse | null> {
+    if (!this.channelExists(workspaceId, channelId)) {
+      return null;
+    }
+
+    const limit = Math.max(1, Math.min(options?.limit ?? 25, 100));
+    const rows = this.getCompletedPublicGameRows(workspaceId, channelId, {
+      limit: limit + 1,
+      cursor: options?.cursor ?? null,
+      playerId: options?.playerId ?? null,
+    });
+    const pageRows = rows;
+    const data = pageRows
+      .slice(0, limit)
+      .map((row) => this.buildChannelHandHistoryIndexItem(row));
+    const nextCursor =
+      pageRows.length > limit
+        ? encodeCursor({
+            endedAt: pageRows[limit - 1].endedAt ?? pageRows[limit - 1].createdAt,
+            gameId: pageRows[limit - 1].gameId,
+          })
+        : null;
 
     return {
-      gameId: gameRecord.gameId,
-      createdAt: gameRecord.createdAt,
-      endedAt: gameRecord.endedAt,
-      handStartSnapshot: handHistory.handStartSnapshot ?? null,
-      actionHistory: handHistory.actionHistory ?? [],
-      boardSnapshot: handHistory.boardSnapshot ?? {
-        flop: [],
-        turn: [],
-        river: [],
+      data,
+      pagination: {
+        nextCursor,
       },
-      handEndSnapshot: handHistory.handEndSnapshot ?? null,
-      communityCards: gameRecord.game.communityCards,
-      activePlayers: gameRecord.game.activePlayers,
-      inactivePlayers: gameRecord.game.inactivePlayers,
-      foldedPlayers: gameRecord.game.foldedPlayers,
-      bettingHistory: gameRecord.game.bettingHistory,
-      dealerPosition: gameRecord.game.dealerPosition,
-      smallBlind: gameRecord.game.smallBlind,
-      bigBlind: gameRecord.game.bigBlind,
-      playerPositions: gameRecord.game.playerPositions,
-      currentPot: gameRecord.game.currentPot,
-      currentBetAmount: gameRecord.game.currentBetAmount,
-      lastRaiseAmount: gameRecord.game.lastRaiseAmount,
-      gameState: gameRecord.game.gameState,
-      preDealId: gameRecord.game.preDealId,
-      handStartChips: gameRecord.game.handStartChips,
     };
+  }
+
+  async getPublicHandHistoryDetail(
+    workspaceId: string,
+    channelId: string,
+    gameId: number
+  ): Promise<ChannelHandHistoryDetailResponse | null> {
+    const gameRecord = this.getPokerGame(workspaceId, channelId, gameId);
+    if (!gameRecord || gameRecord.endedAt === null) {
+      return null;
+    }
+
+    return this.buildChannelHandHistoryDetail(gameRecord);
   }
 
   async getPublicPlayerStats(
@@ -2821,7 +3053,54 @@ async function handlePublicApiRequest(
     if (!detail) {
       return notFoundResponse("Hand not found");
     }
-    const body: PublicApiResponse<ChannelHandDetailResponse> = {
+    return jsonResponse({ data: detail });
+  }
+
+  if (segments[3] === "all-hands" && segments.length === 4) {
+    const limitParam = url.searchParams.get("limit");
+    const parsedLimit = limitParam ? Number(limitParam) : undefined;
+    const cursorParam = url.searchParams.get("cursor");
+    const decodedCursor = decodeCursor(cursorParam);
+    if (
+      typeof parsedLimit !== "undefined" &&
+      (!Number.isFinite(parsedLimit) || parsedLimit < 1)
+    ) {
+      return badRequestResponse("Invalid limit");
+    }
+    if (cursorParam && !decodedCursor) {
+      return badRequestResponse("Invalid cursor");
+    }
+
+    const response = await stub.getPublicChannelHandHistory(
+      PUBLIC_WORKSPACE_ID,
+      channelId,
+      {
+        limit: parsedLimit,
+        cursor: decodedCursor,
+        playerId: url.searchParams.get("playerId"),
+      }
+    );
+    if (!response) {
+      return notFoundResponse("Channel not found");
+    }
+    return jsonResponse(response);
+  }
+
+  if (segments[3] === "all-hands" && segments.length === 5) {
+    const gameId = Number(segments[4]);
+    if (!Number.isInteger(gameId) || gameId < 1) {
+      return badRequestResponse("Invalid gameId");
+    }
+
+    const detail = await stub.getPublicHandHistoryDetail(
+      PUBLIC_WORKSPACE_ID,
+      channelId,
+      gameId
+    );
+    if (!detail) {
+      return notFoundResponse("Hand not found");
+    }
+    const body: PublicApiResponse<ChannelHandHistoryDetailResponse> = {
       data: detail,
     };
     return jsonResponse(body);

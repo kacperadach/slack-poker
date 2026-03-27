@@ -4974,8 +4974,8 @@ describe("Public hand history API", () => {
       sayFn,
     });
 
-    await setHandEndedAt(stub, workspaceId, channelId, 1, hoursAgoMs(8));
-    await setHandEndedAt(stub, workspaceId, channelId, 2, hoursAgoMs(2));
+    await setHandEndedAt(stub, workspaceId, channelId, 1, daysAgoMs(8));
+    await setHandEndedAt(stub, workspaceId, channelId, 2, daysAgoMs(2));
 
     const summaryResponse = await fetchPublicApi(
       `/api/channels/${channelId}`
@@ -4984,8 +4984,8 @@ describe("Public hand history API", () => {
     expect(summaryResponse.body.data).toMatchObject({
       channelId,
       visibleHandsCount: 1,
-      firstHandEndedAt: hoursAgoMs(8),
-      lastHandEndedAt: hoursAgoMs(8),
+      firstHandEndedAt: daysAgoMs(8),
+      lastHandEndedAt: daysAgoMs(8),
       playersWithTrackedStats: expect.arrayContaining([
         MARCUS_USER_ID,
         CAMDEN_USER_ID,
@@ -5000,7 +5000,7 @@ describe("Public hand history API", () => {
     expect(handsResponse.body.data).toHaveLength(1);
     expect(handsResponse.body.data[0]).toMatchObject({
       gameId: 1,
-      endedAt: hoursAgoMs(8),
+      endedAt: daysAgoMs(8),
       playerIds: expect.arrayContaining([MARCUS_USER_ID, CAMDEN_USER_ID]),
       playerCount: 2,
       totalPot: 120,
@@ -5051,6 +5051,140 @@ describe("Public hand history API", () => {
     expect(playerStatsResponse.body.data.recentVisibleHands[0].gameId).toBe(1);
   });
 
+  it("serves all hands with embargoed recent detail and revealed older detail", async () => {
+    const workspaceId = "TDUQJ4MMY";
+    const channelId = "public-api-channel-embargo";
+    const sayFn = vi.fn();
+    const player1Context = createContext({
+      userId: "player1",
+      sayFn,
+      workspaceId,
+      channelId,
+    });
+    const player2Context = createContext({
+      userId: "player2",
+      sayFn,
+      workspaceId,
+      channelId,
+    });
+    const stub = getStub({ workspaceId, channelId });
+
+    await newGame(env, player1Context, createGenericMessageEvent("player1"));
+    await joinGame(env, player1Context, createGenericMessageEvent("player1"));
+    await joinGame(env, player2Context, createGenericMessageEvent("player2"));
+    await buyIn(
+      env,
+      player1Context,
+      createGenericMessageEvent("player1", "buy in 500")
+    );
+    await buyIn(
+      env,
+      player2Context,
+      createGenericMessageEvent("player2", "buy in 500")
+    );
+
+    await startRound(env, player1Context, createGenericMessageEvent("player1"));
+    const foldWinState = await getGameState(stub, workspaceId, channelId);
+    const foldWinCurrentPlayer =
+      foldWinState.activePlayers[foldWinState.currentPlayerIndex];
+    await fold(
+      env,
+      createContext({
+        userId: foldWinCurrentPlayer.id,
+        sayFn,
+        workspaceId,
+        channelId,
+      }),
+      createGenericMessageEvent(foldWinCurrentPlayer.id, "fold")
+    );
+
+    await startRound(env, player1Context, createGenericMessageEvent("player1"));
+    await playHeadsUpToRiver(stub, workspaceId, channelId, sayFn);
+    await setActiveHandCards(
+      stub,
+      workspaceId,
+      channelId,
+      {
+        player1: [new Card("Clubs", "A"), new Card("Diamonds", "A")],
+        player2: [new Card("Clubs", "K"), new Card("Diamonds", "Q")],
+      },
+      [
+        new Card("Spades", "2"),
+        new Card("Hearts", "7"),
+        new Card("Clubs", "9"),
+        new Card("Spades", "J"),
+        new Card("Hearts", "3"),
+      ]
+    );
+    await finishHeadsUpRiver(stub, workspaceId, channelId, sayFn);
+
+    await setHandEndedAt(stub, workspaceId, channelId, 1, daysAgoMs(8));
+    await setHandEndedAt(stub, workspaceId, channelId, 2, daysAgoMs(2));
+
+    const allHandsResponse = await fetchPublicApi(
+      `/api/channels/${channelId}/all-hands`
+    );
+    expect(allHandsResponse.status).toBe(200);
+    expect(allHandsResponse.body.pagination.nextCursor).toBeNull();
+    expect(allHandsResponse.body.data).toHaveLength(2);
+    expect(allHandsResponse.body.data[0]).toMatchObject({
+      gameId: 2,
+      visibility: "embargoed",
+      reachedShowdown: true,
+    });
+    expect(allHandsResponse.body.data[1]).toMatchObject({
+      gameId: 1,
+      visibility: "revealed",
+      reachedShowdown: false,
+    });
+
+    const embargoedDetail = await fetchPublicApi(
+      `/api/channels/${channelId}/all-hands/2`
+    );
+    expect(embargoedDetail.status).toBe(200);
+    expect(embargoedDetail.body.data.visibility).toBe("embargoed");
+    expect(embargoedDetail.body.data.handStartSnapshot.players).toEqual(
+      expect.arrayContaining([
+        expect.not.objectContaining({ holeCards: expect.anything() }),
+      ])
+    );
+    expect(embargoedDetail.body.data.communityCards).toBeUndefined();
+    expect(embargoedDetail.body.data.activePlayers).toBeUndefined();
+    expect(embargoedDetail.body.data.foldedPlayers).toBeUndefined();
+    expect(embargoedDetail.body.data.handEndSnapshot.players).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          playerId: "player1",
+          reachedShowdown: true,
+          revealedCards: true,
+          revealedHoleCards: [
+            { rank: "A", suit: "Clubs" },
+            { rank: "A", suit: "Diamonds" },
+          ],
+        }),
+        expect.objectContaining({
+          playerId: "player2",
+          reachedShowdown: true,
+          revealedCards: true,
+          revealedHoleCards: [
+            { rank: "K", suit: "Clubs" },
+            { rank: "Q", suit: "Diamonds" },
+          ],
+        }),
+      ])
+    );
+
+    const revealedDetail = await fetchPublicApi(
+      `/api/channels/${channelId}/all-hands/1`
+    );
+    expect(revealedDetail.status).toBe(200);
+    expect(revealedDetail.body.data.visibility).toBe("revealed");
+    expect(revealedDetail.body.data.handStartSnapshot.players[0].holeCards).toHaveLength(
+      2
+    );
+    expect(revealedDetail.body.data.foldedPlayers).toEqual(expect.any(Array));
+  });
+
   it("supports cursor pagination and player filtering on visible hands", async () => {
     const workspaceId = "TDUQJ4MMY";
     const channelId = "public-api-channel-2";
@@ -5094,8 +5228,8 @@ describe("Public hand history API", () => {
       sayFn,
     });
 
-    await setHandEndedAt(stub, workspaceId, channelId, 1, hoursAgoMs(9));
-    await setHandEndedAt(stub, workspaceId, channelId, 2, hoursAgoMs(8));
+    await setHandEndedAt(stub, workspaceId, channelId, 1, daysAgoMs(9));
+    await setHandEndedAt(stub, workspaceId, channelId, 2, daysAgoMs(8));
 
     const firstPage = await fetchPublicApi(
       `/api/channels/${channelId}/hands?limit=1`
@@ -5120,6 +5254,44 @@ describe("Public hand history API", () => {
     );
     expect(filtered.status).toBe(200);
     expect(filtered.body.data).toEqual([]);
+
+    const allHandsFiltered = await fetchPublicApi(
+      `/api/channels/${channelId}/all-hands?playerId=${YUVI_USER_ID}`
+    );
+    expect(allHandsFiltered.status).toBe(200);
+    expect(allHandsFiltered.body.data).toEqual([]);
+  });
+
+  it("paginates player-filtered all-hands over the filtered dataset", async () => {
+    const workspaceId = "TDUQJ4MMY";
+    const channelId = "public-api-channel-filtered-cursor";
+    const sayFn = vi.fn();
+    const marcusContext = createContext({
+      userId: MARCUS_USER_ID,
+      sayFn,
+      workspaceId,
+      channelId,
+    });
+
+    await newGame(env, marcusContext, createGenericMessageEvent(MARCUS_USER_ID));
+
+    const stub = getStub({ workspaceId, channelId });
+    await insertSyntheticCompletedHands(stub, workspaceId, channelId, {
+      totalHands: 105,
+      matchingGameIds: [4, 2],
+      targetPlayerId: MARCUS_USER_ID,
+    });
+
+    const response = await fetchPublicApi(
+      `/api/channels/${channelId}/all-hands?playerId=${MARCUS_USER_ID}`
+    );
+
+    expect(response.status).toBe(200);
+    expect(response.body.data.map((hand: any) => hand.gameId)).toEqual([2, 4]);
+    expect(response.body.pagination.nextCursor).toBeNull();
+    response.body.data.forEach((hand: any) => {
+      expect(hand.playerIds).toContain(MARCUS_USER_ID);
+    });
   });
 
   it("returns errors for nonexistent channels and invalid cursors", async () => {
@@ -5344,8 +5516,141 @@ async function fetchPublicApi(path: string) {
   };
 }
 
+async function insertSyntheticCompletedHands(
+  stub: DurableObjectStub,
+  workspaceId: string,
+  channelId: string,
+  {
+    totalHands,
+    matchingGameIds,
+    targetPlayerId,
+  }: {
+    totalHands: number;
+    matchingGameIds: number[];
+    targetPlayerId: string;
+  }
+) {
+  return runInDurableObject(stub, async (_instance, state) => {
+    const matchingSet = new Set(matchingGameIds);
+
+    for (let gameId = 1; gameId <= totalHands; gameId += 1) {
+      const includesTarget = matchingSet.has(gameId);
+      const playerIds = includesTarget
+        ? [targetPlayerId, CAMDEN_USER_ID]
+        : [CAMDEN_USER_ID, YUVI_USER_ID];
+      const winnerPlayerId = playerIds[0];
+      const game = {
+        gameState: GameState.WaitingForPlayers,
+        deck: [],
+        communityCards: [],
+        activePlayers: [],
+        inactivePlayers: [],
+        currentPot: 0,
+        dealerPosition: 0,
+        smallBlind: 10,
+        bigBlind: 20,
+        currentPlayerIndex: 0,
+        foldedPlayers: [],
+        currentBetAmount: 0,
+        lastRaiseAmount: 0,
+        playerPositions: [],
+        preDealId: undefined,
+        bettingHistory: [],
+        handStartChips: [],
+        handHistory: {
+          handStartSnapshot: {
+            dealerPosition: 0,
+            smallBlind: 10,
+            bigBlind: 20,
+            players: playerIds.map((playerId, index) => ({
+              playerId,
+              seatIndex: index,
+              roleFlags: {
+                isDealer: index === 0,
+                isSmallBlind: index === 0,
+                isBigBlind: index === 1,
+              },
+              startingStack: 100,
+              holeCards: [],
+            })),
+          },
+          actionHistory: [],
+          boardSnapshot: { flop: [], turn: [], river: [] },
+          handEndSnapshot: {
+            players: playerIds.map((playerId) => ({
+              playerId,
+              finalStack: playerId === winnerPlayerId ? 120 : 80,
+              foldedStreet: null,
+              reachedShowdown: false,
+              revealedCards: false,
+              chipsWon: playerId === winnerPlayerId ? 20 : 0,
+            })),
+            potResults: [
+              {
+                potIndex: 0,
+                potType: "main",
+                potSize: 20,
+                eligiblePlayerIds: playerIds,
+                winnerPlayerIds: [winnerPlayerId],
+                splitAmount: 20,
+              },
+            ],
+          },
+        },
+      };
+
+      state.storage.sql.exec(
+        `
+          INSERT INTO PokerGames (workspaceId, channelId, gameId, game, createdAt, endedAt)
+          VALUES (?, ?, ?, ?, ?, ?)
+        `,
+        workspaceId,
+        channelId,
+        gameId,
+        JSON.stringify(game),
+        daysAgoMs(8) - gameId,
+        daysAgoMs(8) - gameId
+      );
+
+      playerIds.forEach((playerId) => {
+        state.storage.sql.exec(
+          `
+            INSERT INTO PlayerHandFacts (
+              workspaceId, channelId, gameId, playerId, participated, wonAnyPot,
+              reachedShowdown, folded, checkCount, callCount, betCount, raiseCount,
+              allInCount, raiseToTotal, chipsCommitted, chipsWon, netChips
+            )
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+          `,
+          workspaceId,
+          channelId,
+          gameId,
+          playerId,
+          1,
+          playerId === winnerPlayerId ? 1 : 0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          10,
+          playerId === winnerPlayerId ? 20 : 0,
+          playerId === winnerPlayerId ? 20 : -10
+        );
+      });
+    }
+  });
+}
+
 function hoursAgoMs(hours: number) {
   return Date.now() - hours * 60 * 60 * 1000;
+}
+
+function daysAgoMs(days: number) {
+  return Date.now() - days * 24 * 60 * 60 * 1000;
 }
 
 async function completeFoldWinHand({
