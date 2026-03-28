@@ -95,6 +95,13 @@ type AggregatedPlayerHandStats = {
   netChips: number;
 };
 
+type PlayerHandStreakFact = {
+  gameId: number;
+  playerId: string;
+  participated: boolean;
+  wonAnyPot: boolean;
+};
+
 type PublicApiResponse<T> = {
   data: T;
   pagination?: {
@@ -273,6 +280,8 @@ type DecodedCursor = {
 
 const PUBLIC_WORKSPACE_ID = "TDUQJ4MMY";
 const PUBLIC_HAND_EMBARGO_WINDOW_MS = 7 * 24 * 60 * 60 * 1000;
+const HOT_STREAK_THRESHOLD = 5;
+const COLD_STREAK_THRESHOLD = 5;
 
 function getPublicRevealCutoffMs(now: number = Date.now()): number {
   return now - PUBLIC_HAND_EMBARGO_WINDOW_MS;
@@ -1225,6 +1234,155 @@ export class PokerDurableObject extends DurableObject<Env> {
     });
 
     return { ok: true, count: records.length };
+  }
+
+  private getLatestCompletedGameId(
+    workspaceId: string,
+    channelId: string
+  ): number | null {
+    const row = this.sql
+      .exec(
+        `
+          SELECT MAX(gameId) AS gameId
+          FROM PokerGames
+          WHERE workspaceId = ?
+            AND channelId = ?
+            AND endedAt IS NOT NULL
+        `,
+        workspaceId,
+        channelId
+      )
+      .one();
+
+    if (!row || row.gameId === null || typeof row.gameId === "undefined") {
+      return null;
+    }
+
+    return Number(row.gameId);
+  }
+
+  private getPlayerHandStreakFactsForGame(
+    workspaceId: string,
+    channelId: string,
+    gameId: number
+  ): PlayerHandStreakFact[] {
+    return this.sql
+      .exec(
+        `
+          SELECT gameId, playerId, participated, wonAnyPot
+          FROM PlayerHandFacts
+          WHERE workspaceId = ?
+            AND channelId = ?
+            AND gameId = ?
+          ORDER BY playerId ASC
+        `,
+        workspaceId,
+        channelId,
+        gameId
+      )
+      .toArray()
+      .map((row) => ({
+        gameId: Number(row.gameId),
+        playerId: row.playerId as string,
+        participated: Number(row.participated) === 1,
+        wonAnyPot: Number(row.wonAnyPot) === 1,
+      }));
+  }
+
+  private countTrailingWinState(
+    workspaceId: string,
+    channelId: string,
+    playerId: string,
+    gameId: number,
+    wonAnyPot: boolean
+  ): number {
+    const rows = this.sql
+      .exec(
+        `
+          SELECT wonAnyPot
+          FROM PlayerHandFacts
+          WHERE workspaceId = ?
+            AND channelId = ?
+            AND playerId = ?
+            AND gameId <= ?
+          ORDER BY gameId DESC
+        `,
+        workspaceId,
+        channelId,
+        playerId,
+        gameId
+      )
+      .toArray();
+
+    let streak = 0;
+    for (const row of rows) {
+      if ((Number(row.wonAnyPot) === 1) !== wonAnyPot) {
+        break;
+      }
+      streak += 1;
+    }
+
+    return streak;
+  }
+
+  async getCompletedHandStreakMessages(
+    workspaceId: string,
+    channelId: string,
+    gameId?: number
+  ): Promise<string[]> {
+    const targetGameId =
+      typeof gameId === "number"
+        ? gameId
+        : this.getLatestCompletedGameId(workspaceId, channelId);
+
+    if (targetGameId === null) {
+      return [];
+    }
+
+    const currentHandFacts = this.getPlayerHandStreakFactsForGame(
+      workspaceId,
+      channelId,
+      targetGameId
+    );
+    if (currentHandFacts.length === 0) {
+      return [];
+    }
+
+    const messages: string[] = [];
+
+    currentHandFacts
+      .filter((fact) => fact.wonAnyPot)
+      .forEach((fact) => {
+        const streak = this.countTrailingWinState(
+          workspaceId,
+          channelId,
+          fact.playerId,
+          targetGameId,
+          true
+        );
+        if (streak === HOT_STREAK_THRESHOLD) {
+          messages.push(`${fact.playerId} is running HOT :fire: :fire: :fire:`);
+        }
+      });
+
+    currentHandFacts
+      .filter((fact) => fact.participated && !fact.wonAnyPot)
+      .forEach((fact) => {
+        const streak = this.countTrailingWinState(
+          workspaceId,
+          channelId,
+          fact.playerId,
+          targetGameId,
+          false
+        );
+        if (streak === COLD_STREAK_THRESHOLD) {
+          messages.push(
+            `${fact.playerId} is running COLD :ice_cube: :cold_face: :snowman:`
+          );
+        }
+      });
+
+    return messages;
   }
 
   async getPlayerHandStats(
@@ -5245,6 +5403,13 @@ async function sendEventsWithPlayerIds(
   const filteredEvents = events.filter(
     (event, index) => !event.isTurnMessage || index === lastTurnMessageIndex
   );
+  const handCompleted =
+    gameState?.gameState === GameState.WaitingForPlayers &&
+    filteredEvents.some(
+      (event) =>
+        event.description.includes(" wins ") ||
+        event.description.includes(" won by:")
+    );
 
   let publicMessages: string[] = [];
 
@@ -5347,6 +5512,21 @@ async function sendEventsWithPlayerIds(
       // Never let optional showdown stats impact core game messaging.
       console.error("Failed to build showdown win percentage message", error);
     }
+  }
+
+  if (handCompleted) {
+    const stub = getDurableObject(env, context);
+    const streakMessages = await stub.getCompletedHandStreakMessages(
+      context.teamId!,
+      context.channelId
+    );
+    streakMessages.forEach((message) => {
+      publicMessages.push(
+        ensureNarpBrainOnError(
+          replacePlayerIdsWithDisplayNames(message, playerIds)
+        )
+      );
+    });
   }
 
   if (publicMessages.length > 0) {

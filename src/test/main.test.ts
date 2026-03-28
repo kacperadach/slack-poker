@@ -58,6 +58,7 @@ import {
   SlackAppContextWithChannelId,
 } from "slack-cloudflare-workers";
 import { buildShowdownWinPercentageMessage } from "../ShowdownWinPercentage";
+import { userIdToName } from "../users";
 
 beforeAll(() => {
   vi.useFakeTimers();
@@ -5320,6 +5321,168 @@ describe("Public hand history API", () => {
     );
     expect(badCursor.status).toBe(400);
   });
+
+  it("appends HOT and COLD streak callouts to the completed hand message", async () => {
+    const workspaceId = "streak-message-workspace";
+    const channelId = "streak-message-channel";
+    const sayFn = vi.fn();
+
+    const marcusContext = createContext({
+      userId: MARCUS_USER_ID,
+      sayFn,
+      workspaceId,
+      channelId,
+    });
+    const camdenContext = createContext({
+      userId: CAMDEN_USER_ID,
+      sayFn,
+      workspaceId,
+      channelId,
+    });
+    const stub = getStub({ workspaceId, channelId });
+
+    await newGame(env, marcusContext, createGenericMessageEvent(MARCUS_USER_ID));
+    await joinGame(env, marcusContext, createGenericMessageEvent(MARCUS_USER_ID));
+    await joinGame(env, camdenContext, createGenericMessageEvent(CAMDEN_USER_ID));
+    await buyIn(
+      env,
+      marcusContext,
+      createGenericMessageEvent(MARCUS_USER_ID, "buy in 100")
+    );
+    await buyIn(
+      env,
+      camdenContext,
+      createGenericMessageEvent(CAMDEN_USER_ID, "buy in 100")
+    );
+    sayFn.mockClear();
+
+    await startRound(
+      env,
+      marcusContext,
+      createGenericMessageEvent(MARCUS_USER_ID, "deal")
+    );
+    const gameState = await getGameState(stub, workspaceId, channelId);
+    const losingPlayerId = gameState.activePlayers[gameState.currentPlayerIndex].id;
+    const winningPlayerId =
+      losingPlayerId === MARCUS_USER_ID ? CAMDEN_USER_ID : MARCUS_USER_ID;
+
+    await insertSyntheticHeadsUpHands(stub, workspaceId, channelId, [
+      {
+        gameId: -4,
+        playerIds: [MARCUS_USER_ID, CAMDEN_USER_ID],
+        winnerPlayerIds: [winningPlayerId],
+      },
+      {
+        gameId: -3,
+        playerIds: [MARCUS_USER_ID, CAMDEN_USER_ID],
+        winnerPlayerIds: [winningPlayerId],
+      },
+      {
+        gameId: -2,
+        playerIds: [MARCUS_USER_ID, CAMDEN_USER_ID],
+        winnerPlayerIds: [winningPlayerId],
+      },
+      {
+        gameId: -1,
+        playerIds: [MARCUS_USER_ID, CAMDEN_USER_ID],
+        winnerPlayerIds: [winningPlayerId],
+      },
+    ]);
+
+    sayFn.mockClear();
+
+    await fold(
+      env,
+      createContext({
+        userId: losingPlayerId,
+        sayFn,
+        workspaceId,
+        channelId,
+      }),
+      createGenericMessageEvent(losingPlayerId, "fold")
+    );
+
+    expect(sayFn).toHaveBeenCalledTimes(1);
+    expect(sayFn.mock.calls[0][0].text).toContain(
+      `*${userIdToName[winningPlayerId as keyof typeof userIdToName]}* is running HOT :fire: :fire: :fire:`
+    );
+    expect(sayFn.mock.calls[0][0].text).toContain(
+      `*${userIdToName[losingPlayerId as keyof typeof userIdToName]}* is running COLD :ice_cube: :cold_face: :snowman:`
+    );
+  });
+
+  it("only emits streak messages on the first qualifying hand", async () => {
+    const workspaceId = "streak-threshold-workspace";
+    const channelId = "streak-threshold-channel";
+    const stub = getStub({ workspaceId, channelId });
+
+    await insertSyntheticHeadsUpHands(stub, workspaceId, channelId, [
+      { gameId: 1, playerIds: [MARCUS_USER_ID, CAMDEN_USER_ID], winnerPlayerIds: [MARCUS_USER_ID] },
+      { gameId: 2, playerIds: [MARCUS_USER_ID, CAMDEN_USER_ID], winnerPlayerIds: [MARCUS_USER_ID] },
+      { gameId: 3, playerIds: [MARCUS_USER_ID, CAMDEN_USER_ID], winnerPlayerIds: [MARCUS_USER_ID] },
+      { gameId: 4, playerIds: [MARCUS_USER_ID, CAMDEN_USER_ID], winnerPlayerIds: [MARCUS_USER_ID] },
+      { gameId: 5, playerIds: [MARCUS_USER_ID, CAMDEN_USER_ID], winnerPlayerIds: [MARCUS_USER_ID] },
+      { gameId: 6, playerIds: [MARCUS_USER_ID, CAMDEN_USER_ID], winnerPlayerIds: [MARCUS_USER_ID] },
+    ]);
+
+    expect(
+      await getCompletedHandStreakMessages(stub, workspaceId, channelId, 4)
+    ).toEqual([]);
+    expect(
+      await getCompletedHandStreakMessages(stub, workspaceId, channelId, 5)
+    ).toEqual([
+      `${MARCUS_USER_ID} is running HOT :fire: :fire: :fire:`,
+      `${CAMDEN_USER_ID} is running COLD :ice_cube: :cold_face: :snowman:`,
+    ]);
+    expect(
+      await getCompletedHandStreakMessages(stub, workspaceId, channelId, 6)
+    ).toEqual([]);
+  });
+
+  it("treats split-pot winners as breaking cold streaks and supporting hot streaks", async () => {
+    const workspaceId = "streak-split-workspace";
+    const channelId = "streak-split-channel";
+    const stub = getStub({ workspaceId, channelId });
+
+    await insertSyntheticHeadsUpHands(stub, workspaceId, channelId, [
+      { gameId: 1, playerIds: [MARCUS_USER_ID, CAMDEN_USER_ID], winnerPlayerIds: [MARCUS_USER_ID] },
+      { gameId: 2, playerIds: [MARCUS_USER_ID, CAMDEN_USER_ID], winnerPlayerIds: [MARCUS_USER_ID] },
+      { gameId: 3, playerIds: [MARCUS_USER_ID, CAMDEN_USER_ID], winnerPlayerIds: [MARCUS_USER_ID] },
+      { gameId: 4, playerIds: [MARCUS_USER_ID, CAMDEN_USER_ID], winnerPlayerIds: [MARCUS_USER_ID] },
+      { gameId: 5, playerIds: [MARCUS_USER_ID, CAMDEN_USER_ID], winnerPlayerIds: [MARCUS_USER_ID, CAMDEN_USER_ID] },
+    ]);
+
+    expect(
+      await getCompletedHandStreakMessages(stub, workspaceId, channelId, 5)
+    ).toEqual([`${MARCUS_USER_ID} is running HOT :fire: :fire: :fire:`]);
+  });
+
+  it("allows streaks to re-qualify after the player breaks the run", async () => {
+    const workspaceId = "streak-reset-workspace";
+    const channelId = "streak-reset-channel";
+    const stub = getStub({ workspaceId, channelId });
+
+    await insertSyntheticHeadsUpHands(stub, workspaceId, channelId, [
+      { gameId: 1, playerIds: [MARCUS_USER_ID, CAMDEN_USER_ID], winnerPlayerIds: [MARCUS_USER_ID] },
+      { gameId: 2, playerIds: [MARCUS_USER_ID, CAMDEN_USER_ID], winnerPlayerIds: [MARCUS_USER_ID] },
+      { gameId: 3, playerIds: [MARCUS_USER_ID, CAMDEN_USER_ID], winnerPlayerIds: [MARCUS_USER_ID] },
+      { gameId: 4, playerIds: [MARCUS_USER_ID, CAMDEN_USER_ID], winnerPlayerIds: [MARCUS_USER_ID] },
+      { gameId: 5, playerIds: [MARCUS_USER_ID, CAMDEN_USER_ID], winnerPlayerIds: [MARCUS_USER_ID] },
+      { gameId: 6, playerIds: [MARCUS_USER_ID, CAMDEN_USER_ID], winnerPlayerIds: [CAMDEN_USER_ID] },
+      { gameId: 7, playerIds: [MARCUS_USER_ID, CAMDEN_USER_ID], winnerPlayerIds: [MARCUS_USER_ID] },
+      { gameId: 8, playerIds: [MARCUS_USER_ID, CAMDEN_USER_ID], winnerPlayerIds: [MARCUS_USER_ID] },
+      { gameId: 9, playerIds: [MARCUS_USER_ID, CAMDEN_USER_ID], winnerPlayerIds: [MARCUS_USER_ID] },
+      { gameId: 10, playerIds: [MARCUS_USER_ID, CAMDEN_USER_ID], winnerPlayerIds: [MARCUS_USER_ID] },
+      { gameId: 11, playerIds: [MARCUS_USER_ID, CAMDEN_USER_ID], winnerPlayerIds: [MARCUS_USER_ID] },
+    ]);
+
+    expect(
+      await getCompletedHandStreakMessages(stub, workspaceId, channelId, 11)
+    ).toEqual([
+      `${MARCUS_USER_ID} is running HOT :fire: :fire: :fire:`,
+      `${CAMDEN_USER_ID} is running COLD :ice_cube: :cold_face: :snowman:`,
+    ]);
+  });
 });
 
 function getStub({
@@ -5475,6 +5638,21 @@ function getPlayerHandStats(
 ) {
   return runInDurableObject(stub, async (instance) => {
     return instance.getPlayerHandStats(workspaceId, channelId);
+  });
+}
+
+function getCompletedHandStreakMessages(
+  stub: DurableObjectStub,
+  workspaceId: string,
+  channelId: string,
+  gameId?: number
+) {
+  return runInDurableObject(stub, async (instance) => {
+    return instance.getCompletedHandStreakMessages(
+      workspaceId,
+      channelId,
+      gameId
+    );
   });
 }
 
@@ -5642,6 +5820,127 @@ async function insertSyntheticCompletedHands(
         );
       });
     }
+  });
+}
+
+async function insertSyntheticHeadsUpHands(
+  stub: DurableObjectStub,
+  workspaceId: string,
+  channelId: string,
+  hands: Array<{
+    gameId: number;
+    playerIds: [string, string];
+    winnerPlayerIds: string[];
+  }>
+) {
+  return runInDurableObject(stub, async (_instance, state) => {
+    hands.forEach(({ gameId, playerIds, winnerPlayerIds }) => {
+      const winners = new Set(winnerPlayerIds);
+      const splitAmount = 20 / winnerPlayerIds.length;
+      const createdAt = daysAgoMs(8) + gameId;
+      const game = {
+        gameState: GameState.WaitingForPlayers,
+        deck: [],
+        communityCards: [],
+        activePlayers: [],
+        inactivePlayers: [],
+        currentPot: 0,
+        dealerPosition: 0,
+        smallBlind: 10,
+        bigBlind: 20,
+        currentPlayerIndex: 0,
+        foldedPlayers: [],
+        currentBetAmount: 0,
+        lastRaiseAmount: 0,
+        playerPositions: [],
+        preDealId: undefined,
+        bettingHistory: [],
+        handStartChips: [],
+        handHistory: {
+          handStartSnapshot: {
+            dealerPosition: 0,
+            smallBlind: 10,
+            bigBlind: 20,
+            players: playerIds.map((playerId, index) => ({
+              playerId,
+              seatIndex: index,
+              roleFlags: {
+                isDealer: index === 0,
+                isSmallBlind: index === 0,
+                isBigBlind: index === 1,
+              },
+              startingStack: 100,
+              holeCards: [],
+            })),
+          },
+          actionHistory: [],
+          boardSnapshot: { flop: [], turn: [], river: [] },
+          handEndSnapshot: {
+            players: playerIds.map((playerId) => ({
+              playerId,
+              finalStack: winners.has(playerId) ? 100 + splitAmount : 80,
+              foldedStreet: null,
+              reachedShowdown: winnerPlayerIds.length > 1,
+              revealedCards: winnerPlayerIds.length > 1,
+              chipsWon: winners.has(playerId) ? splitAmount : 0,
+            })),
+            potResults: [
+              {
+                potIndex: 0,
+                potType: "main",
+                potSize: 20,
+                eligiblePlayerIds: playerIds,
+                winnerPlayerIds,
+                splitAmount,
+              },
+            ],
+          },
+        },
+      };
+
+      state.storage.sql.exec(
+        `
+          INSERT INTO PokerGames (workspaceId, channelId, gameId, game, createdAt, endedAt)
+          VALUES (?, ?, ?, ?, ?, ?)
+        `,
+        workspaceId,
+        channelId,
+        gameId,
+        JSON.stringify(game),
+        createdAt,
+        createdAt
+      );
+
+      playerIds.forEach((playerId) => {
+        state.storage.sql.exec(
+          `
+            INSERT INTO PlayerHandFacts (
+              workspaceId, channelId, gameId, playerId, participated, wonAnyPot,
+              reachedShowdown, folded, checkCount, callCount, betCount, raiseCount,
+              allInCount, raiseToTotal, chipsCommitted, chipsWon, netChips
+            )
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+          `,
+          workspaceId,
+          channelId,
+          gameId,
+          playerId,
+          1,
+          winners.has(playerId) ? 1 : 0,
+          winnerPlayerIds.length > 1 ? 1 : 0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          10,
+          winners.has(playerId) ? splitAmount : 0,
+          winners.has(playerId) ? splitAmount : -10
+        );
+      });
+    });
   });
 }
 
