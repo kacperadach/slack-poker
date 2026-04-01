@@ -1,6 +1,8 @@
 import { TexasHoldem } from "poker-odds-calc";
 import { userIdToName } from "./users";
 
+export type PlayerStreakStatus = "hot" | "cold";
+
 type CardSnapshot = {
   rank: string;
   suit: string;
@@ -51,7 +53,8 @@ export async function buildShowdownWinPercentageMessage(
   gameState: ShowdownGameStateSnapshot,
   events: ShowdownEventSnapshot[],
   calculateStreetWinPercentagesFn: StreetWinPercentageCalculator = 
-    calculateStreetWinPercentages
+    calculateStreetWinPercentages,
+  streakStatuses?: Map<string, PlayerStreakStatus>
 ): Promise<string | null> {
   if (!didHandGoToShowdown(events)) {
     console.info(
@@ -109,9 +112,19 @@ export async function buildShowdownWinPercentageMessage(
       ({ label, results }) =>
         `${label}: ${formatPercent(results.get(player.playerId))}`
     );
-    const displayName =
+    const baseName =
       userIdToName[player.playerId as keyof typeof userIdToName] ||
       player.playerId;
+    let streakEmoji = "";
+    if (streakStatuses) {
+      const status = streakStatuses.get(player.playerId);
+      if (status === "hot") {
+        streakEmoji = " :fire:";
+      } else if (status === "cold") {
+        streakEmoji = " :ice_cube:";
+      }
+    }
+    const displayName = `${baseName}${streakEmoji}`;
     lines.push(`*${displayName}* - ${streetSummary.join(" | ")}`);
   }
 

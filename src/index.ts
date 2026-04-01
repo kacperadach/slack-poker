@@ -1385,6 +1385,50 @@ export class PokerDurableObject extends DurableObject<Env> {
     return messages;
   }
 
+  /**
+   * Returns a map of player IDs to their current streak status.
+   * A player is "hot" if they've won the last HOT_STREAK_THRESHOLD or more hands.
+   * A player is "cold" if they've lost the last COLD_STREAK_THRESHOLD or more hands (while participating).
+   */
+  getPlayerStreakStatuses(
+    workspaceId: string,
+    channelId: string
+  ): Map<string, "hot" | "cold"> {
+    const latestGameId = this.getLatestCompletedGameId(workspaceId, channelId);
+    if (latestGameId === null) {
+      return new Map();
+    }
+
+    const statuses = new Map<string, "hot" | "cold">();
+
+    for (const user of allUsers) {
+      const hotStreak = this.countTrailingWinState(
+        workspaceId,
+        channelId,
+        user.userId,
+        latestGameId,
+        true
+      );
+      if (hotStreak >= HOT_STREAK_THRESHOLD) {
+        statuses.set(user.userId, "hot");
+        continue;
+      }
+
+      const coldStreak = this.countTrailingWinState(
+        workspaceId,
+        channelId,
+        user.userId,
+        latestGameId,
+        false
+      );
+      if (coldStreak >= COLD_STREAK_THRESHOLD) {
+        statuses.set(user.userId, "cold");
+      }
+    }
+
+    return statuses;
+  }
+
   async getPlayerHandStats(
     workspaceId: string,
     channelId: string
@@ -3768,13 +3812,19 @@ export async function context(
 
   // Add player list in table order (starting from dealer)
   const playersInOrder = game.getPlayersInTableOrder();
+
+  // Fetch streak statuses for all players to show :fire: or :ice_cube: next to their names
+  const stub = getDurableObject(env, context);
+  const streakStatuses = await stub.getPlayerStreakStatuses(
+    context.teamId!,
+    context.channelId
+  );
+
   if (playersInOrder.length > 0) {
     message += `*Players (table order):*\n`;
     for (const p of playersInOrder) {
-      // Get player display name (use mapping or fall back to Slack mention)
-      const displayName =
-        userIdToName[p.playerId as keyof typeof userIdToName] ||
-        `<@${p.playerId}>`;
+      // Get player display name with streak emoji
+      const displayName = getDisplayNameWithStreak(p.playerId, streakStatuses);
 
       // Get chip count for this player
       const playerObj = activePlayers.find((ap) => ap.getId() === p.playerId);
@@ -3810,7 +3860,7 @@ export async function context(
     ) {
       const nonFoldedNames = nonFoldedPlayers.map(
         (id) =>
-          `*${userIdToName[id as keyof typeof userIdToName] || `<@${id}>`}*`
+          `*${getDisplayNameWithStreak(id, streakStatuses)}*`
       );
       message += `*Still in hand:* ${nonFoldedNames.join(", ")}\n\n`;
     }
@@ -4965,11 +5015,16 @@ export async function showStacks(
   const numActivePlayers = game.getActivePlayers().length;
   const orbitCost = smallBlind + bigBlind;
 
+  // Fetch streak statuses for all players to show :fire: or :ice_cube: next to their names
+  const stub = getDurableObject(env, context);
+  const streakStatuses = await stub.getPlayerStreakStatuses(
+    context.teamId!,
+    context.channelId
+  );
+
   let message = "*Stacks*\n";
   game.getActivePlayers().forEach((player) => {
-    const name =
-      userIdToName[player.getId() as keyof typeof userIdToName] ||
-      player.getId();
+    const name = getDisplayNameWithStreak(player.getId(), streakStatuses);
     const chips = player.getChips();
     const bbMultiple = Math.round(chips / bigBlind);
     const orbitsLeft = numActivePlayers > 0 ? Math.round(chips / orbitCost) : 0;
@@ -4977,9 +5032,7 @@ export async function showStacks(
   });
 
   game.getInactivePlayers().forEach((player) => {
-    const name =
-      userIdToName[player.getId() as keyof typeof userIdToName] ||
-      player.getId();
+    const name = getDisplayNameWithStreak(player.getId(), streakStatuses);
     const chips = player.getChips();
     const bbMultiple = Math.round(chips / bigBlind);
     const orbitsLeft = numActivePlayers > 0 ? Math.round(chips / orbitCost) : 0;
@@ -5005,11 +5058,15 @@ export async function showStats(
     return;
   }
 
+  // Fetch streak statuses for all players to show :fire: or :ice_cube: next to their names
+  const streakStatuses = await stub.getPlayerStreakStatuses(
+    context.teamId!,
+    context.channelId
+  );
+
   let message = "*Player Hand Stats*\n";
   trackedStats.forEach((player) => {
-    const name =
-      userIdToName[player.playerId as keyof typeof userIdToName] ||
-      player.playerId;
+    const name = getDisplayNameWithStreak(player.playerId, streakStatuses);
     message += `*${name}*: hands ${player.handsCount}, won ${player.wonAnyPot}, showdown ${player.reachedShowdown}, folded ${player.folded}, checks ${player.checkCount}, calls ${player.callCount}, bets ${player.betCount}, raises ${player.raiseCount}, all-ins ${player.allInCount}, raise total ${player.raiseToTotal}, committed ${player.chipsCommitted}, won chips ${player.chipsWon}, net ${player.netChips}\n`;
   });
 
@@ -5411,6 +5468,13 @@ async function sendEventsWithPlayerIds(
         event.description.includes(" won by:")
     );
 
+  // Fetch streak statuses for all players to show :fire: or :ice_cube: next to their names
+  const stub = getDurableObject(env, context);
+  const streakStatuses = await stub.getPlayerStreakStatuses(
+    context.teamId!,
+    context.channelId
+  );
+
   let publicMessages: string[] = [];
 
   for (const event of filteredEvents) {
@@ -5478,7 +5542,7 @@ async function sendEventsWithPlayerIds(
     if (event.isTurnMessage) {
       message = replacePlayerIdsWithTags(message, playerIds);
     } else {
-      message = replacePlayerIdsWithDisplayNames(message, playerIds);
+      message = replacePlayerIdsWithDisplayNames(message, playerIds, streakStatuses);
     }
     const slackMessage = ensureNarpBrainOnError(message);
 
@@ -5502,7 +5566,9 @@ async function sendEventsWithPlayerIds(
             foldedPlayers: gameState.foldedPlayers,
             communityCards: gameState.communityCards,
           },
-          filteredEvents
+          filteredEvents,
+          undefined,
+          streakStatuses
         );
 
       if (showdownWinPercentageMessage) {
@@ -5515,7 +5581,6 @@ async function sendEventsWithPlayerIds(
   }
 
   if (handCompleted) {
-    const stub = getDurableObject(env, context);
     const streakMessages = await stub.getCompletedHandStreakMessages(
       context.teamId!,
       context.channelId
@@ -5523,7 +5588,7 @@ async function sendEventsWithPlayerIds(
     streakMessages.forEach((message) => {
       publicMessages.push(
         ensureNarpBrainOnError(
-          replacePlayerIdsWithDisplayNames(message, playerIds)
+          replacePlayerIdsWithDisplayNames(message, playerIds, streakStatuses)
         )
       );
     });
@@ -5558,18 +5623,51 @@ function isVitestRuntime(): boolean {
 /**
  * Replaces player IDs in a message with display names (not Slack tags).
  * This is used for most messages to avoid excessive user pinging.
+ * If streakStatuses is provided, adds :fire: for hot players and :ice_cube: for cold players.
  */
 function replacePlayerIdsWithDisplayNames(
   message: string,
-  playerIds: string[]
+  playerIds: string[],
+  streakStatuses?: Map<string, "hot" | "cold">
 ): string {
   let result = message;
   playerIds.forEach((playerId) => {
     const displayName =
       userIdToName[playerId as keyof typeof userIdToName] || playerId;
-    result = result.replace(new RegExp(playerId, "g"), `*${displayName}*`);
+    let streakEmoji = "";
+    if (streakStatuses) {
+      const status = streakStatuses.get(playerId);
+      if (status === "hot") {
+        streakEmoji = " :fire:";
+      } else if (status === "cold") {
+        streakEmoji = " :ice_cube:";
+      }
+    }
+    result = result.replace(new RegExp(playerId, "g"), `*${displayName}*${streakEmoji}`);
   });
   return result;
+}
+
+/**
+ * Gets the display name for a player with optional streak emoji.
+ * Returns the name with :fire: for hot players and :ice_cube: for cold players.
+ */
+function getDisplayNameWithStreak(
+  playerId: string,
+  streakStatuses?: Map<string, "hot" | "cold">
+): string {
+  const displayName =
+    userIdToName[playerId as keyof typeof userIdToName] || playerId;
+  let streakEmoji = "";
+  if (streakStatuses) {
+    const status = streakStatuses.get(playerId);
+    if (status === "hot") {
+      streakEmoji = " :fire:";
+    } else if (status === "cold") {
+      streakEmoji = " :ice_cube:";
+    }
+  }
+  return `${displayName}${streakEmoji}`;
 }
 
 /**
@@ -5627,6 +5725,13 @@ async function sendGameEventMessages(
       !event.getIsTurnMessage() || index === lastTurnMessageIndex
   );
 
+  // Fetch streak statuses for all players to show :fire: or :ice_cube: next to their names
+  const stub = getDurableObject(env, context);
+  const streakStatuses = await stub.getPlayerStreakStatuses(
+    context.teamId!,
+    context.channelId
+  );
+
   let publicMessages = [];
 
   for (const event of events) {
@@ -5639,8 +5744,6 @@ async function sendGameEventMessages(
       event.getCards().length == 3
     ) {
       skipFlop = Math.random() < 0.01;
-
-      const stub = getDurableObject(env, context);
 
       const workspaceId = context.teamId!;
       const channelId = context.channelId;
@@ -5702,7 +5805,7 @@ async function sendGameEventMessages(
     if (event.getIsTurnMessage()) {
       message = replacePlayerIdsWithTags(message, playerIds);
     } else {
-      message = replacePlayerIdsWithDisplayNames(message, playerIds);
+      message = replacePlayerIdsWithDisplayNames(message, playerIds, streakStatuses);
     }
     const slackMessage = ensureNarpBrainOnError(message);
 
