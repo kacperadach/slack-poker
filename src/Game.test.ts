@@ -854,7 +854,7 @@ test("2 player game, one player all-in ends round", () => {
   assert.equal(game.getGameState(), GameState.WaitingForPlayers);
 });
 
-test("players cant bet more than they can win", () => {
+test("players can bet more than they can win", () => {
   const game = new TexasHoldem();
 
   assert.equal(game.addPlayer(PLAYER_1), true);
@@ -870,7 +870,8 @@ test("players cant bet more than they can win", () => {
 
   assert.equal(game.check(PLAYER_1), Success);
 
-  assert.equal(game.bet(PLAYER_2, 90), `No reason to bet more than 80`);
+  // Player 2 can now bet more than player 1's remaining chips
+  assert.equal(game.bet(PLAYER_2, 90), Success);
 });
 
 test("no sidepot needed for all-in player with other folded players", () => {
@@ -1001,7 +1002,6 @@ test("allIn method works correctly as a bet", () => {
   assert.equal(game.addPlayer(PLAYER_1), true);
   assert.equal(game.addPlayer(PLAYER_2), true);
 
-  // Both players have same stack to avoid "can't bet more than you can win" issue
   assert.equal(game.buyIn(PLAYER_1, 1000), Success);
   assert.equal(game.buyIn(PLAYER_2, 1000), Success);
 
