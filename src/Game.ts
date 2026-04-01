@@ -1385,22 +1385,6 @@ export class TexasHoldem {
     // 	return `Raise must be at least ${this.bigBlind}`;
     // }
 
-    // Calculate total chips player can win from other players
-    const maxWinnable = Math.max(
-      ...this.activePlayers
-        .filter((p) => p.getId() !== playerId)
-        .map((p) => p.getChips() + p.getCurrentBet())
-    );
-
-    if (betAmount > maxWinnable) {
-      this.events.push(
-        new GameEvent(
-          `${playerId} Cannot bet more than ${maxWinnable} - no reason to bet more than you can win!`
-        )
-      );
-      return `No reason to bet more than ${maxWinnable}`;
-    }
-
     this.currentBetAmount = roundedAmount;
     // if (isRaise) {
     this.lastRaiseAmount = betAmount;
