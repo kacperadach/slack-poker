@@ -2,6 +2,7 @@ import { Card } from "./Card";
 import { Deck } from "./Deck";
 import { Player } from "./Player";
 import { GameEvent } from "./GameEvent";
+import { CAMDEN_USER_ID } from "./users";
 
 const { rankDescription, evaluateCards, rankCards } = require("phe");
 
@@ -807,7 +808,11 @@ export class TexasHoldem {
       // if (this.dealerPosition >= this.activePlayers.length) {
       //   this.dealerPosition = 0;
       // }
-      this.events.push(new GameEvent(`${playerId} has left the table!`));
+      const leaveMessage =
+        playerId === CAMDEN_USER_ID
+          ? "Camden has rage quit :triggered-camden:"
+          : `${playerId} has left the table!`;
+      this.events.push(new GameEvent(leaveMessage));
       return true;
     }
   }

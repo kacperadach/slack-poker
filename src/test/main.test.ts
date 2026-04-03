@@ -4119,6 +4119,9 @@ describe("Poker Durable Object", () => {
 
     // Camden leaves the table (becomes inactive)
     await leaveGame(env, contextCamden, payloadCamden);
+    expect(sayFn).toHaveBeenCalledWith({
+      text: "Camden has rage quit :triggered-camden:",
+    });
     sayFn.mockClear();
 
     // Call stacks command
