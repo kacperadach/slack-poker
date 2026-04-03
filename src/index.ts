@@ -64,6 +64,7 @@ type PlayerHandFactRecord = {
   playerId: string;
   participated: boolean;
   wonAnyPot: boolean;
+  royalFlushCount: number;
   reachedShowdown: boolean;
   folded: boolean;
   checkCount: number;
@@ -82,6 +83,7 @@ type AggregatedPlayerHandStats = {
   handsCount: number;
   participated: number;
   wonAnyPot: number;
+  royalFlushCount: number;
   reachedShowdown: number;
   folded: number;
   checkCount: number;
@@ -240,6 +242,7 @@ type ChannelPlayerStatsRow = {
   playerId: string;
   handsCount: number;
   wonAnyPot: number;
+  royalFlushCount: number;
   reachedShowdown: number;
   folded: number;
   checkCount: number;
@@ -276,6 +279,7 @@ type ChannelPlayerStatsDetailResponse = {
   playerId: string;
   handsCount: number;
   wonAnyPot: number;
+  royalFlushCount: number;
   reachedShowdown: number;
   folded: number;
   checkCount: number;
@@ -299,6 +303,7 @@ const PUBLIC_WORKSPACE_ID = "TDUQJ4MMY";
 const PUBLIC_HAND_EMBARGO_WINDOW_MS = 7 * 24 * 60 * 60 * 1000;
 const HOT_STREAK_THRESHOLD = 5;
 const COLD_STREAK_THRESHOLD = 5;
+const ROYAL_FLUSH_BACKFILL_MIGRATION = "royal_flush_count_backfill";
 
 function getPublicRevealCutoffMs(now: number = Date.now()): number {
   return now - PUBLIC_HAND_EMBARGO_WINDOW_MS;
@@ -327,6 +332,21 @@ function decodeCursor(cursor: string | null): DecodedCursor | null {
   } catch {
     return null;
   }
+}
+
+function hasRoyalFlush(cards: Card[]): boolean {
+  const royalRanks = new Set(["10", "J", "Q", "K", "A"]);
+  const suitToRanks = new Map<string, Set<string>>();
+
+  cards.forEach((card) => {
+    const ranks = suitToRanks.get(card.getSuit()) ?? new Set<string>();
+    ranks.add(card.getRank());
+    suitToRanks.set(card.getSuit(), ranks);
+  });
+
+  return [...suitToRanks.values()].some((ranks) =>
+    [...royalRanks].every((rank) => ranks.has(rank))
+  );
 }
 
 /** A Durable Object's behavior is defined in an exported Javascript class */
@@ -384,6 +404,7 @@ export class PokerDurableObject extends DurableObject<Env> {
 				playerId TEXT NOT NULL,
 				participated INTEGER NOT NULL,
 				wonAnyPot INTEGER NOT NULL,
+				royalFlushCount INTEGER NOT NULL DEFAULT 0,
 				reachedShowdown INTEGER NOT NULL,
 				folded INTEGER NOT NULL,
 				checkCount INTEGER NOT NULL,
@@ -398,13 +419,15 @@ export class PokerDurableObject extends DurableObject<Env> {
 				PRIMARY KEY (workspaceId, channelId, gameId, playerId)
 			);
 		`);
+    this.migratePlayerHandFactsSchemaIfNeeded();
 
     this.sql.exec(`
-			CREATE TABLE IF NOT EXISTS PendingChannelResets (
+			CREATE TABLE IF NOT EXISTS ChannelMigrations (
 				workspaceId TEXT NOT NULL,
 				channelId TEXT NOT NULL,
-				requestedAt INTEGER NOT NULL,
-				PRIMARY KEY (workspaceId, channelId)
+				migrationKey TEXT NOT NULL,
+				completedAt INTEGER NOT NULL,
+				PRIMARY KEY (workspaceId, channelId, migrationKey)
 			);
 		`);
 
@@ -749,6 +772,23 @@ export class PokerDurableObject extends DurableObject<Env> {
     }
   }
 
+  private migratePlayerHandFactsSchemaIfNeeded(): void {
+    if (!this.hasTable("PlayerHandFacts")) {
+      return;
+    }
+
+    const columns = this.sql
+      .exec<{ name: string }>(`PRAGMA table_info(PlayerHandFacts)`)
+      .toArray()
+      .map((row) => row.name);
+
+    if (!columns.includes("royalFlushCount")) {
+      this.sql.exec(
+        `ALTER TABLE PlayerHandFacts ADD COLUMN royalFlushCount INTEGER NOT NULL DEFAULT 0`
+      );
+    }
+  }
+
   private loadLegacyGame(
     workspaceId: string,
     channelId: string
@@ -812,101 +852,6 @@ export class PokerDurableObject extends DurableObject<Env> {
       nextGameId,
       activeGameId
     );
-  }
-
-  private hasPendingChannelReset(
-    workspaceId: string,
-    channelId: string
-  ): boolean {
-    const row = this.sql
-      .exec(
-        `
-			SELECT 1
-			FROM PendingChannelResets
-			WHERE workspaceId = ? AND channelId = ?
-			LIMIT 1
-		`,
-        workspaceId,
-        channelId
-      )
-      .next();
-
-    return row.value !== undefined;
-  }
-
-  private queueChannelReset(
-    workspaceId: string,
-    channelId: string,
-    requestedAt: number
-  ): void {
-    this.sql.exec(
-      `
-			INSERT INTO PendingChannelResets (workspaceId, channelId, requestedAt)
-			VALUES (?, ?, ?)
-			ON CONFLICT(workspaceId, channelId) DO UPDATE SET
-				requestedAt = excluded.requestedAt
-		`,
-      workspaceId,
-      channelId,
-      requestedAt
-    );
-  }
-
-  private clearPendingChannelReset(
-    workspaceId: string,
-    channelId: string
-  ): void {
-    this.sql.exec(
-      `
-			DELETE FROM PendingChannelResets
-			WHERE workspaceId = ? AND channelId = ?
-		`,
-      workspaceId,
-      channelId
-    );
-  }
-
-  private resetChannelHistoryAndStats(
-    workspaceId: string,
-    channelId: string,
-    preservedGame: string
-  ): void {
-    this.sql.exec(
-      `
-			DELETE FROM PokerGames
-			WHERE workspaceId = ? AND channelId = ?
-		`,
-      workspaceId,
-      channelId
-    );
-    this.sql.exec(
-      `
-			DELETE FROM PlayerHandFacts
-			WHERE workspaceId = ? AND channelId = ?
-		`,
-      workspaceId,
-      channelId
-    );
-    this.saveChannelGameState(workspaceId, channelId, preservedGame, 1, null);
-  }
-
-  private maybeApplyPendingChannelReset(
-    workspaceId: string,
-    channelId: string,
-    preservedGame: string
-  ): boolean {
-    const channelState = this.getChannelGameState(workspaceId, channelId);
-    if (
-      !channelState ||
-      channelState.activeGameId !== null ||
-      !this.hasPendingChannelReset(workspaceId, channelId)
-    ) {
-      return false;
-    }
-
-    this.resetChannelHistoryAndStats(workspaceId, channelId, preservedGame);
-    this.clearPendingChannelReset(workspaceId, channelId);
-    return true;
   }
 
   private getChannelGameState(
@@ -1058,22 +1003,9 @@ export class PokerDurableObject extends DurableObject<Env> {
     workspaceId: string,
     channelId: string
   ): { gameId: number; game: TexasHoldem; channelState: ChannelGameStateRecord } | null {
-    let channelState = this.loadChannelGameState(workspaceId, channelId);
+    const channelState = this.loadChannelGameState(workspaceId, channelId);
     if (!channelState || channelState.activeGameId !== null) {
       return null;
-    }
-
-    if (
-      this.maybeApplyPendingChannelReset(
-        workspaceId,
-        channelId,
-        JSON.stringify(channelState.game)
-      )
-    ) {
-      channelState = this.getChannelGameState(workspaceId, channelId);
-      if (!channelState) {
-        return null;
-      }
     }
 
     return {
@@ -1109,10 +1041,10 @@ export class PokerDurableObject extends DurableObject<Env> {
       `
 			INSERT OR REPLACE INTO PlayerHandFacts (
 				workspaceId, channelId, gameId, playerId, participated, wonAnyPot,
-				reachedShowdown, folded, checkCount, callCount, betCount, raiseCount,
+				royalFlushCount, reachedShowdown, folded, checkCount, callCount, betCount, raiseCount,
 				allInCount, raiseToTotal, chipsCommitted, chipsWon, netChips
 			)
-			VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+			VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 		`,
       record.workspaceId,
       record.channelId,
@@ -1120,6 +1052,7 @@ export class PokerDurableObject extends DurableObject<Env> {
       record.playerId,
       record.participated ? 1 : 0,
       record.wonAnyPot ? 1 : 0,
+      record.royalFlushCount,
       record.reachedShowdown ? 1 : 0,
       record.folded ? 1 : 0,
       record.checkCount,
@@ -1153,7 +1086,16 @@ export class PokerDurableObject extends DurableObject<Env> {
         player,
       ])
     );
+    const handStartPlayerById = new Map(
+      handStartSnapshot.players.map((player) => [player.playerId, player])
+    );
     const actionHistory = game.getActionHistory();
+    const boardSnapshot = game.getBoardSnapshot();
+    const boardCards = [
+      ...boardSnapshot.flop,
+      ...boardSnapshot.turn,
+      ...boardSnapshot.river,
+    ];
     const outcomeByPlayerId = new Map(
       handEndSnapshot.players.map((player) => [player.playerId, player])
     );
@@ -1201,6 +1143,13 @@ export class PokerDurableObject extends DurableObject<Env> {
         );
         const finalChips = player?.getChips() ?? startingStack;
         const outcome = outcomeByPlayerId.get(playerId);
+        const handStartPlayer = handStartPlayerById.get(playerId);
+        const royalFlushCount =
+          outcome?.reachedShowdown &&
+          handStartPlayer &&
+          hasRoyalFlush([...handStartPlayer.holeCards, ...boardCards])
+            ? 1
+            : 0;
 
         return {
           workspaceId,
@@ -1209,6 +1158,7 @@ export class PokerDurableObject extends DurableObject<Env> {
           playerId,
           participated: true,
           wonAnyPot: (outcome?.chipsWon ?? 0) > 0,
+          royalFlushCount,
           reachedShowdown: outcome?.reachedShowdown ?? false,
           folded: outcome?.foldedStreet !== null,
           checkCount,
@@ -1251,6 +1201,121 @@ export class PokerDurableObject extends DurableObject<Env> {
     });
 
     return { ok: true, count: records.length };
+  }
+
+  private backfillRoyalFlushStats(data: {
+    workspaceId: string;
+    channelId: string;
+  }):
+    | { ok: true; gameCount: number; factCount: number }
+    | { ok: false; reason: "no_game" } {
+    if (!this.channelExists(data.workspaceId, data.channelId)) {
+      return { ok: false, reason: "no_game" };
+    }
+
+    const completedGameIds = this.sql
+      .exec(
+        `
+          SELECT gameId
+          FROM PokerGames
+          WHERE workspaceId = ?
+            AND channelId = ?
+            AND endedAt IS NOT NULL
+          ORDER BY gameId ASC
+        `,
+        data.workspaceId,
+        data.channelId
+      )
+      .toArray()
+      .map((row) => Number(row.gameId));
+
+    let factCount = 0;
+    completedGameIds.forEach((gameId) => {
+      const result = this.recordCompletedHandFacts({
+        workspaceId: data.workspaceId,
+        channelId: data.channelId,
+        gameId,
+      });
+      if (result.ok) {
+        factCount += result.count;
+      }
+    });
+
+    return {
+      ok: true,
+      gameCount: completedGameIds.length,
+      factCount,
+    };
+  }
+
+  private hasCompletedChannelMigration(
+    workspaceId: string,
+    channelId: string,
+    migrationKey: string
+  ): boolean {
+    return (
+      this.sql
+        .exec(
+          `
+            SELECT 1
+            FROM ChannelMigrations
+            WHERE workspaceId = ?
+              AND channelId = ?
+              AND migrationKey = ?
+            LIMIT 1
+          `,
+          workspaceId,
+          channelId,
+          migrationKey
+        )
+        .next().done === false
+    );
+  }
+
+  private markCompletedChannelMigration(
+    workspaceId: string,
+    channelId: string,
+    migrationKey: string,
+    completedAt: number = Date.now()
+  ): void {
+    this.sql.exec(
+      `
+        INSERT OR REPLACE INTO ChannelMigrations (
+          workspaceId, channelId, migrationKey, completedAt
+        )
+        VALUES (?, ?, ?, ?)
+      `,
+      workspaceId,
+      channelId,
+      migrationKey,
+      completedAt
+    );
+  }
+
+  private ensureRoyalFlushBackfillForChannel(
+    workspaceId: string,
+    channelId: string
+  ): void {
+    if (!this.channelExists(workspaceId, channelId)) {
+      return;
+    }
+
+    if (
+      this.hasCompletedChannelMigration(
+        workspaceId,
+        channelId,
+        ROYAL_FLUSH_BACKFILL_MIGRATION
+      )
+    ) {
+      return;
+    }
+
+    this.backfillRoyalFlushStats({ workspaceId, channelId });
+    this.markCompletedChannelMigration(
+      workspaceId,
+      channelId,
+      ROYAL_FLUSH_BACKFILL_MIGRATION
+    );
   }
 
   private getLatestCompletedGameId(
@@ -1406,6 +1471,8 @@ export class PokerDurableObject extends DurableObject<Env> {
     workspaceId: string,
     channelId: string
   ): Promise<AggregatedPlayerHandStats[]> {
+    this.ensureRoyalFlushBackfillForChannel(workspaceId, channelId);
+
     const rows = this.sql
       .exec(
         `
@@ -1414,6 +1481,7 @@ export class PokerDurableObject extends DurableObject<Env> {
 				COUNT(*) AS handsCount,
 				SUM(participated) AS participated,
 				SUM(wonAnyPot) AS wonAnyPot,
+				SUM(royalFlushCount) AS royalFlushCount,
 				SUM(reachedShowdown) AS reachedShowdown,
 				SUM(folded) AS folded,
 				SUM(checkCount) AS checkCount,
@@ -1442,6 +1510,7 @@ export class PokerDurableObject extends DurableObject<Env> {
         handsCount: Number(row?.handsCount ?? 0),
         participated: Number(row?.participated ?? 0),
         wonAnyPot: Number(row?.wonAnyPot ?? 0),
+        royalFlushCount: Number(row?.royalFlushCount ?? 0),
         reachedShowdown: Number(row?.reachedShowdown ?? 0),
         folded: Number(row?.folded ?? 0),
         checkCount: Number(row?.checkCount ?? 0),
@@ -1775,6 +1844,7 @@ export class PokerDurableObject extends DurableObject<Env> {
             facts.playerId AS playerId,
             COUNT(*) AS handsCount,
             SUM(facts.wonAnyPot) AS wonAnyPot,
+            SUM(facts.royalFlushCount) AS royalFlushCount,
             SUM(facts.reachedShowdown) AS reachedShowdown,
             SUM(facts.folded) AS folded,
             SUM(facts.checkCount) AS checkCount,
@@ -1808,6 +1878,7 @@ export class PokerDurableObject extends DurableObject<Env> {
         playerId: row.playerId as string,
         handsCount: Number(row.handsCount),
         wonAnyPot: Number(row.wonAnyPot),
+        royalFlushCount: Number(row.royalFlushCount),
         reachedShowdown: Number(row.reachedShowdown),
         folded: Number(row.folded),
         checkCount: Number(row.checkCount),
@@ -1835,6 +1906,8 @@ export class PokerDurableObject extends DurableObject<Env> {
     if (!this.channelExists(workspaceId, channelId)) {
       return null;
     }
+
+    this.ensureRoyalFlushBackfillForChannel(workspaceId, channelId);
 
     const summaryRow = this.sql
       .exec(
@@ -1995,6 +2068,8 @@ export class PokerDurableObject extends DurableObject<Env> {
       return null;
     }
 
+    this.ensureRoyalFlushBackfillForChannel(workspaceId, channelId);
+
     return {
       data: this.getPublicPlayerStatsRows(workspaceId, channelId),
     };
@@ -2108,6 +2183,8 @@ export class PokerDurableObject extends DurableObject<Env> {
       return null;
     }
 
+    this.ensureRoyalFlushBackfillForChannel(workspaceId, channelId);
+
     const row = this.getPublicPlayerStatsRows(workspaceId, channelId).find(
       (player) => player.playerId === playerId
     );
@@ -2124,45 +2201,6 @@ export class PokerDurableObject extends DurableObject<Env> {
       ...row,
       recentVisibleHands: recentHands?.data ?? [],
     };
-  }
-
-  async resetStatsAndHistory(data: {
-    workspaceId: string;
-    channelId: string;
-    playerId: string;
-    messageText: string;
-    normalizedText: string;
-    handlerKey: string;
-    slackMessageTs: string;
-    timestamp: number;
-  }): Promise<
-    | { ok: true; pending: boolean }
-    | { ok: false; reason: "no_game" }
-  > {
-    const channelState = this.loadChannelGameState(
-      data.workspaceId,
-      data.channelId
-    );
-    if (!channelState) {
-      return { ok: false, reason: "no_game" };
-    }
-
-    if (channelState.activeGameId !== null) {
-      this.queueChannelReset(
-        data.workspaceId,
-        data.channelId,
-        data.timestamp
-      );
-      return { ok: true, pending: true };
-    }
-
-    this.resetChannelHistoryAndStats(
-      data.workspaceId,
-      data.channelId,
-      JSON.stringify(channelState.game)
-    );
-    this.clearPendingChannelReset(data.workspaceId, data.channelId);
-    return { ok: true, pending: false };
   }
 
   private finalizeHandIfEnded(
@@ -2199,7 +2237,6 @@ export class PokerDurableObject extends DurableObject<Env> {
       channelState.nextGameId,
       null
     );
-    this.maybeApplyPendingChannelReset(workspaceId, channelId, serializedGame);
   }
 
   private loadScopedGame(
@@ -5144,7 +5181,7 @@ export async function showStats(
     const name =
       userIdToName[player.playerId as keyof typeof userIdToName] ||
       player.playerId;
-    message += `*${name}*: hands ${player.handsCount}, won ${player.wonAnyPot}, showdown ${player.reachedShowdown}, folded ${player.folded}, checks ${player.checkCount}, calls ${player.callCount}, bets ${player.betCount}, raises ${player.raiseCount}, all-ins ${player.allInCount}, raise total ${player.raiseToTotal}, committed ${player.chipsCommitted}, won chips ${player.chipsWon}, net ${player.netChips}\n`;
+    message += `*${name}*: hands ${player.handsCount}, won ${player.wonAnyPot}, royal flushes ${player.royalFlushCount}, showdown ${player.reachedShowdown}, folded ${player.folded}, checks ${player.checkCount}, calls ${player.callCount}, bets ${player.betCount}, raises ${player.raiseCount}, all-ins ${player.allInCount}, raise total ${player.raiseToTotal}, committed ${player.chipsCommitted}, won chips ${player.chipsWon}, net ${player.netChips}\n`;
   });
 
   await context.say({ text: message.trimEnd() });
