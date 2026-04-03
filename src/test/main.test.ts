@@ -474,10 +474,10 @@ describe("Poker Durable Object", () => {
     sayFn.mockClear();
     await showStats(env, marcusContext, createGenericMessageEvent(MARCUS_USER_ID, "stats"));
     expect(sayFn).toHaveBeenCalledWith({
-      text: expect.stringContaining("*Marcus*: hands 1, won 1"),
+      text: expect.stringContaining("*Marcus*\nHands 1 | Won 1"),
     });
     expect(sayFn).toHaveBeenCalledWith({
-      text: expect.stringContaining("*Camden*: hands 1, won 1"),
+      text: expect.stringContaining("*Camden*\nHands 1 | Won 1"),
     });
   });
 
@@ -574,10 +574,10 @@ describe("Poker Durable Object", () => {
     sayFn.mockClear();
     await showStats(env, marcusContext, createGenericMessageEvent(MARCUS_USER_ID, "stats"));
     expect(sayFn).toHaveBeenCalledWith({
-      text: expect.stringContaining("*Marcus*: hands 1, won 1, royal flushes 1"),
+      text: expect.stringContaining("*Marcus*\nHands 1 | Won 1 | Showdown 1 | Folded 0 | Royal flushes 1"),
     });
     expect(sayFn).toHaveBeenCalledWith({
-      text: expect.stringContaining("*Camden*: hands 1, won 0, royal flushes 0"),
+      text: expect.stringContaining("*Camden*\nHands 1 | Won 0 | Showdown 1 | Folded 0 | Royal flushes 0"),
     });
   });
 

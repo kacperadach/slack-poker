@@ -5176,15 +5176,21 @@ export async function showStats(
     return;
   }
 
-  let message = "*Player Hand Stats*\n";
-  trackedStats.forEach((player) => {
+  const sections = trackedStats.map((player) => {
     const name =
       userIdToName[player.playerId as keyof typeof userIdToName] ||
       player.playerId;
-    message += `*${name}*: hands ${player.handsCount}, won ${player.wonAnyPot}, royal flushes ${player.royalFlushCount}, showdown ${player.reachedShowdown}, folded ${player.folded}, checks ${player.checkCount}, calls ${player.callCount}, bets ${player.betCount}, raises ${player.raiseCount}, all-ins ${player.allInCount}, raise total ${player.raiseToTotal}, committed ${player.chipsCommitted}, won chips ${player.chipsWon}, net ${player.netChips}\n`;
+    return [
+      `*${name}*`,
+      `Hands ${player.handsCount} | Won ${player.wonAnyPot} | Showdown ${player.reachedShowdown} | Folded ${player.folded} | Royal flushes ${player.royalFlushCount}`,
+      `Actions: checks ${player.checkCount}, calls ${player.callCount}, bets ${player.betCount}, raises ${player.raiseCount}, all-ins ${player.allInCount}`,
+      `Chips: committed ${player.chipsCommitted}, won ${player.chipsWon}, net ${player.netChips}, raise total ${player.raiseToTotal}`,
+    ].join("\n");
   });
 
-  await context.say({ text: message.trimEnd() });
+  await context.say({
+    text: ["*Player Hand Stats*", ...sections].join("\n\n"),
+  });
 }
 
 export async function setStacks(
