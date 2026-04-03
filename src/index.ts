@@ -255,6 +255,23 @@ type ChannelPlayerStatsRow = {
 
 type ChannelPlayerStatsListResponse = PublicApiResponse<ChannelPlayerStatsRow[]>;
 
+type ChannelNetChipsSeriesHandRow = {
+  gameId: number;
+  endedAt: number;
+};
+
+type ChannelNetChipsSeriesPlayerRow = {
+  playerId: string;
+  playerName: string;
+  series: number[];
+};
+
+type ChannelNetChipsSeriesResponse = {
+  channelId: string;
+  hands: ChannelNetChipsSeriesHandRow[];
+  players: ChannelNetChipsSeriesPlayerRow[];
+};
+
 type ChannelPlayerStatsDetailResponse = {
   playerId: string;
   handsCount: number;
@@ -1983,6 +2000,105 @@ export class PokerDurableObject extends DurableObject<Env> {
     };
   }
 
+  async getPublicNetChipsSeries(
+    workspaceId: string,
+    channelId: string
+  ): Promise<ChannelNetChipsSeriesResponse | null> {
+    if (!this.channelExists(workspaceId, channelId)) {
+      return null;
+    }
+
+    const hands = this.sql
+      .exec(
+        `
+          SELECT gameId, endedAt
+          FROM PokerGames
+          WHERE workspaceId = ?
+            AND channelId = ?
+            AND endedAt IS NOT NULL
+          ORDER BY gameId ASC
+        `,
+        workspaceId,
+        channelId
+      )
+      .toArray()
+      .map((row) => ({
+        gameId: Number(row.gameId),
+        endedAt: Number(row.endedAt),
+      }));
+
+    if (hands.length === 0) {
+      return {
+        channelId,
+        hands: [],
+        players: [],
+      };
+    }
+
+    const rows = this.sql
+      .exec(
+        `
+          SELECT facts.gameId, facts.playerId, facts.netChips
+          FROM PlayerHandFacts facts
+          INNER JOIN PokerGames games
+            ON games.workspaceId = facts.workspaceId
+            AND games.channelId = facts.channelId
+            AND games.gameId = facts.gameId
+          WHERE facts.workspaceId = ?
+            AND facts.channelId = ?
+            AND games.endedAt IS NOT NULL
+          ORDER BY facts.gameId ASC, facts.playerId ASC
+        `,
+        workspaceId,
+        channelId
+      )
+      .toArray();
+
+    const netChipsByGameId = new Map<number, Map<string, number>>();
+    const playerIds = new Set<string>();
+
+    rows.forEach((row) => {
+      const gameId = Number(row.gameId);
+      const playerId = row.playerId as string;
+      const netChips = Number(row.netChips);
+      playerIds.add(playerId);
+
+      const gameFacts = netChipsByGameId.get(gameId) ?? new Map<string, number>();
+      gameFacts.set(playerId, netChips);
+      netChipsByGameId.set(gameId, gameFacts);
+    });
+
+    const players = Array.from(playerIds).map((playerId) => {
+      const series = [0];
+      let runningTotal = 0;
+
+      hands.forEach((hand) => {
+        const handFacts = netChipsByGameId.get(hand.gameId);
+        runningTotal += handFacts?.get(playerId) ?? 0;
+        series.push(runningTotal);
+      });
+
+      return {
+        playerId,
+        playerName: userIdToName[playerId as keyof typeof userIdToName] || playerId,
+        series,
+        finalNetChips: runningTotal,
+      };
+    });
+
+    return {
+      channelId,
+      hands,
+      players: players
+        .sort(
+          (a, b) =>
+            b.finalNetChips - a.finalNetChips ||
+            a.playerId.localeCompare(b.playerId)
+        )
+        .map(({ finalNetChips: _finalNetChips, ...player }) => player),
+    };
+  }
+
   async getPublicPlayerStatsDetail(
     workspaceId: string,
     channelId: string,
@@ -3270,6 +3386,24 @@ async function handlePublicApiRequest(
       return notFoundResponse("Channel not found");
     }
     return jsonResponse(stats);
+  }
+
+  if (
+    segments[3] === "players" &&
+    segments[4] === "net-chips-series" &&
+    segments.length === 5
+  ) {
+    const series = await stub.getPublicNetChipsSeries(
+      PUBLIC_WORKSPACE_ID,
+      channelId
+    );
+    if (!series) {
+      return notFoundResponse("Channel not found");
+    }
+    const body: PublicApiResponse<ChannelNetChipsSeriesResponse> = {
+      data: series,
+    };
+    return jsonResponse(body);
   }
 
   if (segments[3] === "players" && segments[5] === "stats" && segments.length === 6) {

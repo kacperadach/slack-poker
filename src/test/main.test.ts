@@ -5052,6 +5052,102 @@ describe("Public hand history API", () => {
     expect(playerStatsResponse.body.data.recentVisibleHands[0].gameId).toBe(1);
   });
 
+  it("serves full non-paginated net chips series per channel", async () => {
+    const workspaceId = "TDUQJ4MMY";
+    const channelId = "public-api-channel-net-chips-series";
+    const stub = getStub({ workspaceId, channelId });
+
+    await insertNetChipsSeriesHistory(stub, workspaceId, channelId, [
+      {
+        gameId: 1,
+        endedAt: daysAgoMs(9),
+        netChipsByPlayerId: {
+          [MARCUS_USER_ID]: 10,
+          [CAMDEN_USER_ID]: -5,
+          [YUVI_USER_ID]: -5,
+        },
+      },
+      {
+        gameId: 2,
+        endedAt: daysAgoMs(8),
+        netChipsByPlayerId: {
+          [MARCUS_USER_ID]: -6,
+          [CAMDEN_USER_ID]: 12,
+          [YUVI_USER_ID]: -6,
+        },
+      },
+      {
+        gameId: 3,
+        endedAt: daysAgoMs(7),
+        netChipsByPlayerId: {
+          [MARCUS_USER_ID]: 15,
+          [CAMDEN_USER_ID]: -10,
+        },
+      },
+    ]);
+
+    const response = await fetchPublicApi(
+      `/api/channels/${channelId}/players/net-chips-series`
+    );
+
+    expect(response.status).toBe(200);
+    expect(response.body.pagination).toBeUndefined();
+    expect(response.body.data).toEqual({
+      channelId,
+      hands: [
+        { gameId: 1, endedAt: daysAgoMs(9) },
+        { gameId: 2, endedAt: daysAgoMs(8) },
+        { gameId: 3, endedAt: daysAgoMs(7) },
+      ],
+      players: [
+        {
+          playerId: MARCUS_USER_ID,
+          playerName: "Marcus",
+          series: [0, 10, 4, 19],
+        },
+        {
+          playerId: CAMDEN_USER_ID,
+          playerName: "Camden",
+          series: [0, -5, 7, -3],
+        },
+        {
+          playerId: YUVI_USER_ID,
+          playerName: "Yuvi",
+          series: [0, -5, -11, -11],
+        },
+      ],
+    });
+    response.body.data.players.forEach((player: any) => {
+      expect(player.series).toHaveLength(response.body.data.hands.length + 1);
+      expect(player.series[0]).toBe(0);
+    });
+  });
+
+  it("returns empty net chips series for an existing channel with no completed hands", async () => {
+    const workspaceId = "TDUQJ4MMY";
+    const channelId = "public-api-empty-net-chips-series";
+    const sayFn = vi.fn();
+    const marcusContext = createContext({
+      userId: MARCUS_USER_ID,
+      sayFn,
+      workspaceId,
+      channelId,
+    });
+
+    await newGame(env, marcusContext, createGenericMessageEvent(MARCUS_USER_ID));
+
+    const response = await fetchPublicApi(
+      `/api/channels/${channelId}/players/net-chips-series`
+    );
+
+    expect(response.status).toBe(200);
+    expect(response.body.data).toEqual({
+      channelId,
+      hands: [],
+      players: [],
+    });
+  });
+
   it("serves all hands with embargoed recent detail and revealed older detail", async () => {
     const workspaceId = "TDUQJ4MMY";
     const channelId = "public-api-channel-embargo";
@@ -5298,6 +5394,11 @@ describe("Public hand history API", () => {
   it("returns errors for nonexistent channels and invalid cursors", async () => {
     const missingChannel = await fetchPublicApi("/api/channels/no-such-channel");
     expect(missingChannel.status).toBe(404);
+
+    const missingSeries = await fetchPublicApi(
+      "/api/channels/no-such-channel/players/net-chips-series"
+    );
+    expect(missingSeries.status).toBe(404);
 
     const invalidCursor = await fetchPublicApi(
       "/api/channels/no-such-channel/hands?cursor=not-a-cursor"
@@ -5938,6 +6039,117 @@ async function insertSyntheticHeadsUpHands(
           10,
           winners.has(playerId) ? splitAmount : 0,
           winners.has(playerId) ? splitAmount : -10
+        );
+      });
+    });
+  });
+}
+
+async function insertNetChipsSeriesHistory(
+  stub: DurableObjectStub,
+  workspaceId: string,
+  channelId: string,
+  hands: Array<{
+    gameId: number;
+    endedAt: number;
+    netChipsByPlayerId: Record<string, number>;
+  }>
+) {
+  return runInDurableObject(stub, async (_instance, state) => {
+    hands.forEach((hand, index) => {
+      const playerIds = Object.keys(hand.netChipsByPlayerId);
+      const game = {
+        gameState: GameState.WaitingForPlayers,
+        deck: [],
+        communityCards: [],
+        activePlayers: [],
+        inactivePlayers: [],
+        foldedPlayers: [],
+        currentPot: 0,
+        dealerPosition: 0,
+        smallBlind: 10,
+        bigBlind: 20,
+        currentPlayerIndex: 0,
+        currentBetAmount: 0,
+        lastRaiseAmount: 0,
+        playerPositions: {},
+        preDealId: undefined,
+        events: [],
+        bettingHistory: [],
+        handStartChips: {},
+        handHistory: {
+          handStartSnapshot: {
+            dealerPosition: 0,
+            smallBlind: 10,
+            bigBlind: 20,
+            players: playerIds.map((playerId, playerIndex) => ({
+              playerId,
+              seatIndex: playerIndex,
+              roleFlags: {
+                isDealer: playerIndex === 0,
+                isSmallBlind: playerIndex === 0,
+                isBigBlind: playerIndex === 1,
+              },
+              startingStack: 100,
+              holeCards: [],
+            })),
+          },
+          actionHistory: [],
+          boardSnapshot: { flop: [], turn: [], river: [] },
+          handEndSnapshot: {
+            players: playerIds.map((playerId) => ({
+              playerId,
+              finalStack: 100 + hand.netChipsByPlayerId[playerId],
+              foldedStreet: null,
+              reachedShowdown: false,
+              revealedCards: false,
+              chipsWon: Math.max(hand.netChipsByPlayerId[playerId], 0),
+            })),
+            potResults: [],
+          },
+        },
+      };
+
+      state.storage.sql.exec(
+        `
+          INSERT INTO PokerGames (workspaceId, channelId, gameId, game, createdAt, endedAt)
+          VALUES (?, ?, ?, ?, ?, ?)
+        `,
+        workspaceId,
+        channelId,
+        hand.gameId,
+        JSON.stringify(game),
+        hand.endedAt - 1000 - index,
+        hand.endedAt
+      );
+
+      playerIds.forEach((playerId) => {
+        state.storage.sql.exec(
+          `
+            INSERT INTO PlayerHandFacts (
+              workspaceId, channelId, gameId, playerId, participated, wonAnyPot,
+              reachedShowdown, folded, checkCount, callCount, betCount, raiseCount,
+              allInCount, raiseToTotal, chipsCommitted, chipsWon, netChips
+            )
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+          `,
+          workspaceId,
+          channelId,
+          hand.gameId,
+          playerId,
+          1,
+          hand.netChipsByPlayerId[playerId] > 0 ? 1 : 0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          Math.max(hand.netChipsByPlayerId[playerId], 0),
+          hand.netChipsByPlayerId[playerId]
         );
       });
     });
