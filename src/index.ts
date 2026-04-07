@@ -112,6 +112,16 @@ type PublicApiResponse<T> = {
   meta?: Record<string, unknown>;
 };
 
+type ErrorLogRecord = {
+  id: number;
+  workspaceId: string;
+  channelId: string;
+  scope: string;
+  message: string;
+  details: string | null;
+  createdAt: number;
+};
+
 type HandVisibility = "embargoed" | "revealed";
 
 type ChannelSummaryResponse = {
@@ -431,6 +441,18 @@ export class PokerDurableObject extends DurableObject<Env> {
 			);
 		`);
 
+    this.sql.exec(`
+			CREATE TABLE IF NOT EXISTS ErrorLogs (
+				id INTEGER PRIMARY KEY AUTOINCREMENT,
+				workspaceId TEXT NOT NULL,
+				channelId TEXT NOT NULL,
+				scope TEXT NOT NULL,
+				message TEXT NOT NULL,
+				details JSON,
+				createdAt INTEGER NOT NULL
+			);
+		`);
+
     // Table to track processed messages for idempotency
     // This prevents duplicate processing when Slack retries message delivery
     this.sql.exec(`
@@ -539,6 +561,58 @@ export class PokerDurableObject extends DurableObject<Env> {
 		`,
       cutoff
     );
+  }
+
+  logError(
+    workspaceId: string,
+    channelId: string,
+    scope: string,
+    message: string,
+    details?: unknown
+  ): void {
+    this.sql.exec(
+      `
+			INSERT INTO ErrorLogs (workspaceId, channelId, scope, message, details, createdAt)
+			VALUES (?, ?, ?, ?, ?, ?)
+		`,
+      workspaceId,
+      channelId,
+      scope,
+      message,
+      details === undefined ? null : JSON.stringify(details),
+      Date.now()
+    );
+  }
+
+  getRecentErrors(
+    workspaceId: string,
+    channelId: string,
+    limit: number = 5
+  ): ErrorLogRecord[] {
+    const rows = this.sql
+      .exec(
+        `
+			SELECT id, workspaceId, channelId, scope, message, details, createdAt
+			FROM ErrorLogs
+			WHERE workspaceId = ? AND channelId = ?
+			ORDER BY createdAt DESC, id DESC
+			LIMIT ?
+		`,
+        workspaceId,
+        channelId,
+        limit
+      )
+      .toArray();
+
+    return rows.map((row) => ({
+      id: Number(row.id),
+      workspaceId: String(row.workspaceId),
+      channelId: String(row.channelId),
+      scope: String(row.scope),
+      message: String(row.message),
+      details: row.details == null ? null : String(row.details),
+      createdAt: Number(row.createdAt),
+    }));
   }
 
   /**
@@ -3670,6 +3744,7 @@ const MESSAGE_HANDLERS: Record<string, Function> = {
   "^tsa": preCheck,
   "^flops": showFlops,
   "^fsearch": searchFlops,
+  "^dump$": dumpErrors,
   "^context": context,
   "^stacks": showStacks,
   "^stats$": showStats,
@@ -4089,6 +4164,45 @@ async function showFlops(
   }
 
   await context.say({ text: message });
+}
+
+async function dumpErrors(
+  env: Env,
+  context: SlackAppContextWithChannelId,
+  _payload: PostedMessage
+) {
+  const stub = getDurableObject(env, context);
+  const errors = await stub.getRecentErrors(context.teamId!, context.channelId, 1);
+
+  if (errors.length === 0) {
+    await context.say({ text: "No log to drop :poop:" });
+    return;
+  }
+
+  await context.say({
+    text: ["*Dropping a log :poop:*", formatErrorLogForSlack(errors[0])].join("\n"),
+  });
+}
+
+function formatErrorLogForSlack(error: ErrorLogRecord): string {
+  const timestamp = new Date(error.createdAt).toLocaleString("en-US", {
+    timeZone: "America/New_York",
+    month: "2-digit",
+    day: "2-digit",
+    hour: "2-digit",
+    minute: "2-digit",
+    second: "2-digit",
+    hour12: false,
+  });
+  const lines = [`${timestamp}`, `${error.scope}: ${error.message}`];
+
+  if (error.details) {
+    lines.push("```");
+    lines.push(error.details);
+    lines.push("```");
+  }
+
+  return lines.join("\n");
 }
 
 async function ass(
@@ -5707,7 +5821,31 @@ async function sendEventsWithPlayerIds(
   }
 
   if (publicMessages.length > 0) {
-    await context.say({ text: publicMessages.join("\n") });
+    const combinedMessage = publicMessages.join("\n");
+
+    try {
+      await context.say({ text: combinedMessage });
+    } catch (error) {
+      const errorDetails = formatSlackPostError(error);
+      console.error("[SlackPost] Failed to post public message batch", errorDetails);
+      try {
+        const stub = getDurableObject(env, context);
+        await stub.logError(
+          context.teamId!,
+          context.channelId,
+          "slack_post",
+          "Failed to post public message batch",
+          errorDetails
+        );
+      } catch (loggingError) {
+        console.error("[SlackPost] Failed to persist error log", {
+          teamId: context.teamId,
+          channelId: context.channelId,
+          error: formatSlackPostError(loggingError),
+        });
+      }
+      throw error;
+    }
   }
 }
 
@@ -5895,10 +6033,60 @@ async function sendGameEventMessages(
   }
 
   if (publicMessages.length > 0) {
-    await context.say({
-      text: publicMessages.join("\n"),
-    });
+    const combinedMessage = publicMessages.join("\n");
+
+    try {
+      await context.say({
+        text: combinedMessage,
+      });
+    } catch (error) {
+      const errorDetails = formatSlackPostError(error);
+      console.error("[SlackPost] Failed to post public message batch", errorDetails);
+      try {
+        const stub = getDurableObject(env, context);
+        await stub.logError(
+          context.teamId!,
+          context.channelId,
+          "slack_post",
+          "Failed to post public message batch",
+          errorDetails
+        );
+      } catch (loggingError) {
+        console.error("[SlackPost] Failed to persist error log", {
+          teamId: context.teamId,
+          channelId: context.channelId,
+          error: formatSlackPostError(loggingError),
+        });
+      }
+      throw error;
+    }
   }
+}
+
+function formatSlackPostError(error: unknown): Record<string, unknown> {
+  if (error instanceof Error) {
+    const slackError = error as Error & {
+      code?: string;
+      data?: unknown;
+      status?: number;
+      response?: {
+        status?: number;
+        data?: unknown;
+      };
+    };
+
+    return {
+      name: slackError.name,
+      message: slackError.message,
+      code: slackError.code,
+      status: slackError.status ?? slackError.response?.status,
+      data: slackError.data ?? slackError.response?.data,
+    };
+  }
+
+  return {
+    message: String(error),
+  };
 }
 
 function getFlopString(cards: Card[]) {
