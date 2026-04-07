@@ -5784,27 +5784,6 @@ async function sendEventsWithPlayerIds(
     }
   }
 
-  if (gameState && !isVitestRuntime()) {
-    try {
-      const showdownWinPercentageMessage =
-        await buildShowdownWinPercentageMessage(
-          {
-            activePlayers: gameState.activePlayers,
-            foldedPlayers: gameState.foldedPlayers,
-            communityCards: gameState.communityCards,
-          },
-          filteredEvents
-        );
-
-      if (showdownWinPercentageMessage) {
-        publicMessages.push(showdownWinPercentageMessage);
-      }
-    } catch (error) {
-      // Never let optional showdown stats impact core game messaging.
-      console.error("Failed to build showdown win percentage message", error);
-    }
-  }
-
   if (handCompleted) {
     const stub = getDurableObject(env, context);
     const streakMessages = await stub.getCompletedHandStreakMessages(
@@ -5845,6 +5824,27 @@ async function sendEventsWithPlayerIds(
         });
       }
       throw error;
+    }
+  }
+
+  if (gameState && !isVitestRuntime()) {
+    try {
+      const showdownWinPercentageMessage =
+        await buildShowdownWinPercentageMessage(
+          {
+            activePlayers: gameState.activePlayers,
+            foldedPlayers: gameState.foldedPlayers,
+            communityCards: gameState.communityCards,
+          },
+          filteredEvents
+        );
+
+      if (showdownWinPercentageMessage) {
+        await context.say({ text: showdownWinPercentageMessage });
+      }
+    } catch (error) {
+      // Never let optional showdown stats impact core game messaging.
+      console.error("Failed to build showdown win percentage message", error);
     }
   }
 }
