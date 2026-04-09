@@ -110,6 +110,11 @@ export interface HandEndSnapshot {
   potResults: PotResult[];
 }
 
+type BlindOverride = {
+  smallBlind: number;
+  bigBlind: number;
+};
+
 export interface HandHistoryState {
   handStartSnapshot: HandStartSnapshot | null;
   actionHistory: HandAction[];
@@ -478,7 +483,7 @@ export class TexasHoldem {
     return false;
   }
 
-  public startRound(playerId: string): string {
+  public startRound(playerId: string, blindOverride?: BlindOverride): string {
     if (this.gameState !== GameState.WaitingForPlayers) {
       this.events.push(
         new GameEvent(`${playerId} Cannot start round, game is already active!`)
@@ -553,8 +558,13 @@ export class TexasHoldem {
     this.dealInitialCards();
     this.bettingHistory = [];
 
-    this.smallBlind = this.getSmallBlindByDay();
-    this.bigBlind = 2 * this.smallBlind;
+    if (blindOverride) {
+      this.smallBlind = blindOverride.smallBlind;
+      this.bigBlind = blindOverride.bigBlind;
+    } else {
+      this.smallBlind = this.getSmallBlindByDay();
+      this.bigBlind = 2 * this.smallBlind;
+    }
     this.gameState = GameState.PreFlop;
     this.createHandStartSnapshot();
 
@@ -1028,9 +1038,9 @@ export class TexasHoldem {
     }
   }
 
-  public preDeal(playerId: string): void {
+  public preDeal(playerId: string, blindOverride?: BlindOverride): void {
     if (this.gameState === GameState.WaitingForPlayers) {
-      this.startRound(playerId);
+      this.startRound(playerId, blindOverride);
       return;
     }
 

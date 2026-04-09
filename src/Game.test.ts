@@ -302,6 +302,31 @@ test("Blinds are taken correctly and 3rd player must call big blind", () => {
   assert.equal(thirdPlayer.getChips(), 1000 - game.getBigBlind());
 });
 
+test("Start round can use explicit blind overrides", () => {
+  const game = new TexasHoldem();
+
+  assert.equal(game.addPlayer(PLAYER_1), true);
+  assert.equal(game.addPlayer(PLAYER_2), true);
+  assert.equal(game.addPlayer(PLAYER_3), true);
+  assert.equal(game.buyIn(PLAYER_1, 1000), Success);
+  assert.equal(game.buyIn(PLAYER_2, 1000), Success);
+  assert.equal(game.buyIn(PLAYER_3, 1000), Success);
+
+  assert.equal(
+    game.startRound(PLAYER_1, { smallBlind: 10, bigBlind: 20 }),
+    Success
+  );
+
+  assert.equal(game.getSmallBlind(), 10);
+  assert.equal(game.getBigBlind(), 20);
+  assert.equal(game.getCurrentPot(), 30);
+
+  const players = game.getActivePlayers();
+  assert.equal(players[0].getChips(), 990);
+  assert.equal(players[1].getChips(), 980);
+  assert.equal(players[2].getChips(), 1000);
+});
+
 test("Game progresses to flop after players call/check", () => {
   const game = new TexasHoldem();
 

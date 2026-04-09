@@ -314,6 +314,16 @@ const PUBLIC_HAND_EMBARGO_WINDOW_MS = 7 * 24 * 60 * 60 * 1000;
 const HOT_STREAK_THRESHOLD = 5;
 const COLD_STREAK_THRESHOLD = 5;
 const ROYAL_FLUSH_BACKFILL_MIGRATION = "royal_flush_count_backfill";
+const FIXED_BLINDS_CHANNEL_OVERRIDES: Record<
+  string,
+  { smallBlind: number; bigBlind: number }
+> = {
+  C0ARP9UJ2HY: { smallBlind: 10, bigBlind: 20 },
+};
+
+function getBlindOverrideForChannel(channelId: string) {
+  return FIXED_BLINDS_CHANNEL_OVERRIDES[channelId];
+}
 
 function getPublicRevealCutoffMs(now: number = Date.now()): number {
   return now - PUBLIC_HAND_EMBARGO_WINDOW_MS;
@@ -2766,7 +2776,7 @@ export class PokerDurableObject extends DurableObject<Env> {
         data.channelId
       )!;
       const game = TexasHoldem.fromJson(existingActiveGame.game);
-      game.startRound(data.playerId);
+      game.startRound(data.playerId, getBlindOverrideForChannel(data.channelId));
       this.finalizeHandIfEnded(
         data.workspaceId,
         data.channelId,
@@ -2791,7 +2801,10 @@ export class PokerDurableObject extends DurableObject<Env> {
       return { ok: false, reason: "no_game" };
     }
 
-    hand.game.startRound(data.playerId);
+    hand.game.startRound(
+      data.playerId,
+      getBlindOverrideForChannel(data.channelId)
+    );
     if (hand.game.getGameState() === GameState.WaitingForPlayers) {
       this.saveChannelGameState(
         data.workspaceId,
@@ -2954,7 +2967,10 @@ export class PokerDurableObject extends DurableObject<Env> {
         return { ok: false, reason: "no_game" };
       }
 
-      hand.game.preDeal(data.playerId);
+      hand.game.preDeal(
+        data.playerId,
+        getBlindOverrideForChannel(data.channelId)
+      );
       if (hand.game.getGameState() === GameState.WaitingForPlayers) {
         this.saveChannelGameState(
           data.workspaceId,
@@ -3001,7 +3017,7 @@ export class PokerDurableObject extends DurableObject<Env> {
       data.channelId
     )!;
     const game = TexasHoldem.fromJson(activeGame.game);
-    game.preDeal(data.playerId);
+    game.preDeal(data.playerId, getBlindOverrideForChannel(data.channelId));
     this.finalizeHandIfEnded(
       data.workspaceId,
       data.channelId,
