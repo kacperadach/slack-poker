@@ -57,6 +57,11 @@ type ScopedGameContext = {
   gameId?: number;
 };
 
+type IgnoredMutationResult = {
+  ok: true;
+  ignored: true;
+};
+
 type PlayerHandFactRecord = {
   workspaceId: string;
   channelId: string;
@@ -1118,6 +1123,38 @@ export class PokerDurableObject extends DurableObject<Env> {
       channelId,
       gameId
     );
+  }
+
+  private parseSlackTimestamp(ts: string | undefined | null): number | null {
+    if (!ts) {
+      return null;
+    }
+
+    const parsedTs = Number.parseFloat(ts);
+    return Number.isFinite(parsedTs) ? parsedTs : null;
+  }
+
+  private isStaleMessage(
+    slackMessageTs: string,
+    game: SerializedGame | null | undefined
+  ): boolean {
+    const messageTs = this.parseSlackTimestamp(slackMessageTs);
+    const updatedTs = this.parseSlackTimestamp(game?.updated);
+
+    return messageTs !== null && updatedTs !== null && messageTs < updatedTs;
+  }
+
+  private stampGameUpdate(game: TexasHoldem, slackMessageTs: string): void {
+    if (this.parseSlackTimestamp(slackMessageTs) === null) {
+      return;
+    }
+
+    game.setUpdated(slackMessageTs);
+  }
+
+  private serializeGameForSave(game: TexasHoldem, slackMessageTs: string): string {
+    this.stampGameUpdate(game, slackMessageTs);
+    return JSON.stringify(game.toJson());
   }
 
   private insertPlayerHandFact(record: PlayerHandFactRecord): void {
@@ -2293,9 +2330,10 @@ export class PokerDurableObject extends DurableObject<Env> {
     gameId: number,
     game: TexasHoldem,
     channelState: ChannelGameStateRecord,
-    timestamp: number
+    timestamp: number,
+    slackMessageTs: string
   ): void {
-    const serializedGame = JSON.stringify(game.toJson());
+    const serializedGame = this.serializeGameForSave(game, slackMessageTs);
 
     if (game.getGameState() !== GameState.WaitingForPlayers) {
       this.saveActiveHand(workspaceId, channelId, gameId, serializedGame, null);
@@ -2359,9 +2397,13 @@ export class PokerDurableObject extends DurableObject<Env> {
     workspaceId: string,
     channelId: string,
     scopedGame: ScopedGameContext,
-    timestamp: number
+    timestamp: number,
+    slackMessageTs: string
   ): void {
-    const serializedGame = JSON.stringify(scopedGame.game.toJson());
+    const serializedGame = this.serializeGameForSave(
+      scopedGame.game,
+      slackMessageTs
+    );
 
     if (scopedGame.scope === "active") {
       this.finalizeHandIfEnded(
@@ -2370,7 +2412,8 @@ export class PokerDurableObject extends DurableObject<Env> {
         scopedGame.gameId!,
         scopedGame.game,
         scopedGame.channelState,
-        timestamp
+        timestamp,
+        slackMessageTs
       );
       return;
     }
@@ -2403,11 +2446,14 @@ export class PokerDurableObject extends DurableObject<Env> {
     handlerKey: string;
     slackMessageTs: string;
     timestamp: number;
-  }): Promise<{ ok: true } | { ok: false; blockingPlayerId: string }> {
+  }): Promise<IgnoredMutationResult | { ok: true } | { ok: false; blockingPlayerId: string }> {
     const channelState = this.loadChannelGameState(
       data.workspaceId,
       data.channelId
     );
+    if (this.isStaleMessage(data.slackMessageTs, channelState?.game)) {
+      return { ok: true, ignored: true };
+    }
     const existing = await this.fetchGame(data.workspaceId, data.channelId);
     if (existing) {
       const game = TexasHoldem.fromJson(existing);
@@ -2434,7 +2480,7 @@ export class PokerDurableObject extends DurableObject<Env> {
     this.saveChannelGameState(
       data.workspaceId,
       data.channelId,
-      JSON.stringify(newGameInstance.toJson()),
+      this.serializeGameForSave(newGameInstance, data.slackMessageTs),
       channelState?.nextGameId ?? 1,
       null
     );
@@ -2452,6 +2498,7 @@ export class PokerDurableObject extends DurableObject<Env> {
     slackMessageTs: string;
     timestamp: number;
   }): Promise<
+    | IgnoredMutationResult
     | { ok: true; game: ReturnType<TexasHoldem["getState"]> }
     | { ok: false; reason: "no_game" }
   > {
@@ -2459,13 +2506,17 @@ export class PokerDurableObject extends DurableObject<Env> {
     if (!scopedGame) {
       return { ok: false, reason: "no_game" };
     }
+    if (this.isStaleMessage(data.slackMessageTs, scopedGame.game.toJson())) {
+      return { ok: true, ignored: true };
+    }
 
     scopedGame.game.addPlayer(data.playerId);
     this.persistScopedGame(
       data.workspaceId,
       data.channelId,
       scopedGame,
-      data.timestamp
+      data.timestamp,
+      data.slackMessageTs
     );
 
     return { ok: true, game: scopedGame.game.getState() };
@@ -2482,6 +2533,7 @@ export class PokerDurableObject extends DurableObject<Env> {
     timestamp: number;
     amount: number;
   }): Promise<
+    | IgnoredMutationResult
     | { ok: true; game: ReturnType<TexasHoldem["getState"]> }
     | { ok: false; reason: "no_game" }
   > {
@@ -2489,13 +2541,17 @@ export class PokerDurableObject extends DurableObject<Env> {
     if (!scopedGame) {
       return { ok: false, reason: "no_game" };
     }
+    if (this.isStaleMessage(data.slackMessageTs, scopedGame.game.toJson())) {
+      return { ok: true, ignored: true };
+    }
 
     scopedGame.game.buyIn(data.playerId, data.amount);
     this.persistScopedGame(
       data.workspaceId,
       data.channelId,
       scopedGame,
-      data.timestamp
+      data.timestamp,
+      data.slackMessageTs
     );
 
     return { ok: true, game: scopedGame.game.getState() };
@@ -2512,6 +2568,7 @@ export class PokerDurableObject extends DurableObject<Env> {
     timestamp: number;
     targetAmount: number;
   }): Promise<
+    | IgnoredMutationResult
     | {
         ok: true;
         game: ReturnType<TexasHoldem["getState"]>;
@@ -2527,6 +2584,9 @@ export class PokerDurableObject extends DurableObject<Env> {
     const scopedGame = this.loadScopedGame(data.workspaceId, data.channelId);
     if (!scopedGame) {
       return { ok: false, reason: "no_game" };
+    }
+    if (this.isStaleMessage(data.slackMessageTs, scopedGame.game.toJson())) {
+      return { ok: true, ignored: true };
     }
 
     if (scopedGame.game.getGameState() !== GameState.WaitingForPlayers) {
@@ -2561,7 +2621,8 @@ export class PokerDurableObject extends DurableObject<Env> {
       data.workspaceId,
       data.channelId,
       scopedGame,
-      data.timestamp
+      data.timestamp,
+      data.slackMessageTs
     );
 
     return { ok: true, game: scopedGame.game.getState(), adjustments };
@@ -2577,12 +2638,16 @@ export class PokerDurableObject extends DurableObject<Env> {
     slackMessageTs: string;
     timestamp: number;
   }): Promise<
+    | IgnoredMutationResult
     | { ok: true; game: ReturnType<TexasHoldem["getState"]> }
     | { ok: false; reason: "no_game" }
   > {
     const activeGame = this.loadActiveGame(data.workspaceId, data.channelId);
     if (!activeGame) {
       return { ok: false, reason: "no_game" };
+    }
+    if (this.isStaleMessage(data.slackMessageTs, activeGame.game)) {
+      return { ok: true, ignored: true };
     }
 
     const channelState = this.loadChannelGameState(
@@ -2597,7 +2662,8 @@ export class PokerDurableObject extends DurableObject<Env> {
       activeGame.gameId,
       game,
       channelState,
-      data.timestamp
+      data.timestamp,
+      data.slackMessageTs
     );
 
     return { ok: true, game: game.getState() };
@@ -2613,12 +2679,16 @@ export class PokerDurableObject extends DurableObject<Env> {
     slackMessageTs: string;
     timestamp: number;
   }): Promise<
+    | IgnoredMutationResult
     | { ok: true; game: ReturnType<TexasHoldem["getState"]> }
     | { ok: false; reason: "no_game" }
   > {
     const activeGame = this.loadActiveGame(data.workspaceId, data.channelId);
     if (!activeGame) {
       return { ok: false, reason: "no_game" };
+    }
+    if (this.isStaleMessage(data.slackMessageTs, activeGame.game)) {
+      return { ok: true, ignored: true };
     }
 
     const channelState = this.loadChannelGameState(
@@ -2633,7 +2703,8 @@ export class PokerDurableObject extends DurableObject<Env> {
       activeGame.gameId,
       game,
       channelState,
-      data.timestamp
+      data.timestamp,
+      data.slackMessageTs
     );
 
     return { ok: true, game: game.getState() };
@@ -2649,12 +2720,16 @@ export class PokerDurableObject extends DurableObject<Env> {
     slackMessageTs: string;
     timestamp: number;
   }): Promise<
+    | IgnoredMutationResult
     | { ok: true; game: ReturnType<TexasHoldem["getState"]> }
     | { ok: false; reason: "no_game" }
   > {
     const activeGame = this.loadActiveGame(data.workspaceId, data.channelId);
     if (!activeGame) {
       return { ok: false, reason: "no_game" };
+    }
+    if (this.isStaleMessage(data.slackMessageTs, activeGame.game)) {
+      return { ok: true, ignored: true };
     }
 
     const channelState = this.loadChannelGameState(
@@ -2669,7 +2744,8 @@ export class PokerDurableObject extends DurableObject<Env> {
       activeGame.gameId,
       game,
       channelState,
-      data.timestamp
+      data.timestamp,
+      data.slackMessageTs
     );
 
     return { ok: true, game: game.getState() };
@@ -2686,12 +2762,16 @@ export class PokerDurableObject extends DurableObject<Env> {
     timestamp: number;
     amount: number;
   }): Promise<
+    | IgnoredMutationResult
     | { ok: true; game: ReturnType<TexasHoldem["getState"]> }
     | { ok: false; reason: "no_game" }
   > {
     const activeGame = this.loadActiveGame(data.workspaceId, data.channelId);
     if (!activeGame) {
       return { ok: false, reason: "no_game" };
+    }
+    if (this.isStaleMessage(data.slackMessageTs, activeGame.game)) {
+      return { ok: true, ignored: true };
     }
 
     const channelState = this.loadChannelGameState(
@@ -2706,7 +2786,8 @@ export class PokerDurableObject extends DurableObject<Env> {
       activeGame.gameId,
       game,
       channelState,
-      data.timestamp
+      data.timestamp,
+      data.slackMessageTs
     );
 
     return { ok: true, game: game.getState() };
@@ -2722,12 +2803,16 @@ export class PokerDurableObject extends DurableObject<Env> {
     slackMessageTs: string;
     timestamp: number;
   }): Promise<
+    | IgnoredMutationResult
     | { ok: true; game: ReturnType<TexasHoldem["getState"]> }
     | { ok: false; reason: "no_game" }
   > {
     const activeGame = this.loadActiveGame(data.workspaceId, data.channelId);
     if (!activeGame) {
       return { ok: false, reason: "no_game" };
+    }
+    if (this.isStaleMessage(data.slackMessageTs, activeGame.game)) {
+      return { ok: true, ignored: true };
     }
 
     const channelState = this.loadChannelGameState(
@@ -2742,7 +2827,8 @@ export class PokerDurableObject extends DurableObject<Env> {
       activeGame.gameId,
       game,
       channelState,
-      data.timestamp
+      data.timestamp,
+      data.slackMessageTs
     );
 
     return { ok: true, game: game.getState() };
@@ -2758,6 +2844,7 @@ export class PokerDurableObject extends DurableObject<Env> {
     slackMessageTs: string;
     timestamp: number;
   }): Promise<
+    | IgnoredMutationResult
     | {
         ok: true;
         game: ReturnType<TexasHoldem["getState"]>;
@@ -2771,6 +2858,9 @@ export class PokerDurableObject extends DurableObject<Env> {
       data.channelId
     );
     if (existingActiveGame) {
+      if (this.isStaleMessage(data.slackMessageTs, existingActiveGame.game)) {
+        return { ok: true, ignored: true };
+      }
       const channelState = this.loadChannelGameState(
         data.workspaceId,
         data.channelId
@@ -2783,7 +2873,8 @@ export class PokerDurableObject extends DurableObject<Env> {
         existingActiveGame.gameId,
         game,
         channelState,
-        data.timestamp
+        data.timestamp,
+        data.slackMessageTs
       );
       return {
         ok: true,
@@ -2800,6 +2891,9 @@ export class PokerDurableObject extends DurableObject<Env> {
     if (!hand) {
       return { ok: false, reason: "no_game" };
     }
+    if (this.isStaleMessage(data.slackMessageTs, hand.game.toJson())) {
+      return { ok: true, ignored: true };
+    }
 
     hand.game.startRound(
       data.playerId,
@@ -2809,7 +2903,7 @@ export class PokerDurableObject extends DurableObject<Env> {
       this.saveChannelGameState(
         data.workspaceId,
         data.channelId,
-        JSON.stringify(hand.game.toJson()),
+        this.serializeGameForSave(hand.game, data.slackMessageTs),
         hand.channelState.nextGameId,
         null
       );
@@ -2826,7 +2920,7 @@ export class PokerDurableObject extends DurableObject<Env> {
       data.workspaceId,
       data.channelId,
       hand.gameId,
-      JSON.stringify(hand.game.toJson()),
+      this.serializeGameForSave(hand.game, data.slackMessageTs),
       data.timestamp,
       null
     );
@@ -2857,12 +2951,16 @@ export class PokerDurableObject extends DurableObject<Env> {
     timestamp: number;
     targetPhase: "flop" | "turn" | "river";
   }): Promise<
+    | IgnoredMutationResult
     | { ok: true; game: ReturnType<TexasHoldem["getState"]> }
     | { ok: false; reason: "no_game" | "invalid_state" }
   > {
     const activeGame = this.loadActiveGame(data.workspaceId, data.channelId);
     if (!activeGame) {
       return { ok: false, reason: "no_game" };
+    }
+    if (this.isStaleMessage(data.slackMessageTs, activeGame.game)) {
+      return { ok: true, ignored: true };
     }
 
     const channelState = this.loadChannelGameState(
@@ -2891,7 +2989,8 @@ export class PokerDurableObject extends DurableObject<Env> {
       activeGame.gameId,
       game,
       channelState,
-      data.timestamp
+      data.timestamp,
+      data.slackMessageTs
     );
 
     return { ok: true, game: game.getState() };
@@ -2907,12 +3006,16 @@ export class PokerDurableObject extends DurableObject<Env> {
     slackMessageTs: string;
     timestamp: number;
   }): Promise<
+    | IgnoredMutationResult
     | { ok: true; game: ReturnType<TexasHoldem["getState"]> }
     | { ok: false; reason: "no_game" | "not_river" }
   > {
     const activeGame = this.loadActiveGame(data.workspaceId, data.channelId);
     if (!activeGame) {
       return { ok: false, reason: "no_game" };
+    }
+    if (this.isStaleMessage(data.slackMessageTs, activeGame.game)) {
+      return { ok: true, ignored: true };
     }
 
     const channelState = this.loadChannelGameState(
@@ -2933,7 +3036,8 @@ export class PokerDurableObject extends DurableObject<Env> {
       activeGame.gameId,
       game,
       channelState,
-      data.timestamp
+      data.timestamp,
+      data.slackMessageTs
     );
 
     return { ok: true, game: game.getState() };
@@ -2949,6 +3053,7 @@ export class PokerDurableObject extends DurableObject<Env> {
     slackMessageTs: string;
     timestamp: number;
   }): Promise<
+    | IgnoredMutationResult
     | {
         ok: true;
         game: ReturnType<TexasHoldem["getState"]>;
@@ -2966,6 +3071,9 @@ export class PokerDurableObject extends DurableObject<Env> {
       if (!hand) {
         return { ok: false, reason: "no_game" };
       }
+      if (this.isStaleMessage(data.slackMessageTs, hand.game.toJson())) {
+        return { ok: true, ignored: true };
+      }
 
       hand.game.preDeal(
         data.playerId,
@@ -2975,7 +3083,7 @@ export class PokerDurableObject extends DurableObject<Env> {
         this.saveChannelGameState(
           data.workspaceId,
           data.channelId,
-          JSON.stringify(hand.game.toJson()),
+          this.serializeGameForSave(hand.game, data.slackMessageTs),
           hand.channelState.nextGameId,
           null
         );
@@ -2992,7 +3100,7 @@ export class PokerDurableObject extends DurableObject<Env> {
         data.workspaceId,
         data.channelId,
         hand.gameId,
-        JSON.stringify(hand.game.toJson()),
+        this.serializeGameForSave(hand.game, data.slackMessageTs),
         data.timestamp,
         null
       );
@@ -3011,6 +3119,9 @@ export class PokerDurableObject extends DurableObject<Env> {
         gameId: hand.gameId,
       };
     }
+    if (this.isStaleMessage(data.slackMessageTs, activeGame.game)) {
+      return { ok: true, ignored: true };
+    }
 
     const channelState = this.loadChannelGameState(
       data.workspaceId,
@@ -3024,7 +3135,8 @@ export class PokerDurableObject extends DurableObject<Env> {
       activeGame.gameId,
       game,
       channelState,
-      data.timestamp
+      data.timestamp,
+      data.slackMessageTs
     );
 
     return {
@@ -3045,12 +3157,16 @@ export class PokerDurableObject extends DurableObject<Env> {
     slackMessageTs: string;
     timestamp: number;
   }): Promise<
+    | IgnoredMutationResult
     | { ok: true; game: ReturnType<TexasHoldem["getState"]> }
     | { ok: false; reason: "no_game" }
   > {
     const activeGame = this.loadActiveGame(data.workspaceId, data.channelId);
     if (!activeGame) {
       return { ok: false, reason: "no_game" };
+    }
+    if (this.isStaleMessage(data.slackMessageTs, activeGame.game)) {
+      return { ok: true, ignored: true };
     }
 
     const channelState = this.loadChannelGameState(
@@ -3065,7 +3181,8 @@ export class PokerDurableObject extends DurableObject<Env> {
       activeGame.gameId,
       game,
       channelState,
-      data.timestamp
+      data.timestamp,
+      data.slackMessageTs
     );
 
     return { ok: true, game: game.getState() };
@@ -3081,12 +3198,16 @@ export class PokerDurableObject extends DurableObject<Env> {
     slackMessageTs: string;
     timestamp: number;
   }): Promise<
+    | IgnoredMutationResult
     | { ok: true; game: ReturnType<TexasHoldem["getState"]> }
     | { ok: false; reason: "no_game" }
   > {
     const activeGame = this.loadActiveGame(data.workspaceId, data.channelId);
     if (!activeGame) {
       return { ok: false, reason: "no_game" };
+    }
+    if (this.isStaleMessage(data.slackMessageTs, activeGame.game)) {
+      return { ok: true, ignored: true };
     }
 
     const channelState = this.loadChannelGameState(
@@ -3101,7 +3222,8 @@ export class PokerDurableObject extends DurableObject<Env> {
       activeGame.gameId,
       game,
       channelState,
-      data.timestamp
+      data.timestamp,
+      data.slackMessageTs
     );
 
     return { ok: true, game: game.getState() };
@@ -3117,12 +3239,16 @@ export class PokerDurableObject extends DurableObject<Env> {
     slackMessageTs: string;
     timestamp: number;
   }): Promise<
+    | IgnoredMutationResult
     | { ok: true; game: ReturnType<TexasHoldem["getState"]> }
     | { ok: false; reason: "no_game" }
   > {
     const activeGame = this.loadActiveGame(data.workspaceId, data.channelId);
     if (!activeGame) {
       return { ok: false, reason: "no_game" };
+    }
+    if (this.isStaleMessage(data.slackMessageTs, activeGame.game)) {
+      return { ok: true, ignored: true };
     }
 
     const channelState = this.loadChannelGameState(
@@ -3137,7 +3263,8 @@ export class PokerDurableObject extends DurableObject<Env> {
       activeGame.gameId,
       game,
       channelState,
-      data.timestamp
+      data.timestamp,
+      data.slackMessageTs
     );
 
     return { ok: true, game: game.getState() };
@@ -3153,12 +3280,16 @@ export class PokerDurableObject extends DurableObject<Env> {
     slackMessageTs: string;
     timestamp: number;
   }): Promise<
+    | IgnoredMutationResult
     | { ok: true; game: ReturnType<TexasHoldem["getState"]> }
     | { ok: false; reason: "no_game" }
   > {
     const activeGame = this.loadActiveGame(data.workspaceId, data.channelId);
     if (!activeGame) {
       return { ok: false, reason: "no_game" };
+    }
+    if (this.isStaleMessage(data.slackMessageTs, activeGame.game)) {
+      return { ok: true, ignored: true };
     }
 
     const channelState = this.loadChannelGameState(
@@ -3173,7 +3304,8 @@ export class PokerDurableObject extends DurableObject<Env> {
       activeGame.gameId,
       game,
       channelState,
-      data.timestamp
+      data.timestamp,
+      data.slackMessageTs
     );
 
     return { ok: true, game: game.getState() };
@@ -3189,12 +3321,16 @@ export class PokerDurableObject extends DurableObject<Env> {
     slackMessageTs: string;
     timestamp: number;
   }): Promise<
+    | IgnoredMutationResult
     | { ok: true; game: ReturnType<TexasHoldem["getState"]> }
     | { ok: false; reason: "no_game" }
   > {
     const activeGame = this.loadActiveGame(data.workspaceId, data.channelId);
     if (!activeGame) {
       return { ok: false, reason: "no_game" };
+    }
+    if (this.isStaleMessage(data.slackMessageTs, activeGame.game)) {
+      return { ok: true, ignored: true };
     }
 
     const channelState = this.loadChannelGameState(
@@ -3209,7 +3345,8 @@ export class PokerDurableObject extends DurableObject<Env> {
       activeGame.gameId,
       game,
       channelState,
-      data.timestamp
+      data.timestamp,
+      data.slackMessageTs
     );
 
     return { ok: true, game: game.getState() };
@@ -3226,6 +3363,7 @@ export class PokerDurableObject extends DurableObject<Env> {
     timestamp: number;
     amount: number;
   }): Promise<
+    | IgnoredMutationResult
     | { ok: true; game: ReturnType<TexasHoldem["getState"]> }
     | { ok: false; reason: "no_game" }
   > {
@@ -3269,13 +3407,17 @@ export class PokerDurableObject extends DurableObject<Env> {
     if (!scopedGame) {
       return { ok: false, reason: "no_game" };
     }
+    if (this.isStaleMessage(data.slackMessageTs, scopedGame.game.toJson())) {
+      return { ok: true, ignored: true };
+    }
 
     scopedGame.game.cashOut(data.playerId);
     this.persistScopedGame(
       data.workspaceId,
       data.channelId,
       scopedGame,
-      data.timestamp
+      data.timestamp,
+      data.slackMessageTs
     );
 
     return { ok: true, game: scopedGame.game.getState() };
@@ -3291,6 +3433,7 @@ export class PokerDurableObject extends DurableObject<Env> {
     slackMessageTs: string;
     timestamp: number;
   }): Promise<
+    | IgnoredMutationResult
     | { ok: true; game: ReturnType<TexasHoldem["getState"]> }
     | { ok: false; reason: "no_game" }
   > {
@@ -3298,13 +3441,17 @@ export class PokerDurableObject extends DurableObject<Env> {
     if (!scopedGame) {
       return { ok: false, reason: "no_game" };
     }
+    if (this.isStaleMessage(data.slackMessageTs, scopedGame.game.toJson())) {
+      return { ok: true, ignored: true };
+    }
 
     scopedGame.game.removePlayer(data.playerId);
     this.persistScopedGame(
       data.workspaceId,
       data.channelId,
       scopedGame,
-      data.timestamp
+      data.timestamp,
+      data.slackMessageTs
     );
 
     return { ok: true, game: scopedGame.game.getState() };
@@ -3321,12 +3468,16 @@ export class PokerDurableObject extends DurableObject<Env> {
     slackMessageTs: string;
     timestamp: number;
   }): Promise<
+    | IgnoredMutationResult
     | { ok: true; game: ReturnType<TexasHoldem["getState"]> }
     | { ok: false; reason: "no_game" | "delete_failed"; message?: string }
   > {
     const scopedGame = this.loadScopedGame(data.workspaceId, data.channelId);
     if (!scopedGame) {
       return { ok: false, reason: "no_game" };
+    }
+    if (this.isStaleMessage(data.slackMessageTs, scopedGame.game.toJson())) {
+      return { ok: true, ignored: true };
     }
 
     const result = scopedGame.game.deletePlayer(data.targetPlayerId);
@@ -3338,7 +3489,8 @@ export class PokerDurableObject extends DurableObject<Env> {
       data.workspaceId,
       data.channelId,
       scopedGame,
-      data.timestamp
+      data.timestamp,
+      data.slackMessageTs
     );
 
     return { ok: true, game: scopedGame.game.getState() };
@@ -3795,6 +3947,12 @@ type HandlerMeta = {
 };
 
 type GameEventJson = ReturnType<GameEvent["toJson"]>;
+
+function isIgnoredMutationResult(
+  result: { ok: boolean; ignored?: boolean }
+): result is IgnoredMutationResult {
+  return result.ok && result.ignored === true;
+}
 
 async function handleMessage(
   env: Env,
@@ -4663,6 +4821,9 @@ export async function preDeal(
     await context.say({ text: NO_GAME_EXISTS_MESSAGE });
     return;
   }
+  if (isIgnoredMutationResult(result)) {
+    return;
+  }
 
   await sendGameStateMessages(env, context, result.game);
 }
@@ -4694,6 +4855,9 @@ export async function preNH(
 
   if (!result.ok) {
     await context.say({ text: NO_GAME_EXISTS_MESSAGE });
+    return;
+  }
+  if (isIgnoredMutationResult(result)) {
     return;
   }
 
@@ -4729,6 +4893,9 @@ export async function preAH(
     await context.say({ text: NO_GAME_EXISTS_MESSAGE });
     return;
   }
+  if (isIgnoredMutationResult(result)) {
+    return;
+  }
 
   await sendGameStateMessages(env, context, result.game);
 }
@@ -4760,6 +4927,9 @@ export async function preCheck(
 
   if (!result.ok) {
     await context.say({ text: NO_GAME_EXISTS_MESSAGE });
+    return;
+  }
+  if (isIgnoredMutationResult(result)) {
     return;
   }
 
@@ -4795,6 +4965,9 @@ export async function preFold(
     await context.say({ text: NO_GAME_EXISTS_MESSAGE });
     return;
   }
+  if (isIgnoredMutationResult(result)) {
+    return;
+  }
 
   await sendGameStateMessages(env, context, result.game);
 }
@@ -4826,6 +4999,9 @@ export async function preCall(
 
   if (!result.ok) {
     await context.say({ text: NO_GAME_EXISTS_MESSAGE });
+    return;
+  }
+  if (isIgnoredMutationResult(result)) {
     return;
   }
 
@@ -4879,6 +5055,9 @@ export async function preBet(
 
   if (!result.ok) {
     await context.say({ text: NO_GAME_EXISTS_MESSAGE });
+    return;
+  }
+  if (isIgnoredMutationResult(result)) {
     return;
   }
 
@@ -4939,6 +5118,9 @@ export async function bet(
     await context.say({ text: NO_GAME_EXISTS_MESSAGE });
     return;
   }
+  if (isIgnoredMutationResult(result)) {
+    return;
+  }
 
   await sendGameStateMessages(env, context, result.game);
 }
@@ -4970,6 +5152,9 @@ export async function call(
 
   if (!result.ok) {
     await context.say({ text: NO_GAME_EXISTS_MESSAGE });
+    return;
+  }
+  if (isIgnoredMutationResult(result)) {
     return;
   }
 
@@ -5005,6 +5190,9 @@ export async function allIn(
     await context.say({ text: NO_GAME_EXISTS_MESSAGE });
     return;
   }
+  if (isIgnoredMutationResult(result)) {
+    return;
+  }
 
   await sendGameStateMessages(env, context, result.game);
 }
@@ -5036,6 +5224,9 @@ export async function check(
 
   if (!result.ok) {
     await context.say({ text: NO_GAME_EXISTS_MESSAGE });
+    return;
+  }
+  if (isIgnoredMutationResult(result)) {
     return;
   }
 
@@ -5075,6 +5266,9 @@ export async function thisPotAintBigEnough(
       return;
     }
     await context.say({ text: NO_GAME_EXISTS_MESSAGE });
+    return;
+  }
+  if (isIgnoredMutationResult(result)) {
     return;
   }
 
@@ -5145,6 +5339,9 @@ export async function takeHerToThe(
     }
     return;
   }
+  if (isIgnoredMutationResult(result)) {
+    return;
+  }
 
   await sendGameStateMessages(env, context, result.game);
 }
@@ -5178,6 +5375,9 @@ export async function fold(
     await context.say({ text: NO_GAME_EXISTS_MESSAGE });
     return;
   }
+  if (isIgnoredMutationResult(result)) {
+    return;
+  }
 
   await sendGameStateMessages(env, context, result.game);
 }
@@ -5209,6 +5409,9 @@ export async function startRound(
 
   if (!result.ok) {
     await context.say({ text: NO_GAME_EXISTS_MESSAGE });
+    return;
+  }
+  if (isIgnoredMutationResult(result)) {
     return;
   }
 
@@ -5375,6 +5578,9 @@ export async function setStacks(
     }
     return;
   }
+  if (isIgnoredMutationResult(result)) {
+    return;
+  }
 
   const { adjustments } = result;
 
@@ -5457,6 +5663,9 @@ export async function cashOut(
     await context.say({ text: NO_GAME_EXISTS_MESSAGE });
     return;
   }
+  if (isIgnoredMutationResult(result)) {
+    return;
+  }
 
   await sendGameStateMessages(env, context, result.game);
 }
@@ -5503,6 +5712,9 @@ export async function buyIn(
     await context.say({ text: NO_GAME_EXISTS_MESSAGE });
     return;
   }
+  if (isIgnoredMutationResult(result)) {
+    return;
+  }
 
   await sendGameStateMessages(env, context, result.game);
 }
@@ -5534,6 +5746,9 @@ export async function leaveGame(
 
   if (!result.ok) {
     await context.say({ text: NO_GAME_EXISTS_MESSAGE });
+    return;
+  }
+  if (isIgnoredMutationResult(result)) {
     return;
   }
 
@@ -5592,6 +5807,9 @@ export async function removePlayer(
     }
     return;
   }
+  if (isIgnoredMutationResult(result)) {
+    return;
+  }
 
   await sendGameStateMessages(env, context, result.game);
 }
@@ -5622,6 +5840,9 @@ export async function joinGame(
 
   if (!result.ok) {
     await context.say({ text: NO_GAME_EXISTS_MESSAGE });
+    return;
+  }
+  if (isIgnoredMutationResult(result)) {
     return;
   }
 
@@ -5658,6 +5879,9 @@ export async function newGame(
         `Cannot start new game - ${result.blockingPlayerId} still has chips!`
       ),
     });
+    return;
+  }
+  if (isIgnoredMutationResult(result)) {
     return;
   }
 

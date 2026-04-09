@@ -123,6 +123,7 @@ export interface HandHistoryState {
 }
 
 export class TexasHoldem {
+  private updated?: string;
   private gameState: GameState;
   private deck: Deck;
   private communityCards: Card[];
@@ -147,6 +148,7 @@ export class TexasHoldem {
   private handEndSnapshot: HandEndSnapshot | null;
 
   constructor(
+    updated: string | undefined = undefined,
     gameState: GameState = GameState.WaitingForPlayers,
     deck: Deck = new Deck(),
     communityCards: Card[] = [],
@@ -169,6 +171,7 @@ export class TexasHoldem {
     boardSnapshot: BoardSnapshot = { flop: [], turn: [], river: [] },
     handEndSnapshot: HandEndSnapshot | null = null
   ) {
+    this.updated = updated;
     this.gameState = gameState;
     this.deck = deck;
     this.communityCards = communityCards;
@@ -2209,6 +2212,7 @@ export class TexasHoldem {
 
   public toJson(): any {
     return {
+      updated: this.updated,
       gameState: this.gameState,
       deck: this.deck.toJson(),
       communityCards: this.communityCards.map((card) => card.toJson()),
@@ -2297,6 +2301,7 @@ export class TexasHoldem {
     };
 
     const game = new TexasHoldem(
+      data.updated,
       data.gameState,
       Deck.fromJson(data.deck),
       data.communityCards.map((cardJson: string) => Card.fromJson(cardJson)),
@@ -2328,6 +2333,14 @@ export class TexasHoldem {
       )
     );
     return game;
+  }
+
+  public setUpdated(updated: string | undefined): void {
+    this.updated = updated;
+  }
+
+  public getUpdated(): string | undefined {
+    return this.updated;
   }
 
   // only for testing
@@ -2379,6 +2392,7 @@ export class TexasHoldem {
 
   public getState(): any {
     return {
+      updated: this.updated,
       gameState: this.gameState,
       deck: this.deck.toJson(),
       events: this.events.map((event) => event.toJson()),

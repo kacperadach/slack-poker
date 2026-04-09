@@ -250,6 +250,53 @@ describe("Poker Durable Object", () => {
     });
   });
 
+  it("ignores stale messages older than the saved game state", async () => {
+    const workspaceId = "stale-message-workspace";
+    const channelId = "stale-message-channel";
+    const sayFn = vi.fn();
+    const context = createContext({
+      userId: "user1",
+      sayFn,
+      workspaceId,
+      channelId,
+    });
+    const stub = getStub({ workspaceId, channelId });
+
+    await newGame(
+      env,
+      context,
+      createGenericMessageEvent("user1", "new game", "1000.100000")
+    );
+    await joinGame(
+      env,
+      context,
+      createGenericMessageEvent("user1", "join table", "1000.200000")
+    );
+
+    sayFn.mockClear();
+    await buyIn(
+      env,
+      context,
+      createGenericMessageEvent("user1", "buy in 100", "1000.300000")
+    );
+
+    let gameState = await getGameState(stub, workspaceId, channelId);
+    expect(getPlayerById(gameState, "user1")?.chips).toBe(100);
+    expect(gameState.updated).toBe("1000.300000");
+
+    sayFn.mockClear();
+    await buyIn(
+      env,
+      context,
+      createGenericMessageEvent("user1", "buy in 50", "1000.250000")
+    );
+
+    gameState = await getGameState(stub, workspaceId, channelId);
+    expect(getPlayerById(gameState, "user1")?.chips).toBe(100);
+    expect(gameState.updated).toBe("1000.300000");
+    expect(sayFn).not.toHaveBeenCalled();
+  });
+
   it("creates sequential hand rows per channel and carries state forward", async () => {
     const workspaceId = "history-workspace";
     const channelId = "history-channel";
@@ -6376,12 +6423,14 @@ async function finishHeadsUpRiver(
 
 function createGenericMessageEvent(
   userId: string,
-  text?: string
+  text?: string,
+  ts?: string
 ): GenericMessageEvent {
   return {
     type: "message",
     user: userId,
     text: text ?? "test",
+    ts,
   } as GenericMessageEvent;
 }
 
