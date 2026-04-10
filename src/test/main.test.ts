@@ -1209,9 +1209,9 @@ describe("Poker Durable Object", () => {
       *user1* 1000 chips
 
       *user2* has the dealer button
-      *user1* posted small blind of 40
-      *user2* posted big blind of 80
-      <@user1>'s turn",
+      *user2* posted small blind of 40
+      *user1* posted big blind of 80
+      <@user2>'s turn",
           },
         ],
       ]
@@ -1239,8 +1239,8 @@ describe("Poker Durable Object", () => {
     sayFn.mockClear();
     postEphemeralFn.mockClear();
 
-    // user1 calls (matches big blind)
-    await call(env, contextUser1, payloadUser1);
+    // user2 calls (dealer/SB acts first in heads-up)
+    await call(env, contextUser2, payloadUser2);
     const gameState8 = await getGameState(stub, workspaceId, channelId);
     expect(gameState8.gameState).toBe(GameState.PreFlop);
     expect(getPlayerById(gameState8, "user1")?.chips).toBe(920); // 1000 - 80
@@ -1249,8 +1249,8 @@ describe("Poker Durable Object", () => {
       [
         [
           {
-            "text": "*user1* called 80 chips! Total Pot: 160
-      <@user2>'s turn",
+            "text": "*user2* called 80 chips! Total Pot: 160
+      <@user1>'s turn",
           },
         ],
       ]
@@ -1258,8 +1258,8 @@ describe("Poker Durable Object", () => {
     sayFn.mockClear();
     postEphemeralFn.mockClear();
 
-    // user2 checks (big blind option)
-    await check(env, contextUser2, payloadUser2);
+    // user1 checks (big blind option)
+    await check(env, contextUser1, payloadUser1);
     const gameState9 = await getGameState(stub, workspaceId, channelId);
     expect(gameState9.gameState).toBe(GameState.Flop);
     expect(gameState9.communityCards.length).toBe(3);
@@ -1267,7 +1267,7 @@ describe("Poker Durable Object", () => {
       [
         [
           {
-            "text": "*user2* checked!
+            "text": "*user1* checked!
       *NEW* Flop:
       1 flops discovered (0.00%), 22,099 remain
       10:spades: 3:clubs: 8:spades:
@@ -1423,9 +1423,9 @@ describe("Poker Durable Object", () => {
       *user1* 920 chips
 
       *user1* has the dealer button
-      *user2* posted small blind of 40
-      *user1* posted big blind of 80
-      <@user2>'s turn",
+      *user1* posted small blind of 40
+      *user2* posted big blind of 80
+      <@user1>'s turn",
           },
         ],
       ]
@@ -1433,7 +1433,9 @@ describe("Poker Durable Object", () => {
     sayFn.mockClear();
     postEphemeralFn.mockClear();
 
-    // user2 folds immediately
+    // user1 completes the blind, then user2 folds
+    await call(env, contextUser1, payloadUser1);
+    sayFn.mockClear();
     await fold(env, contextUser2, payloadUser2);
     const gameState18 = await getGameState(stub, workspaceId, channelId);
     expect(gameState18.gameState).toBe(GameState.WaitingForPlayers);
@@ -1441,9 +1443,9 @@ describe("Poker Durable Object", () => {
       [
         [
           {
-            "text": "*user2* folded!
+            "text": "*user2* folded! :narp-brain:
       <@user1>'s turn
-      *user1* wins 120 chips!
+      *user1* wins 160 chips!
       Community Cards would have been:
       10:spades: 3:clubs: 8:spades: A:diamonds: K:diamonds:",
           },
@@ -1453,11 +1455,11 @@ describe("Poker Durable Object", () => {
 
     // Verify final chip counts after fold
     // Round 1: user2 won showdown (1080 chips), user1 lost (920 chips)
-    // Round 2: user2 posted SB (40), user1 posted BB (80), user2 folded
-    // user1: 920 - 80 + 120 = 960, user2: 1080 - 40 = 1040
+    // Round 2: user1 posted SB (40), user2 posted BB (80), user1 called and user2 folded
+    // user1: 920 - 40 - 40 + 160 = 1000, user2: 1080 - 80 = 1000
     const gameState19 = await getGameState(stub, workspaceId, channelId);
-    expect(getPlayerById(gameState19, "user1")?.chips).toBe(960);
-    expect(getPlayerById(gameState19, "user2")?.chips).toBe(1040);
+    expect(getPlayerById(gameState19, "user1")?.chips).toBe(1000);
+    expect(getPlayerById(gameState19, "user2")?.chips).toBe(1000);
   });
 
   /**
@@ -1558,31 +1560,8 @@ describe("Poker Durable Object", () => {
       *bob* 500 chips
 
       *alice* has the dealer button
-      *bob* posted small blind of 40
-      *alice* posted big blind of 80
-      <@bob>'s turn",
-          },
-        ],
-      ]
-    `);
-    sayFn.mockClear();
-    postEphemeralFn.mockClear();
-
-    // bob (SB) raises to 160 instead of just calling
-    await bet(env, contextUser2, createGenericMessageEvent("user2", "bet 160"));
-    const gameStateAfterRaise = await getGameState(
-      stub,
-      workspaceId,
-      channelId
-    );
-    expect(gameStateAfterRaise.gameState).toBe(GameState.PreFlop);
-    expect(gameStateAfterRaise.currentPot).toBe(240); // 80 BB + 160 raise
-    expect(getPlayerById(gameStateAfterRaise, "bob")?.chips).toBe(340); // 500 - 160
-    expect(sayFn.mock.calls).toMatchInlineSnapshot(`
-      [
-        [
-          {
-            "text": "*bob* raised 160 chips! Total Pot: 240
+      *alice* posted small blind of 40
+      *bob* posted big blind of 80
       <@alice>'s turn",
           },
         ],
@@ -1591,18 +1570,41 @@ describe("Poker Durable Object", () => {
     sayFn.mockClear();
     postEphemeralFn.mockClear();
 
-    // alice (BB) calls the raise
-    await call(env, contextUser1, payloadAlice);
+    // alice (dealer/SB) raises to 160 instead of just calling
+    await bet(env, contextUser1, createGenericMessageEvent("user1", "bet 160"));
+    const gameStateAfterRaise = await getGameState(
+      stub,
+      workspaceId,
+      channelId
+    );
+    expect(gameStateAfterRaise.gameState).toBe(GameState.PreFlop);
+    expect(gameStateAfterRaise.currentPot).toBe(240); // 80 BB + 160 raise
+    expect(getPlayerById(gameStateAfterRaise, "alice")?.chips).toBe(340); // 500 - 40 - 120
+    expect(sayFn.mock.calls).toMatchInlineSnapshot(`
+      [
+        [
+          {
+            "text": "*alice* raised 160 chips! Total Pot: 240
+      <@bob>'s turn",
+          },
+        ],
+      ]
+    `);
+    sayFn.mockClear();
+    postEphemeralFn.mockClear();
+
+    // bob (BB) calls the raise
+    await call(env, contextUser2, payloadBob);
     const gameStateAfterCall = await getGameState(stub, workspaceId, channelId);
     expect(gameStateAfterCall.gameState).toBe(GameState.Flop);
     expect(gameStateAfterCall.currentPot).toBe(320); // 160 + 160
-    expect(getPlayerById(gameStateAfterCall, "alice")?.chips).toBe(340); // 500 - 160
+    expect(getPlayerById(gameStateAfterCall, "bob")?.chips).toBe(340); // 500 - 80 - 80
     expect(gameStateAfterCall.communityCards.length).toBe(3);
     expect(sayFn.mock.calls).toMatchInlineSnapshot(`
       [
         [
           {
-            "text": "*alice* called 160 chips! Total Pot: 320
+            "text": "*bob* called 160 chips! Total Pot: 320
       *NEW* Flop:
       1 flops discovered (0.00%), 22,099 remain
       Q:diamonds: 9:spades: J:diamonds:
@@ -1798,30 +1800,8 @@ describe("Poker Durable Object", () => {
       *player2* 300 chips
 
       *player1* has the dealer button
-      *player2* posted small blind of 40
-      *player1* posted big blind of 80
-      <@player2>'s turn",
-          },
-        ],
-      ]
-    `);
-    sayFn.mockClear();
-    postEphemeralFn.mockClear();
-
-    // player2 (SB) goes ALL-IN
-    await bet(env, contextUser2, createGenericMessageEvent("user2", "bet 300"));
-    const gameStateAfterAllIn = await getGameState(
-      stub,
-      workspaceId,
-      channelId
-    );
-    expect(gameStateAfterAllIn.gameState).toBe(GameState.PreFlop);
-    expect(getPlayerById(gameStateAfterAllIn, "player2")?.chips).toBe(0);
-    expect(sayFn.mock.calls).toMatchInlineSnapshot(`
-      [
-        [
-          {
-            "text": "*player2* raised 300 chips! *:rotating_light: ALL-IN :rotating_light:* Total Pot: 380
+      *player1* posted small blind of 40
+      *player2* posted big blind of 80
       <@player1>'s turn",
           },
         ],
@@ -1830,8 +1810,30 @@ describe("Poker Durable Object", () => {
     sayFn.mockClear();
     postEphemeralFn.mockClear();
 
-    // player1 (BB) calls the all-in - this should trigger automatic showdown
-    await call(env, contextUser1, payloadPlayer1);
+    // player1 (dealer/SB) goes ALL-IN
+    await bet(env, contextUser1, createGenericMessageEvent("user1", "bet 300"));
+    const gameStateAfterAllIn = await getGameState(
+      stub,
+      workspaceId,
+      channelId
+    );
+    expect(gameStateAfterAllIn.gameState).toBe(GameState.PreFlop);
+    expect(getPlayerById(gameStateAfterAllIn, "player1")?.chips).toBe(0);
+    expect(sayFn.mock.calls).toMatchInlineSnapshot(`
+      [
+        [
+          {
+            "text": "*player1* raised 300 chips! *:rotating_light: ALL-IN :rotating_light:* Total Pot: 380
+      <@player2>'s turn",
+          },
+        ],
+      ]
+    `);
+    sayFn.mockClear();
+    postEphemeralFn.mockClear();
+
+    // player2 (BB) calls the all-in - this should trigger automatic showdown
+    await call(env, contextUser2, payloadPlayer2);
     const gameStateAfterCall = await getGameState(stub, workspaceId, channelId);
 
     // Game should be back to WaitingForPlayers after showdown
@@ -1842,7 +1844,7 @@ describe("Poker Durable Object", () => {
       [
         [
           {
-            "text": "*player1* called 300 chips *:rotating_light: ALL-IN :rotating_light:* Total Pot: 600
+            "text": "*player2* called 300 chips *:rotating_light: ALL-IN :rotating_light:* Total Pot: 600
       Flop:
       10:spades: 2:diamonds: 8:spades: A:hearts: 4:spades:
       Turn:
@@ -2168,10 +2170,10 @@ describe("Poker Durable Object", () => {
     postEphemeralFn.mockClear();
 
     // Get through preflop with calls
-    // trapper is BB, victim is SB/dealer
-    await call(env, contextUser2, createGenericMessageEvent("victim")); // victim calls
+    // trapper is SB/dealer, victim is BB
+    await call(env, contextUser1, createGenericMessageEvent("trapper")); // trapper calls
     sayFn.mockClear();
-    await check(env, contextUser1, createGenericMessageEvent("trapper")); // trapper checks
+    await check(env, contextUser2, createGenericMessageEvent("victim")); // victim checks
 
     const gameStateFlop = await getGameState(stub, workspaceId, channelId);
     expect(gameStateFlop.gameState).toBe(GameState.Flop);
@@ -2501,23 +2503,25 @@ describe("Poker Durable Object", () => {
     );
     sayFn.mockClear();
 
-    // Play a quick round - loser folds
+    // Play a quick round - winner completes the blind, loser folds
     await startRound(env, contextUser1, createGenericMessageEvent("winner"));
     sayFn.mockClear();
 
+    await call(env, contextUser1, createGenericMessageEvent("winner"));
+    sayFn.mockClear();
     await fold(env, contextUser2, createGenericMessageEvent("loser"));
     sayFn.mockClear();
 
     // Verify winner has chips
     // winner = dealer/SB, loser = BB in heads up
-    // loser (SB) folds, winner (BB) gets pot
+    // winner calls, loser folds, winner gets the full preflop pot
     const gameStateAfterRound = await getGameState(
       stub,
       workspaceId,
       channelId
     );
-    expect(getPlayerById(gameStateAfterRound, "winner")?.chips).toBe(540); // 500 - 80 + 120
-    expect(getPlayerById(gameStateAfterRound, "loser")?.chips).toBe(460); // 500 - 40 (SB lost)
+    expect(getPlayerById(gameStateAfterRound, "winner")?.chips).toBe(580); // 500 - 80 + 160
+    expect(getPlayerById(gameStateAfterRound, "loser")?.chips).toBe(420); // 500 - 80
 
     // Winner cashes out
     await cashOut(env, contextUser1, createGenericMessageEvent("winner"));
@@ -2525,7 +2529,7 @@ describe("Poker Durable Object", () => {
       [
         [
           {
-            "text": "*winner* Cashed out 540 chips",
+            "text": "*winner* Cashed out 580 chips",
           },
         ],
       ]
@@ -2539,7 +2543,7 @@ describe("Poker Durable Object", () => {
       channelId
     );
     expect(getPlayerById(gameStateAfterCashOut, "winner")?.chips).toBe(0);
-    expect(getPlayerById(gameStateAfterCashOut, "loser")?.chips).toBe(460);
+    expect(getPlayerById(gameStateAfterCashOut, "loser")?.chips).toBe(420);
 
     // Try to cash out with no chips
     await cashOut(env, contextUser1, createGenericMessageEvent("winner"));
@@ -2629,7 +2633,9 @@ describe("Poker Durable Object", () => {
     const gameStateMidRound = await getGameState(stub, workspaceId, channelId);
     expect(gameStateMidRound.activePlayers.length).toBe(2);
 
-    // Finish the round - leaver folds
+    // Finish the round
+    await call(env, contextUser1, createGenericMessageEvent("stayer"));
+    sayFn.mockClear();
     await fold(env, contextUser2, createGenericMessageEvent("leaver"));
     sayFn.mockClear();
 
@@ -2736,7 +2742,9 @@ describe("Poker Durable Object", () => {
     const gameStateMidRound = await getGameState(stub, workspaceId, channelId);
     expect(gameStateMidRound.activePlayers.length).toBe(2);
 
-    // Finish the round - player2 folds
+    // Finish the round
+    await call(env, contextUser1, createGenericMessageEvent("player1"));
+    sayFn.mockClear();
     await fold(env, contextUser2, createGenericMessageEvent("player2"));
 
     // New player join was queued and will take effect after round
@@ -2799,19 +2807,19 @@ describe("Poker Durable Object", () => {
     );
     sayFn.mockClear();
 
-    // Start round - player2 is SB/dealer, player1 is BB
-    // So player2 acts first
+    // Start round - player1 is SB/dealer, player2 is BB
+    // So player1 acts first
     await startRound(env, contextUser1, createGenericMessageEvent("player1"));
     sayFn.mockClear();
     postEphemeralFn.mockClear();
 
-    // player1 (BB) tries to act but it's player2's turn
-    await check(env, contextUser1, createGenericMessageEvent("player1"));
+    // player2 (BB) tries to act but it's player1's turn
+    await check(env, contextUser2, createGenericMessageEvent("player2"));
     expect(sayFn.mock.calls).toMatchInlineSnapshot(`
       [
         [
           {
-            "text": ":narp-brain: *player1* Cannot check, not your turn!",
+            "text": ":narp-brain: *player2* Cannot check, not your turn!",
           },
         ],
       ]
@@ -2820,38 +2828,38 @@ describe("Poker Durable Object", () => {
 
     await bet(
       env,
-      contextUser1,
-      createGenericMessageEvent("player1", "bet 100")
+      contextUser2,
+      createGenericMessageEvent("player2", "bet 100")
     );
     expect(sayFn.mock.calls).toMatchInlineSnapshot(`
       [
         [
           {
-            "text": ":narp-brain: *player1* Cannot bet, not your turn!",
+            "text": ":narp-brain: *player2* Cannot bet, not your turn!",
           },
         ],
       ]
     `);
     sayFn.mockClear();
 
-    await fold(env, contextUser1, createGenericMessageEvent("player1"));
+    await fold(env, contextUser2, createGenericMessageEvent("player2"));
     expect(sayFn.mock.calls).toMatchInlineSnapshot(`
       [
         [
           {
-            "text": ":narp-brain: *player1* Cannot fold, not your turn!",
+            "text": ":narp-brain: *player2* Cannot fold, not your turn!",
           },
         ],
       ]
     `);
     sayFn.mockClear();
 
-    // player2 calls correctly
-    await call(env, contextUser2, createGenericMessageEvent("player2"));
+    // player1 calls correctly
+    await call(env, contextUser1, createGenericMessageEvent("player1"));
     sayFn.mockClear();
 
-    // Now it's player1's turn - after player2 calls, player1 (BB) can check
-    await check(env, contextUser1, createGenericMessageEvent("player1"));
+    // Now it's player2's turn - after player1 calls, player2 (BB) can check
+    await check(env, contextUser2, createGenericMessageEvent("player2"));
     // This should advance to flop
     const gameStateFlop = await getGameState(stub, workspaceId, channelId);
     expect(gameStateFlop.gameState).toBe(GameState.Flop);
@@ -2956,7 +2964,7 @@ describe("Poker Durable Object", () => {
     sayFn.mockClear();
 
     // End current round with a fold
-    await fold(env, contextUser2, createGenericMessageEvent("player"));
+    await fold(env, contextUser1, createGenericMessageEvent("dealer"));
 
     // Pre-deal should have triggered automatic new round
     const gameStateRound2 = await getGameState(stub, workspaceId, channelId);
@@ -3031,7 +3039,7 @@ describe("Poker Durable Object", () => {
     sayFn.mockClear();
 
     // End round with fold
-    await fold(env, contextUser2, createGenericMessageEvent("winner"));
+    await fold(env, contextUser1, createGenericMessageEvent("polite"));
 
     // Check that :nh: message appeared (uses display name, not tag)
     const endMessages = sayFn.mock.calls[0][0].text;
@@ -3092,9 +3100,9 @@ describe("Poker Durable Object", () => {
     postEphemeralFn.mockClear();
 
     // Both players call/check through to showdown
-    await call(env, contextUser2, createGenericMessageEvent("player2")); // SB calls
+    await call(env, contextUser1, createGenericMessageEvent("player1")); // SB calls
     sayFn.mockClear();
-    await check(env, contextUser1, createGenericMessageEvent("player1")); // BB checks -> Flop
+    await check(env, contextUser2, createGenericMessageEvent("player2")); // BB checks -> Flop
     sayFn.mockClear();
     postEphemeralFn.mockClear();
 
@@ -3325,6 +3333,8 @@ describe("Poker Durable Object", () => {
     await startRound(env, contextUser1, createGenericMessageEvent("revealer"));
 
     // End the hand so reveal is allowed (WaitingForPlayers state)
+    await call(env, contextUser1, createGenericMessageEvent("revealer"));
+    sayFn.mockClear();
     await fold(env, contextUser2, createGenericMessageEvent("other"));
     sayFn.mockClear();
 
@@ -3338,7 +3348,7 @@ describe("Poker Durable Object", () => {
     await revealSingleCard(
       env,
       contextUser1,
-      createGenericMessageEvent("revealer", "reveal dard 1")
+      createGenericMessageEvent("revealer", "reveal card 1")
     );
     expect(sayFn.mock.calls.length).toBeGreaterThan(0);
     const revealOneMessage = sayFn.mock.calls[0][0].text;
@@ -3479,8 +3489,8 @@ describe("Poker Durable Object", () => {
     postEphemeralFn.mockClear();
 
     // Get to flop
-    await call(env, contextUser2, createGenericMessageEvent("tracker2"));
-    await check(env, contextUser1, createGenericMessageEvent("tracker1"));
+    await call(env, contextUser1, createGenericMessageEvent("tracker1"));
+    await check(env, contextUser2, createGenericMessageEvent("tracker2"));
 
     // Check that flop message mentions discovery
     const flopMessages = sayFn.mock.calls.map((c) => c[0].text).join("\n");
@@ -3715,7 +3725,7 @@ describe("Poker Durable Object", () => {
     sayFn.mockClear();
 
     // End round with fold
-    await fold(env, contextUser2, createGenericMessageEvent("winner"));
+    await fold(env, contextUser1, createGenericMessageEvent("salty"));
 
     // Check that :ah: message appeared (uses display name, not tag)
     const endMessages = sayFn.mock.calls[0][0].text;
@@ -3936,7 +3946,7 @@ describe("Poker Durable Object", () => {
       [
         [
           {
-            "text": "<@slowpoke> it's your turn and you need to roll!",
+            "text": ":narp-brain: <@nudger> it's your turn and you need to roll!",
           },
         ],
       ]
@@ -3950,7 +3960,7 @@ describe("Poker Durable Object", () => {
       [
         [
           {
-            "text": ":narp-brain: <@slowpoke> it's your turn and you need to roll!",
+            "text": "<@nudger> it's your turn and you need to roll!",
           },
         ],
       ]
@@ -4024,8 +4034,8 @@ describe("Poker Durable Object", () => {
     sayFn.mockClear();
 
     // Get to flop
-    await call(env, contextUser2, createGenericMessageEvent("counter2"));
-    await check(env, contextUser1, createGenericMessageEvent("counter1"));
+    await call(env, contextUser1, createGenericMessageEvent("counter1"));
+    await check(env, contextUser2, createGenericMessageEvent("counter2"));
 
     // Verify flop message shows "1 flops discovered"
     const round1Messages = sayFn.mock.calls.map((c) => c[0].text).join("\n");
@@ -4275,30 +4285,21 @@ describe("Poker Durable Object", () => {
     sayFn.mockClear();
 
     // === TEST: Correct phrase in PreFlop (call) ===
-    // player2 (SB) uses "lets take her to the flop" - should call to match BB
-    await takeHerToThe(
-      env,
-      contextUser2,
-      createGenericMessageEvent("player2", "lets take her to the flop")
-    );
-    expect(sayFn.mock.calls).toMatchInlineSnapshot(`
-      [
-        [
-          {
-            "text": "*player2* called 80 chips! Total Pot: 160
-      <@player1>'s turn",
-          },
-        ],
-      ]
-    `);
-    sayFn.mockClear();
-
-    // === TEST: Correct phrase in PreFlop (check) ===
-    // player1 (BB) uses "lets take her to the flop" - should check (already matched)
+    // player1 (SB/dealer) uses "lets take her to the flop" - should call to match BB
     await takeHerToThe(
       env,
       contextUser1,
       createGenericMessageEvent("player1", "lets take her to the flop")
+    );
+    expect(sayFn.mock.calls[0][0].text).toContain("called");
+    sayFn.mockClear();
+
+    // === TEST: Correct phrase in PreFlop (check) ===
+    // player2 (BB) uses "lets take her to the flop" - should check (already matched)
+    await takeHerToThe(
+      env,
+      contextUser2,
+      createGenericMessageEvent("player2", "lets take her to the flop")
     );
     const gameStateFlop = await getGameState(stub, workspaceId, channelId);
     expect(gameStateFlop.gameState).toBe(GameState.Flop);

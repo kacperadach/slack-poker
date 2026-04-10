@@ -333,9 +333,9 @@ export class TexasHoldem {
     return {
       isDealer: relativePosition === 0,
       isSmallBlind:
-        numPlayers === 2 ? relativePosition === 1 : relativePosition === 1,
+        numPlayers === 2 ? relativePosition === 0 : relativePosition === 1,
       isBigBlind:
-        numPlayers === 2 ? relativePosition === 0 : relativePosition === 2,
+        numPlayers === 2 ? relativePosition === 1 : relativePosition === 2,
     };
   }
 
@@ -554,8 +554,10 @@ export class TexasHoldem {
         activePlayer.getChips(),
       ])
     );
-    this.currentPlayerIndex =
-      (this.dealerPosition + 3) % this.activePlayers.length; // Start after big blind
+    const isHeadsUp = this.activePlayers.length === 2;
+    this.currentPlayerIndex = isHeadsUp
+      ? this.dealerPosition
+      : (this.dealerPosition + 3) % this.activePlayers.length; // Start after big blind
     this.deck.reset();
     this.deck.shuffle();
     this.dealInitialCards();
@@ -571,10 +573,12 @@ export class TexasHoldem {
     this.gameState = GameState.PreFlop;
     this.createHandStartSnapshot();
 
-    const smallBlindPlayer =
-      this.activePlayers[(this.dealerPosition + 1) % this.activePlayers.length];
-    const bigBlindPlayer =
-      this.activePlayers[(this.dealerPosition + 2) % this.activePlayers.length];
+    const smallBlindPlayer = isHeadsUp
+      ? this.activePlayers[this.dealerPosition]
+      : this.activePlayers[(this.dealerPosition + 1) % this.activePlayers.length];
+    const bigBlindPlayer = isHeadsUp
+      ? this.activePlayers[(this.dealerPosition + 1) % this.activePlayers.length]
+      : this.activePlayers[(this.dealerPosition + 2) % this.activePlayers.length];
 
     // Handle small blind payment
     const smallBlindAmount = Math.min(
