@@ -3747,7 +3747,6 @@ function getGlobalDurableObject(env: Env) {
 /**
  * Collect and store the HUBS closing price.
  * Called by the scheduled handler at 4:30 PM ET on weekdays (Mon-Fri).
- * Only collects prices from Feb 18, 2026 to March 31, 2026 (not inclusive of April 1).
  */
 async function collectHubsClosingPrice(env: Env): Promise<void> {
   const now = new Date();
@@ -3760,17 +3759,6 @@ async function collectHubsClosingPrice(env: Env): Promise<void> {
     day: "2-digit",
   };
   const etDateStr = now.toLocaleDateString("en-CA", { ...etOptions }); // en-CA gives YYYY-MM-DD format
-
-  // Check if date is within range: March 18, 2026 to March 31, 2026
-  const startDate = "2026-03-18";
-  const endDate = "2026-04-01"; // Not inclusive
-
-  if (etDateStr < startDate || etDateStr >= endDate) {
-    console.log(
-      `Skipping price collection: ${etDateStr} is outside the allowed range`
-    );
-    return;
-  }
 
   // Fetch the current HUBS stock price
   const result = await fetchStockPrice("HUBS");
