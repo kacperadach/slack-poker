@@ -506,9 +506,9 @@ export class PokerDurableObject extends DurableObject<Env> {
 			);
 		`);
 
-    // Clear any closing prices before the new start date (March 18, 2026)
+    // Clear any closing prices before the new start date (Feb 18, 2026)
     this.sql.exec(`
-			DELETE FROM closingPrices WHERE date < '2026-03-18'
+			DELETE FROM closingPrices WHERE date < '2026-02-18'
 		`);
   }
 
@@ -3761,8 +3761,8 @@ async function collectHubsClosingPrice(env: Env): Promise<void> {
   };
   const etDateStr = now.toLocaleDateString("en-CA", { ...etOptions }); // en-CA gives YYYY-MM-DD format
 
-  // Check if date is within range: March 18, 2026 to March 31, 2026
-  const startDate = "2026-03-18";
+  // Check if date is within range: Feb 18, 2026 to March 31, 2026
+  const startDate = "2026-02-18";
   const endDate = "2026-04-01"; // Not inclusive
 
   if (etDateStr < startDate || etDateStr >= endDate) {
