@@ -4010,22 +4010,7 @@ async function handleMessage(
     const symbol = stockSymbolMatch[1].toUpperCase();
     const stockPriceMessage = await getStockPriceMessage(symbol);
     if (stockPriceMessage) {
-      let message = stockPriceMessage;
-
-      // Add trailing average for HUBS
-      if (symbol === "HUBS") {
-        const globalStub = getGlobalDurableObject(env);
-        const trailingAvg = await globalStub.getTrailingAverage("HUBS");
-        if (trailingAvg) {
-          const avgFormatted = trailingAvg.average.toLocaleString("en-US", {
-            style: "currency",
-            currency: "USD",
-          });
-          message += `\n:bar_chart: Trailing Avg (${trailingAvg.count} day${trailingAvg.count === 1 ? "" : "s"}): ${avgFormatted}`;
-        }
-      }
-
-      await context.say({ text: message });
+      await context.say({ text: stockPriceMessage });
     } else {
       await context.say({
         text: ensureNarpBrainOnError(
@@ -4404,20 +4389,7 @@ async function hubsStockPrice(
 ) {
   const stockPriceMessage = await getHubsStockPriceMessage();
   if (stockPriceMessage) {
-    // Get the trailing average from the global Durable Object
-    const stub = getGlobalDurableObject(env);
-    const trailingAvg = await stub.getTrailingAverage("HUBS");
-
-    let message = stockPriceMessage;
-    if (trailingAvg) {
-      const avgFormatted = trailingAvg.average.toLocaleString("en-US", {
-        style: "currency",
-        currency: "USD",
-      });
-      message += `\n:bar_chart: Trailing Avg (${trailingAvg.count} day${trailingAvg.count === 1 ? "" : "s"}): ${avgFormatted}`;
-    }
-
-    await context.say({ text: message });
+    await context.say({ text: stockPriceMessage });
   } else {
     await context.say({
       text: ensureNarpBrainOnError(
