@@ -5,7 +5,7 @@ import {
   SlackAppContextWithChannelId,
   isPostedMessageEvent,
 } from "slack-cloudflare-workers";
-import { GameState, TexasHoldem } from "./Game";
+import { GameState, TexasHoldem, BettingLimitType } from "./Game";
 import { Card } from "./Card";
 import type { GameEvent } from "./GameEvent";
 // @ts-ignore phe is not typed
@@ -319,10 +319,13 @@ const PUBLIC_HAND_EMBARGO_WINDOW_MS = 7 * 24 * 60 * 60 * 1000;
 const HOT_STREAK_THRESHOLD = 5;
 const COLD_STREAK_THRESHOLD = 5;
 const ROYAL_FLUSH_BACKFILL_MIGRATION = "royal_flush_count_backfill";
-const FIXED_BLINDS_CHANNEL_OVERRIDES: Record<
-  string,
-  { smallBlind: number; bigBlind: number }
-> = {
+type ChannelOverride = {
+  smallBlind: number;
+  bigBlind: number;
+  bettingLimitType?: BettingLimitType;
+};
+
+const FIXED_BLINDS_CHANNEL_OVERRIDES: Record<string, ChannelOverride> = {
   C0ARP9UJ2HY: { smallBlind: 10, bigBlind: 20 },
 };
 
@@ -2793,6 +2796,54 @@ export class PokerDurableObject extends DurableObject<Env> {
     return { ok: true, game: game.getState() };
   }
 
+  async betPot(data: {
+    workspaceId: string;
+    channelId: string;
+    playerId: string;
+    messageText: string;
+    normalizedText: string;
+    handlerKey: string;
+    slackMessageTs: string;
+    timestamp: number;
+  }): Promise<
+    | IgnoredMutationResult
+    | { ok: true; game: ReturnType<TexasHoldem["getState"]>; betAmount: number }
+    | { ok: false; reason: "no_game" | "not_pot_limit" | "cannot_bet" }
+  > {
+    const activeGame = this.loadActiveGame(data.workspaceId, data.channelId);
+    if (!activeGame) {
+      return { ok: false, reason: "no_game" };
+    }
+    if (this.isStaleMessage(data.slackMessageTs, activeGame.game)) {
+      return { ok: true, ignored: true } as IgnoredMutationResult;
+    }
+
+    const channelState = this.loadChannelGameState(
+      data.workspaceId,
+      data.channelId
+    )!;
+    const game = TexasHoldem.fromJson(activeGame.game);
+
+    // Calculate the max pot-limit bet for this player
+    const maxBet = game.calculateMaxPotLimitBet(data.playerId);
+    if (maxBet <= 0) {
+      return { ok: false, reason: "cannot_bet" };
+    }
+
+    game.bet(data.playerId, maxBet);
+    this.finalizeHandIfEnded(
+      data.workspaceId,
+      data.channelId,
+      activeGame.gameId,
+      game,
+      channelState,
+      data.timestamp,
+      data.slackMessageTs
+    );
+
+    return { ok: true, game: game.getState(), betAmount: maxBet };
+  }
+
   async allIn(data: {
     workspaceId: string;
     channelId: string;
@@ -3808,6 +3859,7 @@ const MESSAGE_HANDLERS: Record<string, Function> = {
   "^fold": fold,
   "^check": check,
   "^call": call,
+  "^bet pot": betPot,
   "^bet": bet,
   "^all in": allIn,
   "^all-in": allIn,
@@ -5087,6 +5139,48 @@ export async function bet(
   });
 
   if (!result.ok) {
+    await context.say({ text: NO_GAME_EXISTS_MESSAGE });
+    return;
+  }
+  if (isIgnoredMutationResult(result)) {
+    return;
+  }
+
+  await sendGameStateMessages(env, context, result.game);
+}
+
+export async function betPot(
+  env: Env,
+  context: SlackAppContextWithChannelId,
+  payload: PostedMessage,
+  meta?: HandlerMeta
+) {
+  const stub = getDurableObject(env, context);
+  const rawMessageText = meta?.messageText ?? payload.text ?? "";
+  const normalizedText =
+    meta?.normalizedText ?? cleanMessageText(rawMessageText);
+  const handlerKey = meta?.handlerKey ?? "bet pot";
+  const slackMessageTs = meta?.slackMessageTs ?? payload.ts ?? "";
+  const timestamp = meta?.timestamp ?? Date.now();
+
+  const result = await stub.betPot({
+    workspaceId: context.teamId!,
+    channelId: context.channelId,
+    playerId: context.userId!,
+    messageText: rawMessageText,
+    normalizedText,
+    handlerKey,
+    slackMessageTs,
+    timestamp,
+  });
+
+  if (!result.ok) {
+    if (result.reason === "cannot_bet") {
+      await context.say({
+        text: ensureNarpBrainOnError("Cannot bet pot right now!"),
+      });
+      return;
+    }
     await context.say({ text: NO_GAME_EXISTS_MESSAGE });
     return;
   }
