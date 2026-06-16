@@ -324,6 +324,7 @@ const FIXED_BLINDS_CHANNEL_OVERRIDES: Record<
   { smallBlind: number; bigBlind: number }
 > = {
   C0ARP9UJ2HY: { smallBlind: 10, bigBlind: 20 },
+  C0A88UKDTFV: { smallBlind: 10, bigBlind: 20 },
 };
 
 function getBlindOverrideForChannel(channelId: string) {
