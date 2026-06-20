@@ -1190,30 +1190,17 @@ export class TexasHoldem {
     });
     this.recordHandAction(playerId, "fold", 0, player.getCurrentBet(), player.getIsAllIn());
 
-    this.advanceToNextPlayer();
-
     // Check if round should end (only one player left who hasn't folded)
+    // Do this BEFORE advanceToNextPlayer to avoid tagging the winner with a turn notification
     const activeNonFoldedPlayers = this.activePlayers.filter(
       (p) => !this.foldedPlayers.has(p.getId())
     );
     if (activeNonFoldedPlayers.length <= 1) {
       this.endRound();
-
-      // if (this.communityCards.length < 5) {
-      // 	// round is over reveal community cards
-      // 	while (this.communityCards.length < 5) {
-      // 		if (this.communityCards.length === 0) {
-      // 			this.burnAndDeal(3);
-      // 		} else {
-      // 			this.burnAndDeal(1);
-      // 		}
-      // 	}
-      // 	this.events.push(new GameEvent('Community Cards would have been:', [...this.communityCards]));
-      // }
-
       return Success + ": round ended";
     }
 
+    this.advanceToNextPlayer();
     this.progressGame();
     return Success;
   }
