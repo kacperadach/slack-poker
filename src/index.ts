@@ -3936,6 +3936,7 @@ function cleanMessageText(messageText: string) {
     .replace(/shi+/g, "")
     .replace(/fu+ck/g, "")
     .replace(/yeah+/g, "")
+    .replace(/wow+/g, "")
     .trim();
 }
 
