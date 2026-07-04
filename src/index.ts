@@ -3937,6 +3937,7 @@ function cleanMessageText(messageText: string) {
     .replace(/fu+ck/g, "")
     .replace(/yeah+/g, "")
     .replace(/wow+/g, "")
+    .replace(/actually+/g, "")
     .trim();
 }
 
