@@ -3938,6 +3938,7 @@ function cleanMessageText(messageText: string) {
     .replace(/yeah+/g, "")
     .replace(/wow+/g, "")
     .replace(/actually+/g, "")
+    .replace(/immediate(ly)?/g, "")
     .trim();
 }
 
