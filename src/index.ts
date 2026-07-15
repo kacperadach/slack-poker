@@ -5062,6 +5062,7 @@ export async function bet(
       .replace("its gonna be a", "")
       .replace("bet", "")
       .replace("donk", "")
+      .replace("nut", "")
       .replace("for me", "")
       .replace("from me", "")
       .trim()
