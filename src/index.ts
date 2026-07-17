@@ -3945,6 +3945,7 @@ function cleanMessageText(messageText: string) {
     .replace(/wow+/g, "")
     .replace(/actually+/g, "")
     .replace(/immediate(ly)?/g, "")
+    .replace(/computer/g, "")
     .trim();
 }
 
