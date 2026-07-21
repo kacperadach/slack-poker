@@ -1129,4 +1129,195 @@ test("allIn method returns error when not player's turn", () => {
   assert.equal(game.allIn(otherPlayerId), "Not your turn to go all-in");
 });
 
+// Pot-limit betting tests
+test("Pot-limit game restricts max bet to pot size", () => {
+  const game = new TexasHoldem();
+
+  assert.equal(game.addPlayer(PLAYER_1), true);
+  assert.equal(game.addPlayer(PLAYER_2), true);
+  assert.equal(game.buyIn(PLAYER_1, 1000), Success);
+  assert.equal(game.buyIn(PLAYER_2, 1000), Success);
+
+  // Set game to pot-limit
+  game.setBettingLimitType("pot-limit");
+  assert.equal(game.getBettingLimitType(), "pot-limit");
+
+  // Start round with explicit blinds for predictable testing
+  assert.equal(game.startRound(PLAYER_1, { smallBlind: 10, bigBlind: 20 }), Success);
+  
+  // Pot is now 30 (10 + 20 blinds)
+  // Current bet is 20 (big blind)
+  // Player 1 (SB) has bet 10, so to call they need to put in 10 more
+  // After calling, pot would be 40
+  // Max raise in pot-limit = pot after calling = 40
+  // So max total bet = current bet (20) + max raise (40) = 60
+  
+  const currentPlayer = game.getCurrentPlayer();
+  assert(currentPlayer);
+  assert.equal(currentPlayer.getId(), PLAYER_1);
+  
+  const maxBet = game.calculateMaxPotLimitBet(PLAYER_1);
+  assert.equal(maxBet, 60); // 20 (current bet) + 40 (pot after call)
+  
+  // Try to bet more than max - should fail
+  const overBetResult = game.bet(PLAYER_1, 100);
+  assert.equal(overBetResult, "Maximum pot-limit bet is 60");
+  
+  // Bet exactly max - should succeed
+  assert.equal(game.bet(PLAYER_1, 60), "Raised to 60");
+});
+
+test("Pot-limit allows betting up to max pot bet", () => {
+  const game = new TexasHoldem();
+
+  assert.equal(game.addPlayer(PLAYER_1), true);
+  assert.equal(game.addPlayer(PLAYER_2), true);
+  assert.equal(game.buyIn(PLAYER_1, 1000), Success);
+  assert.equal(game.buyIn(PLAYER_2, 1000), Success);
+
+  // Start as pot-limit game via blind override
+  assert.equal(
+    game.startRound(PLAYER_1, { smallBlind: 10, bigBlind: 20, bettingLimitType: "pot-limit" }),
+    Success
+  );
+  
+  assert.equal(game.getBettingLimitType(), "pot-limit");
+  
+  // Player 1 (SB) raises to pot max
+  const currentPlayer = game.getCurrentPlayer();
+  assert(currentPlayer);
+  const maxBet = game.calculateMaxPotLimitBet(currentPlayer.getId());
+  
+  // Bet slightly under max should work
+  assert.equal(game.bet(currentPlayer.getId(), maxBet - 10), `Raised to ${maxBet - 10}`);
+});
+
+test("No-limit game allows any bet size up to stack", () => {
+  const game = new TexasHoldem();
+
+  assert.equal(game.addPlayer(PLAYER_1), true);
+  assert.equal(game.addPlayer(PLAYER_2), true);
+  assert.equal(game.buyIn(PLAYER_1, 1000), Success);
+  assert.equal(game.buyIn(PLAYER_2, 1000), Success);
+
+  // Start as no-limit (default)
+  assert.equal(game.startRound(PLAYER_1, { smallBlind: 10, bigBlind: 20 }), Success);
+  
+  assert.equal(game.getBettingLimitType(), "no-limit");
+  
+  // Player can bet any amount up to their stack
+  const currentPlayer = game.getCurrentPlayer();
+  assert(currentPlayer);
+  
+  // Big bet should work in no-limit
+  assert.equal(game.bet(currentPlayer.getId(), 500), "Raised to 500");
+});
+
+test("Pot-limit allows all-in even if it exceeds pot", () => {
+  const game = new TexasHoldem();
+
+  assert.equal(game.addPlayer(PLAYER_1), true);
+  assert.equal(game.addPlayer(PLAYER_2), true);
+  assert.equal(game.buyIn(PLAYER_1, 50), Success);  // Small stack
+  assert.equal(game.buyIn(PLAYER_2, 1000), Success);
+
+  // Start as pot-limit
+  game.setBettingLimitType("pot-limit");
+  assert.equal(game.startRound(PLAYER_1, { smallBlind: 10, bigBlind: 20 }), Success);
+  
+  // Player 1 (SB) has only 40 chips left after posting blind
+  // The max pot-limit bet is 60, but player can only bet 50 total (all chips)
+  // All-in should be allowed even if pot-limit math says otherwise
+  const currentPlayer = game.getCurrentPlayer();
+  assert(currentPlayer);
+  assert.equal(currentPlayer.getId(), PLAYER_1);
+  assert.equal(currentPlayer.getChips(), 40);
+  
+  // All-in (50 total) is allowed even in pot-limit
+  assert.equal(game.bet(PLAYER_1, 50), "Raised to 50");
+  assert.equal(currentPlayer.getIsAllIn(), true);
+});
+
+test("calculateMaxPotLimitBet works correctly in different scenarios", () => {
+  const game = new TexasHoldem();
+
+  assert.equal(game.addPlayer(PLAYER_1), true);
+  assert.equal(game.addPlayer(PLAYER_2), true);
+  assert.equal(game.addPlayer(PLAYER_3), true);
+  assert.equal(game.buyIn(PLAYER_1, 1000), Success);
+  assert.equal(game.buyIn(PLAYER_2, 1000), Success);
+  assert.equal(game.buyIn(PLAYER_3, 1000), Success);
+
+  game.setBettingLimitType("pot-limit");
+  assert.equal(game.startRound(PLAYER_1, { smallBlind: 10, bigBlind: 20 }), Success);
+  
+  // Player 3 (UTG) acts first: pot=30, currentBet=20, player's currentBet=0
+  // amountToCall = 20, potAfterCall = 30+20=50, maxRaise=50
+  // maxBet = 20 + 50 = 70
+  let maxBet = game.calculateMaxPotLimitBet(PLAYER_3);
+  assert.equal(maxBet, 70);
+  
+  // Player 3 calls
+  assert.equal(game.call(PLAYER_3), Success);
+  
+  // Player 1 (SB): pot=50, currentBet=20, player's currentBet=10
+  // amountToCall = 10, potAfterCall = 50+10=60, maxRaise=60
+  // maxBet = 20 + 60 = 80
+  maxBet = game.calculateMaxPotLimitBet(PLAYER_1);
+  assert.equal(maxBet, 80);
+  
+  // Player 1 raises to max (80)
+  assert.equal(game.bet(PLAYER_1, 80), "Raised to 80");
+  
+  // Player 2 (BB): pot=130, currentBet=80, player's currentBet=20
+  // amountToCall = 60, potAfterCall = 130+60=190, maxRaise=190
+  // maxBet = 80 + 190 = 270
+  maxBet = game.calculateMaxPotLimitBet(PLAYER_2);
+  assert.equal(maxBet, 270);
+});
+
+test("Pot-limit serializes and deserializes correctly", () => {
+  const game = new TexasHoldem();
+
+  assert.equal(game.addPlayer(PLAYER_1), true);
+  assert.equal(game.addPlayer(PLAYER_2), true);
+  assert.equal(game.buyIn(PLAYER_1, 1000), Success);
+  assert.equal(game.buyIn(PLAYER_2, 1000), Success);
+
+  game.setBettingLimitType("pot-limit");
+  assert.equal(game.startRound(PLAYER_1, { smallBlind: 10, bigBlind: 20 }), Success);
+
+  // Serialize and deserialize
+  const serialized = game.toJson();
+  const reloaded = TexasHoldem.fromJson(serialized);
+
+  assert.equal(reloaded.getBettingLimitType(), "pot-limit");
+  
+  // Verify pot-limit still enforced after reload
+  const currentPlayer = reloaded.getCurrentPlayer();
+  assert(currentPlayer);
+  const maxBet = reloaded.calculateMaxPotLimitBet(currentPlayer.getId());
+  
+  // Try to over-bet
+  const overBetResult = reloaded.bet(currentPlayer.getId(), maxBet + 50);
+  assert(overBetResult.includes("Maximum pot-limit bet"));
+});
+
+test("Legacy games without bettingLimitType default to no-limit", () => {
+  const game = new TexasHoldem();
+
+  assert.equal(game.addPlayer(PLAYER_1), true);
+  assert.equal(game.addPlayer(PLAYER_2), true);
+  assert.equal(game.buyIn(PLAYER_1, 1000), Success);
+  assert.equal(game.buyIn(PLAYER_2, 1000), Success);
+  assert.equal(game.startRound(PLAYER_1), Success);
+
+  // Simulate legacy data without bettingLimitType
+  const serialized: any = game.toJson();
+  delete serialized.bettingLimitType;
+
+  const reloaded = TexasHoldem.fromJson(serialized);
+  assert.equal(reloaded.getBettingLimitType(), "no-limit");
+});
+
 console.log("\nTest suite complete");
