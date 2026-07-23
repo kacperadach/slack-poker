@@ -3946,6 +3946,7 @@ function cleanMessageText(messageText: string) {
     .replace(/actually+/g, "")
     .replace(/immediate(ly)?/g, "")
     .replace(/computer/g, "")
+    .replace(/turbo/g, "")
     .replace(/imagine/g, "")
     .trim();
 }
