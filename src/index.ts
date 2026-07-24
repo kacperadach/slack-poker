@@ -5,7 +5,7 @@ import {
   SlackAppContextWithChannelId,
   isPostedMessageEvent,
 } from "slack-cloudflare-workers";
-import { GameState, TexasHoldem } from "./Game";
+import { GameState, Success, TexasHoldem } from "./Game";
 import { Card } from "./Card";
 import type { GameEvent } from "./GameEvent";
 // @ts-ignore phe is not typed
@@ -2656,16 +2656,18 @@ export class PokerDurableObject extends DurableObject<Env> {
       data.channelId
     )!;
     const game = TexasHoldem.fromJson(activeGame.game);
-    game.fold(data.playerId);
-    this.finalizeHandIfEnded(
-      data.workspaceId,
-      data.channelId,
-      activeGame.gameId,
-      game,
-      channelState,
-      data.timestamp,
-      data.slackMessageTs
-    );
+    const result = game.fold(data.playerId);
+    if (result.startsWith(Success)) {
+      this.finalizeHandIfEnded(
+        data.workspaceId,
+        data.channelId,
+        activeGame.gameId,
+        game,
+        channelState,
+        data.timestamp,
+        data.slackMessageTs
+      );
+    }
 
     return { ok: true, game: game.getState() };
   }
@@ -2697,16 +2699,18 @@ export class PokerDurableObject extends DurableObject<Env> {
       data.channelId
     )!;
     const game = TexasHoldem.fromJson(activeGame.game);
-    game.check(data.playerId);
-    this.finalizeHandIfEnded(
-      data.workspaceId,
-      data.channelId,
-      activeGame.gameId,
-      game,
-      channelState,
-      data.timestamp,
-      data.slackMessageTs
-    );
+    const result = game.check(data.playerId);
+    if (result.startsWith(Success)) {
+      this.finalizeHandIfEnded(
+        data.workspaceId,
+        data.channelId,
+        activeGame.gameId,
+        game,
+        channelState,
+        data.timestamp,
+        data.slackMessageTs
+      );
+    }
 
     return { ok: true, game: game.getState() };
   }
@@ -2738,16 +2742,18 @@ export class PokerDurableObject extends DurableObject<Env> {
       data.channelId
     )!;
     const game = TexasHoldem.fromJson(activeGame.game);
-    game.call(data.playerId);
-    this.finalizeHandIfEnded(
-      data.workspaceId,
-      data.channelId,
-      activeGame.gameId,
-      game,
-      channelState,
-      data.timestamp,
-      data.slackMessageTs
-    );
+    const result = game.call(data.playerId);
+    if (result.startsWith(Success)) {
+      this.finalizeHandIfEnded(
+        data.workspaceId,
+        data.channelId,
+        activeGame.gameId,
+        game,
+        channelState,
+        data.timestamp,
+        data.slackMessageTs
+      );
+    }
 
     return { ok: true, game: game.getState() };
   }
@@ -2780,16 +2786,18 @@ export class PokerDurableObject extends DurableObject<Env> {
       data.channelId
     )!;
     const game = TexasHoldem.fromJson(activeGame.game);
-    game.bet(data.playerId, data.amount);
-    this.finalizeHandIfEnded(
-      data.workspaceId,
-      data.channelId,
-      activeGame.gameId,
-      game,
-      channelState,
-      data.timestamp,
-      data.slackMessageTs
-    );
+    const result = game.bet(data.playerId, data.amount);
+    if (result.startsWith("Bet") || result.startsWith("Raised")) {
+      this.finalizeHandIfEnded(
+        data.workspaceId,
+        data.channelId,
+        activeGame.gameId,
+        game,
+        channelState,
+        data.timestamp,
+        data.slackMessageTs
+      );
+    }
 
     return { ok: true, game: game.getState() };
   }
@@ -2821,16 +2829,18 @@ export class PokerDurableObject extends DurableObject<Env> {
       data.channelId
     )!;
     const game = TexasHoldem.fromJson(activeGame.game);
-    game.allIn(data.playerId);
-    this.finalizeHandIfEnded(
-      data.workspaceId,
-      data.channelId,
-      activeGame.gameId,
-      game,
-      channelState,
-      data.timestamp,
-      data.slackMessageTs
-    );
+    const result = game.allIn(data.playerId);
+    if (result.startsWith(Success) || result.startsWith("Bet") || result.startsWith("Raised")) {
+      this.finalizeHandIfEnded(
+        data.workspaceId,
+        data.channelId,
+        activeGame.gameId,
+        game,
+        channelState,
+        data.timestamp,
+        data.slackMessageTs
+      );
+    }
 
     return { ok: true, game: game.getState() };
   }
@@ -2983,16 +2993,18 @@ export class PokerDurableObject extends DurableObject<Env> {
       return { ok: false, reason: "invalid_state" };
     }
 
-    game.callOrCheck(data.playerId);
-    this.finalizeHandIfEnded(
-      data.workspaceId,
-      data.channelId,
-      activeGame.gameId,
-      game,
-      channelState,
-      data.timestamp,
-      data.slackMessageTs
-    );
+    const result = game.callOrCheck(data.playerId);
+    if (result.startsWith(Success)) {
+      this.finalizeHandIfEnded(
+        data.workspaceId,
+        data.channelId,
+        activeGame.gameId,
+        game,
+        channelState,
+        data.timestamp,
+        data.slackMessageTs
+      );
+    }
 
     return { ok: true, game: game.getState() };
   }
@@ -3030,16 +3042,18 @@ export class PokerDurableObject extends DurableObject<Env> {
       return { ok: false, reason: "not_river" };
     }
 
-    game.callOrCheck(data.playerId);
-    this.finalizeHandIfEnded(
-      data.workspaceId,
-      data.channelId,
-      activeGame.gameId,
-      game,
-      channelState,
-      data.timestamp,
-      data.slackMessageTs
-    );
+    const result = game.callOrCheck(data.playerId);
+    if (result.startsWith(Success)) {
+      this.finalizeHandIfEnded(
+        data.workspaceId,
+        data.channelId,
+        activeGame.gameId,
+        game,
+        channelState,
+        data.timestamp,
+        data.slackMessageTs
+      );
+    }
 
     return { ok: true, game: game.getState() };
   }
