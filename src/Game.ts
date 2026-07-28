@@ -14,6 +14,8 @@ export enum GameState {
   River,
 }
 
+export type BettingLimitType = "no-limit" | "pot-limit";
+
 export const Success = "Success";
 
 export type BettingStreet = "preflop" | "flop" | "turn" | "river";
@@ -113,6 +115,7 @@ export interface HandEndSnapshot {
 type BlindOverride = {
   smallBlind: number;
   bigBlind: number;
+  bettingLimitType?: BettingLimitType;
 };
 
 export interface HandHistoryState {
@@ -133,6 +136,7 @@ export class TexasHoldem {
   private dealerPosition: number;
   private smallBlind: number;
   private bigBlind: number;
+  private bettingLimitType: BettingLimitType;
   private currentPlayerIndex: number;
   private foldedPlayers: Set<string>;
   private currentBetAmount: number;
@@ -158,6 +162,7 @@ export class TexasHoldem {
     dealerPosition: number = 0,
     smallBlind: number = 10,
     bigBlind: number = 20,
+    bettingLimitType: BettingLimitType = "no-limit",
     currentPlayerIndex: number = 0,
     foldedPlayers: Set<string> = new Set(),
     currentBetAmount: number = 0,
@@ -181,6 +186,7 @@ export class TexasHoldem {
     this.dealerPosition = dealerPosition;
     this.smallBlind = smallBlind;
     this.bigBlind = bigBlind;
+    this.bettingLimitType = bettingLimitType;
     this.currentPlayerIndex = currentPlayerIndex;
     this.foldedPlayers = foldedPlayers;
     this.currentBetAmount = currentBetAmount;
@@ -566,6 +572,9 @@ export class TexasHoldem {
     if (blindOverride) {
       this.smallBlind = blindOverride.smallBlind;
       this.bigBlind = blindOverride.bigBlind;
+      if (blindOverride.bettingLimitType) {
+        this.bettingLimitType = blindOverride.bettingLimitType;
+      }
     } else {
       this.smallBlind = this.getSmallBlindByDay();
       this.bigBlind = 2 * this.smallBlind;
@@ -1402,10 +1411,18 @@ export class TexasHoldem {
       }
     }
 
-    // if (roundedAmount < this.bigBlind) {
-    // 	this.events.push(new GameEvent(`${playerId} Cannot raise, minimum raise is ${this.bigBlind}!`));
-    // 	return `Raise must be at least ${this.bigBlind}`;
-    // }
+    // Pot-limit validation: check max bet in pot-limit mode
+    if (this.bettingLimitType === "pot-limit" && betAmount != player.getChips()) {
+      const maxPotLimitBet = this.calculateMaxPotLimitBet(playerId);
+      if (roundedAmount > maxPotLimitBet) {
+        this.events.push(
+          new GameEvent(
+            `${playerId} Cannot bet ${roundedAmount}, maximum pot-limit bet is ${maxPotLimitBet}!`
+          )
+        );
+        return `Maximum pot-limit bet is ${maxPotLimitBet}`;
+      }
+    }
 
     this.currentBetAmount = roundedAmount;
     // if (isRaise) {
@@ -1833,6 +1850,38 @@ export class TexasHoldem {
     return this.bigBlind;
   }
 
+  public getBettingLimitType(): BettingLimitType {
+    return this.bettingLimitType;
+  }
+
+  public setBettingLimitType(limitType: BettingLimitType): void {
+    this.bettingLimitType = limitType;
+  }
+
+  /**
+   * Calculates the maximum bet allowed in pot-limit mode.
+   * Formula: current pot + (amount to call * 2) + player's current bet contribution
+   * This equals: pot after calling + amount that would go into the pot from a raise
+   * 
+   * In pot-limit, the maximum raise is the size of the pot after calling.
+   * Max bet = current pot + call amount + call amount (the pot-sized raise) = pot + 2*call
+   * But the bet() method takes a target total, so we need to add the player's current bet
+   * to get the final target amount.
+   */
+  public calculateMaxPotLimitBet(playerId: string): number {
+    const player = this.activePlayers.find((p) => p.getId() === playerId);
+    if (!player) {
+      return 0;
+    }
+
+    const amountToCall = Math.max(0, this.currentBetAmount - player.getCurrentBet());
+    const potAfterCall = this.currentPot + amountToCall;
+    const maxRaiseAmount = potAfterCall;
+    const maxBetTotal = this.currentBetAmount + maxRaiseAmount;
+
+    return maxBetTotal;
+  }
+
   public getFoldedPlayers(): Set<string> {
     return this.foldedPlayers;
   }
@@ -2226,6 +2275,7 @@ export class TexasHoldem {
       dealerPosition: this.dealerPosition,
       smallBlind: this.smallBlind,
       bigBlind: this.bigBlind,
+      bettingLimitType: this.bettingLimitType,
       currentPlayerIndex: this.currentPlayerIndex,
       foldedPlayers: Array.from(this.foldedPlayers),
       currentBetAmount: this.currentBetAmount,
@@ -2319,6 +2369,7 @@ export class TexasHoldem {
       data.dealerPosition,
       data.smallBlind,
       data.bigBlind,
+      data.bettingLimitType || "no-limit",
       data.currentPlayerIndex,
       new Set(data.foldedPlayers),
       data.currentBetAmount,
@@ -2407,6 +2458,7 @@ export class TexasHoldem {
       dealerPosition: this.dealerPosition,
       smallBlind: this.smallBlind,
       bigBlind: this.bigBlind,
+      bettingLimitType: this.bettingLimitType,
       currentPlayerIndex: this.currentPlayerIndex,
       foldedPlayers: Array.from(this.foldedPlayers),
       currentBetAmount: this.currentBetAmount,
