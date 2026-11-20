@@ -3941,7 +3941,7 @@ const MESSAGE_HANDLERS: Record<string, Function> = {
   "^gyvs": hubsStockPrice,
 };
 
-function cleanMessageText(messageText: string) {
+function cleanMessageTextKeepPrelude(messageText: string) {
   return messageText
     .toLowerCase()
     .replace(/'/g, "")
@@ -3955,11 +3955,17 @@ function cleanMessageText(messageText: string) {
     .replace(/computer/g, "")
     .replace(/turbo/g, "")
     .replace(/imagine/g, "")
-    .trim()
-    // "im gonna <command>" prelude (also covers "im gonna go ahead and <command>"
-    // and "im gonna go all in")
-    .replace(/^im gonna\s+(go ahead and\s+)?(go\s+(?=all))?/, "")
     .trim();
+}
+
+function cleanMessageText(messageText: string) {
+  return (
+    cleanMessageTextKeepPrelude(messageText)
+      // "im gonna <command>" prelude (also covers "im gonna go ahead and <command>"
+      // and "im gonna go all in")
+      .replace(/^im gonna\s+(go ahead and\s+)?(go\s+(?=all))?/, "")
+      .trim()
+  );
 }
 
 type HandlerMeta = {
@@ -5067,7 +5073,11 @@ export async function bet(
   meta?: HandlerMeta
 ) {
   const messageText = cleanMessageText(payload.text);
-  const betAmount = parseFloat(
+  // "im gonna nut" by itself is a bet of 20
+  const isImGonnaNut = /^im gonna\s+nut$/.test(
+    cleanMessageTextKeepPrelude(payload.text)
+  );
+  const betAmount = isImGonnaNut ? 20 : parseFloat(
     messageText
       .replace("i choose to", "")
       .replace("im gonna go ahead and", "")
