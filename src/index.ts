@@ -3909,7 +3909,13 @@ const MESSAGE_HANDLERS: Record<string, Function> = {
   "^donk": bet,
   "^i choose to donk": bet,
   "^d$": showCards,
-  "^c$": context,
+  "^f$": fold,
+  "^pf$": preFold,
+  "^c$": call,
+  "^pc$": preCall,
+  "^x$": check,
+  "^px$": preCheck,
+  "^i$": context,
   "^ass$": ass,
   "^cjecl": check,
   "^cbecmk": check,
@@ -3948,6 +3954,10 @@ function cleanMessageText(messageText: string) {
     .replace(/computer/g, "")
     .replace(/turbo/g, "")
     .replace(/imagine/g, "")
+    .trim()
+    // "im gonna <command>" prelude (also covers "im gonna go ahead and <command>"
+    // and "im gonna go all in")
+    .replace(/^im gonna\s+(go ahead and\s+)?(go\s+(?=all))?/, "")
     .trim();
 }
 
