@@ -3809,6 +3809,7 @@ const MESSAGE_HANDLERS: Record<string, Function> = {
   "^fold": fold,
   "^check": check,
   "^call": call,
+  "^qall": call,
   "^bet": bet,
   "^nut": bet,
   "^all in": allIn,
