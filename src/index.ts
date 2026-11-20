@@ -2950,7 +2950,7 @@ export class PokerDurableObject extends DurableObject<Env> {
     handlerKey: string;
     slackMessageTs: string;
     timestamp: number;
-    targetPhase: "flop" | "turn" | "river";
+    targetPhase: "flop" | "turn" | "river" | "showdown";
   }): Promise<
     | IgnoredMutationResult
     | { ok: true; game: ReturnType<TexasHoldem["getState"]> }
@@ -2979,6 +2979,11 @@ export class PokerDurableObject extends DurableObject<Env> {
     } else if (
       data.targetPhase === "river" &&
       currentState !== GameState.Turn
+    ) {
+      return { ok: false, reason: "invalid_state" };
+    } else if (
+      data.targetPhase === "showdown" &&
+      currentState !== GameState.River
     ) {
       return { ok: false, reason: "invalid_state" };
     }
@@ -3932,9 +3937,10 @@ const MESSAGE_HANDLERS: Record<string, Function> = {
   "^stacks": showStacks,
   "^stats$": showStats,
   "^set stacks": setStacks,
-  "^lets take her to the flop": takeHerToThe,
-  "^lets take her to the turn": takeHerToThe,
-  "^lets take her to the river": takeHerToThe,
+  "^lets take h?er to the flop": takeHerToThe,
+  "^lets take h?er to the turn": takeHerToThe,
+  "^lets take h?er to the river": takeHerToThe,
+  "^lets take h?er to the showdown": takeHerToThe,
   "^this pot aint big enough for the both of us": thisPotAintBigEnough,
   "^hubs only": enableHubsOnlyMode,
   "^all commands": disableHubsOnlyMode,
@@ -5313,16 +5319,13 @@ export async function takeHerToThe(
   const timestamp = meta?.timestamp ?? Date.now();
 
   // Determine target phase from message
-  let targetPhase: "flop" | "turn" | "river";
-  if (normalizedText.startsWith("lets take her to the flop")) {
-    targetPhase = "flop";
-  } else if (normalizedText.startsWith("lets take her to the turn")) {
-    targetPhase = "turn";
-  } else if (normalizedText.startsWith("lets take her to the river")) {
-    targetPhase = "river";
-  } else {
+  const phaseMatch = normalizedText.match(
+    /^lets take h?er to the (flop|turn|river|showdown)/
+  );
+  if (!phaseMatch) {
     return;
   }
+  const targetPhase = phaseMatch[1] as "flop" | "turn" | "river" | "showdown";
 
   const result = await stub.takeHerToThe({
     workspaceId: context.teamId!,
@@ -5352,10 +5355,16 @@ export async function takeHerToThe(
             "We're not on the flop! Can't take her to the turn from here."
           ),
         });
-      } else {
+      } else if (targetPhase === "river") {
         await context.say({
           text: ensureNarpBrainOnError(
             "We're not on the turn! Can't take her to the river from here."
+          ),
+        });
+      } else {
+        await context.say({
+          text: ensureNarpBrainOnError(
+            "We're not on the river! Can't take her to the showdown from here."
           ),
         });
       }
