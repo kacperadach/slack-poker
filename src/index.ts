@@ -3812,6 +3812,7 @@ const MESSAGE_HANDLERS: Record<string, Function> = {
   "^keep": keepDice,
   "^score": scoreDice,
   "^fold": fold,
+  "^fodl": fold,
   "^check": check,
   "^call": call,
   "^qall": call,
