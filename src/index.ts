@@ -3941,10 +3941,25 @@ const MESSAGE_HANDLERS: Record<string, Function> = {
   "^gyvs": hubsStockPrice,
 };
 
+// Whole-message phrases rewritten to a canonical command before other cleanup
+// (which would otherwise strip the "fuck"s out of them).
+const PHRASE_REWRITES: [RegExp, string][] = [
+  [/^holy\s+fu+ck\s+im\s+(gonna|going\s+to)\s+fu+cking\s+nut[!.]*$/, "bet 80"],
+  [/^holy\s+fu+ck\s+im\s+(gonna|going\s+to)\s+nut[!.]*$/, "bet 40"],
+  [/^holy\s+fu+ck\s+im\s+fu+cking\s+nutting[!.]*$/, "all in"],
+];
+
+function rewritePhrases(text: string) {
+  for (const [pattern, replacement] of PHRASE_REWRITES) {
+    if (pattern.test(text)) {
+      return replacement;
+    }
+  }
+  return text;
+}
+
 function cleanMessageTextKeepPrelude(messageText: string) {
-  return messageText
-    .toLowerCase()
-    .replace(/'/g, "")
+  return rewritePhrases(messageText.toLowerCase().replace(/'/g, "").trim())
     .replace(/oh+\s*buddy\s*/g, "")
     .replace(/shi+/g, "")
     .replace(/fu+ck/g, "")
