@@ -215,11 +215,14 @@ export async function fetchStockPrice(
         }
       }
       
-      if (lastPreMarketPrice !== null && typeof previousClose === "number") {
+      // Compare against regularMarketPrice (the most recent regular-session close).
+      // During PRE, chartPreviousClose is the close from the day *before* that,
+      // so using it would add the prior day's move into the pre-market change.
+      if (lastPreMarketPrice !== null) {
         stockResult.preMarketPrice = lastPreMarketPrice;
-        stockResult.preMarketChange = Math.round((lastPreMarketPrice - previousClose) * 100) / 100;
-        stockResult.preMarketChangePercent = previousClose !== 0 
-          ? Math.round(((lastPreMarketPrice - previousClose) / previousClose) * 10000) / 100
+        stockResult.preMarketChange = Math.round((lastPreMarketPrice - currentPrice) * 100) / 100;
+        stockResult.preMarketChangePercent = currentPrice !== 0
+          ? Math.round(((lastPreMarketPrice - currentPrice) / currentPrice) * 10000) / 100
           : 0;
       }
     }
