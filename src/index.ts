@@ -3841,6 +3841,9 @@ const MESSAGE_HANDLERS: Record<string, Function> = {
   "^deployed": deployed,
   "^poke": nudgePlayer,
   "^pole": polishNudgeKacper,
+  "^loud pole": loudPolishNudgeKacper,
+  "^quiet pole": quietPolishNudgeKacper,
+  "^silent pole": quietPolishNudgeKacper,
   "^silent poke": silentNudgePlayer,
   "^loud poke": loudNudgePlayer,
   "^it'll be a poke for me": nudgePlayer,
@@ -4516,11 +4519,37 @@ export async function nudgePlayer(
   });
 }
 
-export async function polishNudgeKacper(
+type PoleVolume = "normal" | "loud" | "quiet";
+
+const POLE_MESSAGES: Record<
+  PoleVolume,
+  { notStarted: string; notKacper: string; nudge: string }
+> = {
+  normal: {
+    notStarted: "Gra jeszcze się nie zaczęła! Kogo do cholery mam szturchnąć?",
+    notKacper: "Niezła próba, kolego, to nie jest kolej Kacper",
+    nudge: `<@${KACPER_USER_ID}> twoja kolej i musisz rzucić!`,
+  },
+  loud: {
+    notStarted:
+      ":rotating_light::rotating_light::rotating_light: GRA JESZCZE SIĘ NIE ZACZĘŁA! KOGO DO CHOLERY MAM SZTURCHNĄĆ?! :rotating_light::rotating_light::rotating_light:",
+    notKacper:
+      ":rotating_light::rotating_light::rotating_light: NIEZŁA PRÓBA, KOLEGO, TO NIE JEST KOLEJ KACPER! :rotating_light::rotating_light::rotating_light:",
+    nudge: `:rotating_light::rotating_light::rotating_light: <@${KACPER_USER_ID}> :rotating_light::rotating_light::rotating_light:\n:mega::mega::mega: *TWOJA KOLEJ I MUSISZ RZUCIĆ NATYCHMIAST!!!* :mega::mega::mega:\n:alarm_clock: HALO??? WSZYSCY CZEKAMY!!! :alarm_clock:`,
+  },
+  quiet: {
+    notStarted: "Gra jeszcze się nie zaczęła! Kogo do cholery mam szturchnąć?",
+    notKacper: "Niezła próba, kolego, to nie jest kolej Kacper",
+    nudge: "^*kacper*^ ... ᵗʷᵒʲᵃ ᵏᵒˡᵉʲ",
+  },
+};
+
+async function poleKacper(
   env: Env,
   context: SlackAppContextWithChannelId,
-  _payload: PostedMessage
+  volume: PoleVolume
 ) {
+  const messages = POLE_MESSAGES[volume];
   const game = await fetchGame(env, context);
   if (!game) {
     await context.say({ text: NO_GAME_EXISTS_MESSAGE });
@@ -4528,28 +4557,44 @@ export async function polishNudgeKacper(
   }
 
   if (game.getGameState() === GameState.WaitingForPlayers) {
-    await context.say({
-      text: ensureNarpBrainOnError(
-        "Gra jeszcze się nie zaczęła! Kogo do cholery mam szturchnąć?"
-      ),
-    });
+    await context.say({ text: ensureNarpBrainOnError(messages.notStarted) });
     return;
   }
 
   const currentPlayer = game.getCurrentPlayer();
   if (!currentPlayer || currentPlayer.getId() !== KACPER_USER_ID) {
-    await context.say({
-      text: ensureNarpBrainOnError("Niezła próba, kolego, to nie jest kolej Kacper"),
-    });
+    await context.say({ text: ensureNarpBrainOnError(messages.notKacper) });
     return;
   }
 
   const isSelfPoke = context.userId === KACPER_USER_ID;
   const selfPokePrefix = isSelfPoke ? ":narp-brain: " : "";
 
-  await context.say({
-    text: `${selfPokePrefix}<@${KACPER_USER_ID}> twoja kolej i musisz rzucić!`,
-  });
+  await context.say({ text: `${selfPokePrefix}${messages.nudge}` });
+}
+
+export async function polishNudgeKacper(
+  env: Env,
+  context: SlackAppContextWithChannelId,
+  _payload: PostedMessage
+) {
+  await poleKacper(env, context, "normal");
+}
+
+export async function loudPolishNudgeKacper(
+  env: Env,
+  context: SlackAppContextWithChannelId,
+  _payload: PostedMessage
+) {
+  await poleKacper(env, context, "loud");
+}
+
+export async function quietPolishNudgeKacper(
+  env: Env,
+  context: SlackAppContextWithChannelId,
+  _payload: PostedMessage
+) {
+  await poleKacper(env, context, "quiet");
 }
 
 export async function silentNudgePlayer(
