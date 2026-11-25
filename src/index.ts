@@ -14,6 +14,7 @@ import {
   allUsers,
   CAMDEN_USER_ID,
   KACPER_USER_ID,
+  MARCUS_USER_ID,
   userIdToName,
 } from "./users";
 import {
@@ -3850,6 +3851,7 @@ const MESSAGE_HANDLERS: Record<string, Function> = {
   "^quiet pole": quietPolishNudgeKacper,
   "^silent pole": quietPolishNudgeKacper,
   "^nyc$": nycNudgeCamden,
+  "^buddy$": buddyNudgeMarcus,
   "^silent poke": silentNudgePlayer,
   "^loud poke": loudNudgePlayer,
   "^it'll be a poke for me": nudgePlayer,
@@ -4603,10 +4605,11 @@ export async function quietPolishNudgeKacper(
   await poleKacper(env, context, "quiet");
 }
 
-export async function nycNudgeCamden(
+async function nudgeSpecificPlayer(
   env: Env,
   context: SlackAppContextWithChannelId,
-  _payload: PostedMessage
+  targetUserId: string,
+  nudgeText: string
 ) {
   const game = await fetchGame(env, context);
   if (!game) {
@@ -4624,19 +4627,37 @@ export async function nycNudgeCamden(
   }
 
   const currentPlayer = game.getCurrentPlayer();
-  if (!currentPlayer || currentPlayer.getId() !== CAMDEN_USER_ID) {
+  if (!currentPlayer || currentPlayer.getId() !== targetUserId) {
+    const name =
+      userIdToName[targetUserId as keyof typeof userIdToName] ?? targetUserId;
     await context.say({
-      text: ensureNarpBrainOnError("Nice try bud, it isn't Camden's turn"),
+      text: ensureNarpBrainOnError(`Nice try bud, it isn't ${name}'s turn`),
     });
     return;
   }
 
-  const isSelfPoke = context.userId === CAMDEN_USER_ID;
+  const isSelfPoke = context.userId === targetUserId;
   const selfPokePrefix = isSelfPoke ? ":narp-brain: " : "";
 
   await context.say({
-    text: `${selfPokePrefix}<@${CAMDEN_USER_ID}> ayy im poking here!`,
+    text: `${selfPokePrefix}<@${targetUserId}> ${nudgeText}`,
   });
+}
+
+export async function nycNudgeCamden(
+  env: Env,
+  context: SlackAppContextWithChannelId,
+  _payload: PostedMessage
+) {
+  await nudgeSpecificPlayer(env, context, CAMDEN_USER_ID, "ayy im poking here!");
+}
+
+export async function buddyNudgeMarcus(
+  env: Env,
+  context: SlackAppContextWithChannelId,
+  _payload: PostedMessage
+) {
+  await nudgeSpecificPlayer(env, context, MARCUS_USER_ID, "it's your turn, eh?");
 }
 
 export async function silentNudgePlayer(
