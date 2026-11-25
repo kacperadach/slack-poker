@@ -23,6 +23,8 @@ const ERROR_MESSAGE_FRAGMENTS = [
   "we're not in",
   "we're not on",
   "who the hell am i going to nudge",
+  "kogo do cholery mam szturchnąć",
+  "niezła próba, kolego",
   "which means the code is ass",
   "how about you try doing a check",
 ];
