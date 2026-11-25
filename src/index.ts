@@ -4539,7 +4539,7 @@ export async function polishNudgeKacper(
   const currentPlayer = game.getCurrentPlayer();
   if (!currentPlayer || currentPlayer.getId() !== KACPER_USER_ID) {
     await context.say({
-      text: ensureNarpBrainOnError("Niezła próba, kolego, to nie jest kolej Kacpra"),
+      text: ensureNarpBrainOnError("Niezła próba, kolego, to nie jest kolej Kacper"),
     });
     return;
   }
