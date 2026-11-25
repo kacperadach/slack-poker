@@ -3851,6 +3851,8 @@ const MESSAGE_HANDLERS: Record<string, Function> = {
   "^quiet pole": quietPolishNudgeKacper,
   "^silent pole": quietPolishNudgeKacper,
   "^nyc$": nycNudgeCamden,
+  "^new yawk$": nycNudgeCamden,
+  "^brooklyn$": nycNudgeCamden,
   "^buddy$": buddyNudgeMarcus,
   "^canada$": buddyNudgeMarcus,
   "^maple syrup$": buddyNudgeMarcus,
