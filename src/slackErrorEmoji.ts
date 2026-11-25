@@ -25,6 +25,7 @@ const ERROR_MESSAGE_FRAGMENTS = [
   "who the hell am i going to nudge",
   "kogo do cholery mam szturchnąć",
   "niezła próba, kolego",
+  "fuhgeddaboudit",
   "which means the code is ass",
   "how about you try doing a check",
 ];

@@ -3852,6 +3852,9 @@ const MESSAGE_HANDLERS: Record<string, Function> = {
   "^silent pole": quietPolishNudgeKacper,
   "^nyc$": nycNudgeCamden,
   "^buddy$": buddyNudgeMarcus,
+  "^canada$": buddyNudgeMarcus,
+  "^maple syrup$": buddyNudgeMarcus,
+  "^nova scotia$": buddyNudgeMarcus,
   "^silent poke": silentNudgePlayer,
   "^loud poke": loudNudgePlayer,
   "^it'll be a poke for me": nudgePlayer,
@@ -4609,7 +4612,8 @@ async function nudgeSpecificPlayer(
   env: Env,
   context: SlackAppContextWithChannelId,
   targetUserId: string,
-  nudgeText: string
+  nudgeText: string,
+  notTheirTurnText?: string
 ) {
   const game = await fetchGame(env, context);
   if (!game) {
@@ -4631,7 +4635,9 @@ async function nudgeSpecificPlayer(
     const name =
       userIdToName[targetUserId as keyof typeof userIdToName] ?? targetUserId;
     await context.say({
-      text: ensureNarpBrainOnError(`Nice try bud, it isn't ${name}'s turn`),
+      text: ensureNarpBrainOnError(
+        notTheirTurnText ?? `Nice try bud, it isn't ${name}'s turn`
+      ),
     });
     return;
   }
@@ -4649,7 +4655,13 @@ export async function nycNudgeCamden(
   context: SlackAppContextWithChannelId,
   _payload: PostedMessage
 ) {
-  await nudgeSpecificPlayer(env, context, CAMDEN_USER_ID, "ayy im poking here!");
+  await nudgeSpecificPlayer(
+    env,
+    context,
+    CAMDEN_USER_ID,
+    "ayy im poking here!",
+    "Fuhgeddaboudit, it's not Camden's turn"
+  );
 }
 
 export async function buddyNudgeMarcus(
