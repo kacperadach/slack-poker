@@ -10,7 +10,12 @@ import { Card } from "./Card";
 import type { GameEvent } from "./GameEvent";
 // @ts-ignore phe is not typed
 import { rankDescription, rankCards } from "phe";
-import { allUsers, KACPER_USER_ID, userIdToName } from "./users";
+import {
+  allUsers,
+  CAMDEN_USER_ID,
+  KACPER_USER_ID,
+  userIdToName,
+} from "./users";
 import {
   fetchStockPrice,
   getHubsStockPriceMessage,
@@ -3844,6 +3849,7 @@ const MESSAGE_HANDLERS: Record<string, Function> = {
   "^loud pole": loudPolishNudgeKacper,
   "^quiet pole": quietPolishNudgeKacper,
   "^silent pole": quietPolishNudgeKacper,
+  "^nyc$": nycNudgeCamden,
   "^silent poke": silentNudgePlayer,
   "^loud poke": loudNudgePlayer,
   "^it'll be a poke for me": nudgePlayer,
@@ -4595,6 +4601,42 @@ export async function quietPolishNudgeKacper(
   _payload: PostedMessage
 ) {
   await poleKacper(env, context, "quiet");
+}
+
+export async function nycNudgeCamden(
+  env: Env,
+  context: SlackAppContextWithChannelId,
+  _payload: PostedMessage
+) {
+  const game = await fetchGame(env, context);
+  if (!game) {
+    await context.say({ text: NO_GAME_EXISTS_MESSAGE });
+    return;
+  }
+
+  if (game.getGameState() === GameState.WaitingForPlayers) {
+    await context.say({
+      text: ensureNarpBrainOnError(
+        "Game has not started yet! Who the hell am I going to nudge?"
+      ),
+    });
+    return;
+  }
+
+  const currentPlayer = game.getCurrentPlayer();
+  if (!currentPlayer || currentPlayer.getId() !== CAMDEN_USER_ID) {
+    await context.say({
+      text: ensureNarpBrainOnError("Nice try bud, it isn't Camden's turn"),
+    });
+    return;
+  }
+
+  const isSelfPoke = context.userId === CAMDEN_USER_ID;
+  const selfPokePrefix = isSelfPoke ? ":narp-brain: " : "";
+
+  await context.say({
+    text: `${selfPokePrefix}<@${CAMDEN_USER_ID}> ayy im poking here!`,
+  });
 }
 
 export async function silentNudgePlayer(
