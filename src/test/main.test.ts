@@ -6470,6 +6470,63 @@ function createFakeDurableObjectEnv(stub: Record<string, unknown>) {
   } as unknown as Env;
 }
 
+describe("odd chip on uneven split pots", () => {
+  // Board is a Broadway straight, so every player ties regardless of hole cards.
+  const board = () => [
+    new Card("Hearts", "A"),
+    new Card("Spades", "K"),
+    new Card("Clubs", "Q"),
+    new Card("Diamonds", "J"),
+    new Card("Hearts", "10"),
+  ];
+  const makeGame = (dealerPosition: number) => {
+    const players = [
+      new Player("seat0", 0, [new Card("Clubs", "2"), new Card("Diamonds", "3")]),
+      new Player("seat1", 0, [new Card("Spades", "2"), new Card("Hearts", "3")]),
+      new Player("seat2", 0, [new Card("Hearts", "2"), new Card("Clubs", "3")]),
+    ];
+    const game = new TexasHoldem(
+      undefined,
+      GameState.WaitingForPlayers,
+      undefined,
+      board(),
+      players,
+      [],
+      0,
+      dealerPosition
+    );
+    return { game, players };
+  };
+  const chips = (players: Player[]) => players.map((p) => p.getChips());
+
+  it("gives a single odd chip to the first winner left of the button", () => {
+    const { game, players } = makeGame(0);
+    const result = (game as any).distributePot(players, 100, false, 0);
+    expect(chips(players)).toEqual([33, 34, 33]);
+    expect(result.splitAmount).toBe(33);
+    expect(result.amountsByPlayerId).toEqual({ seat0: 33, seat1: 34, seat2: 33 });
+  });
+
+  it("wraps around the table when the button is in the last seat", () => {
+    const { game, players } = makeGame(2);
+    (game as any).distributePot(players, 101, false, 0);
+    expect(chips(players)).toEqual([34, 34, 33]);
+  });
+
+  it("never pays out more than a fractional pot holds", () => {
+    const { game, players } = makeGame(0);
+    (game as any).distributePot(players, 100.5, false, 0);
+    expect(chips(players)).toEqual([33, 34, 33.5]);
+    expect(chips(players).reduce((a, b) => a + b, 0)).toBe(100.5);
+  });
+
+  it("gives whole chips with no odd chip when the split is even", () => {
+    const { game, players } = makeGame(1);
+    (game as any).distributePot(players, 99, false, 0);
+    expect(chips(players)).toEqual([33, 33, 33]);
+  });
+});
+
 afterAll(() => {
   vi.useRealTimers();
 });

@@ -94,6 +94,10 @@ export interface PotResult {
   eligiblePlayerIds: string[];
   winnerPlayerIds: string[];
   splitAmount: number;
+  // Exact chips awarded per winner. Odd chips from an uneven split go to the
+  // winners closest to the left of the button, so amounts may differ by 1
+  // from splitAmount.
+  amountsByPlayerId?: Record<string, number>;
 }
 
 export interface HandEndPlayerSnapshot {
@@ -407,7 +411,8 @@ export class TexasHoldem {
       potResult.winnerPlayerIds.forEach((playerId) => {
         chipsWonByPlayerId.set(
           playerId,
-          (chipsWonByPlayerId.get(playerId) ?? 0) + potResult.splitAmount
+          (chipsWonByPlayerId.get(playerId) ?? 0) +
+            (potResult.amountsByPlayerId?.[playerId] ?? potResult.splitAmount)
         );
       });
     });
@@ -1732,10 +1737,34 @@ export class TexasHoldem {
     const winners = playerHands.filter((ph) =>
       bestHandPlayerIds.includes(ph.player.getId())
     );
-    // Split the pot among winners
-    const winnings = potSize / winners.length;
+    // Split the pot among winners in whole chips; any odd chips go one each
+    // to winners in seat order, starting with the first seat left of the button.
+    const winnings = Math.floor(potSize / winners.length);
+    let oddChips = potSize - winnings * winners.length;
+    const amountsByPlayerId: Record<string, number> = {};
     winners.forEach((winner) => {
-      winner.player.addChips(winnings);
+      amountsByPlayerId[winner.player.getId()] = winnings;
+    });
+    const oddChipRecipients: string[] = [];
+    const numPlayers = this.activePlayers.length;
+    const seatsLeftOfButton = (playerId: string) => {
+      const seat = this.activePlayers.findIndex((p) => p.getId() === playerId);
+      return (seat - this.dealerPosition - 1 + numPlayers) % numPlayers;
+    };
+    const winnerIdsLeftOfButton = winners
+      .map((w) => w.player.getId())
+      .sort((a, b) => seatsLeftOfButton(a) - seatsLeftOfButton(b));
+    for (const playerId of winnerIdsLeftOfButton) {
+      if (oddChips <= 0) break;
+      // Cap at the remainder so a fractional pot (from legacy fractional
+      // stacks) never pays out more than it holds.
+      const chip = Math.min(1, oddChips);
+      amountsByPlayerId[playerId] += chip;
+      oddChipRecipients.push(playerId);
+      oddChips -= chip;
+    }
+    winners.forEach((winner) => {
+      winner.player.addChips(amountsByPlayerId[winner.player.getId()]);
     });
 
     this.events.push(
@@ -1765,6 +1794,14 @@ export class TexasHoldem {
       );
     }
 
+    if (oddChipRecipients.length > 0) {
+      this.events.push(
+        new GameEvent(
+          `Odd chip${oddChipRecipients.length > 1 ? "s" : ""} awarded to: ${oddChipRecipients.join(", ")}`
+        )
+      );
+    }
+
     return {
       potIndex,
       potType: isSidePot ? "side" : "main",
@@ -1772,6 +1809,7 @@ export class TexasHoldem {
       eligiblePlayerIds: eligiblePlayers.map((player) => player.getId()),
       winnerPlayerIds: winners.map((winner) => winner.player.getId()),
       splitAmount: winnings,
+      amountsByPlayerId,
     };
   }
 
